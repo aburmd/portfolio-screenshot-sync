@@ -6,10 +6,12 @@ export async function fetchPortfolio(userId) {
   return res.json();
 }
 
-export async function uploadScreenshot(userId, file) {
+export async function uploadScreenshots(userId, files) {
   const formData = new FormData();
-  formData.append("file", file);
   formData.append("user_id", userId);
+  for (const file of files) {
+    formData.append("files", file);
+  }
 
   const res = await fetch(`${API_BASE}/upload`, {
     method: "POST",

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import UploadArea from "../components/UploadArea";
 import PortfolioTable from "../components/PortfolioTable";
-import { fetchPortfolio, uploadScreenshot, downloadCsv } from "../services/api";
+import { fetchPortfolio, uploadScreenshots, downloadCsv } from "../services/api";
 
 function Dashboard({ user }) {
   const [portfolio, setPortfolio] = useState([]);
@@ -32,10 +32,8 @@ function Dashboard({ user }) {
     setUploading(true);
     setMessage("");
     try {
-      for (const file of files) {
-        await uploadScreenshot(userId, file);
-      }
-      setMessage(`Uploaded ${files.length} file(s). Processing... refresh in a few seconds.`);
+      const result = await uploadScreenshots(userId, files);
+      setMessage(`Uploaded ${result.uploaded} file(s). Processing... refresh in a few seconds.`);
       setTimeout(loadPortfolio, 5000);
     } catch (e) {
       setMessage("Upload failed: " + e.message);

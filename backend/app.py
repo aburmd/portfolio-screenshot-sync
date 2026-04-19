@@ -2,7 +2,9 @@
 import io
 import csv
 import os
+import uuid
 from datetime import datetime, timezone
+from typing import List
 
 import boto3
 from fastapi import FastAPI, UploadFile, File, Form
@@ -27,13 +29,16 @@ ddb = boto3.resource("dynamodb", region_name=REGION)
 
 
 @app.post("/upload")
-async def upload_screenshot(file: UploadFile = File(...), user_id: str = Form(...)):
-    """Upload screenshot to S3. Lambda triggers automatically on S3 event."""
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    key = f"uploads/{user_id}/{ts}_{file.filename}"
-    content = await file.read()
-    s3.put_object(Bucket=SCREENSHOTS_BUCKET, Key=key, Body=content, ContentType=file.content_type)
-    return {"s3_key": key, "status": "uploaded"}
+async def upload_screenshots(files: List[UploadFile] = File(...), user_id: str = Form(...)):
+    """Upload one or more screenshots to S3. Lambda triggers on each S3 object."""
+    results = []
+    for file in files:
+        unique_id = uuid.uuid4().hex[:8]
+        key = f"uploads/{user_id}/{unique_id}_{file.filename}"
+        content = await file.read()
+        s3.put_object(Bucket=SCREENSHOTS_BUCKET, Key=key, Body=content, ContentType=file.content_type)
+        results.append({"s3_key": key, "filename": file.filename})
+    return {"uploaded": len(results), "files": results}
 
 
 @app.get("/portfolio/{user_id}")
@@ -42,7 +47,6 @@ async def get_portfolio(user_id: str):
     table = ddb.Table(PORTFOLIO_TABLE)
     resp = table.query(KeyConditionExpression=boto3.dynamodb.conditions.Key("user_id").eq(user_id))
     items = resp.get("Items", [])
-    # Convert Decimal to float for JSON serialization
     for item in items:
         for k, v in item.items():
             if hasattr(v, "is_finite"):
