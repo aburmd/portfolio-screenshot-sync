@@ -12,7 +12,7 @@ SKIP_PATTERNS = {
     "us stocks", "my stocks", "watchlist", "explore", "rewards", "sip",
     "orders", "invested", "current value", "market value",
     "indstocks", "myind", "funds", "insta plus", "insta", "plus",
-    "hr", "ry", "sm",
+    "hr", "ry", "sm", "treasment",
 }
 
 # Known non-stock short words that OCR picks up
@@ -35,8 +35,10 @@ def _is_stock_name(line: str) -> bool:
     low = s.lower()
     if low in SKIP_PATTERNS or low in SKIP_EXACT:
         return False
+    # Skip lines containing multiple nav/UI keywords
     if any(skip in low for skip in ["invite your", "when they join", "pull down",
-                                     "indstocks", "myind", "insta plus"]):
+                                     "indstocks", "myind", "insta plus",
+                                     "watchlist", "rewards", "us stocks"]):
         return False
     if not re.search(r"[A-Za-z]{2,}", s):
         return False
@@ -48,8 +50,8 @@ def _is_stock_name(line: str) -> bool:
         return False
     if re.match(r"^[\d.]+%$", s):
         return False
-    # Skip lines that are all uppercase and <= 5 chars (likely ticker symbols, not names)
-    if re.match(r"^[A-Z]{1,5}$", s):
+    # Skip lines that are all uppercase and <= 10 chars (OCR garbage like TREASMENT, SPDR)
+    if re.match(r"^[A-Z]{1,10}$", s):
         return False
     return True
 
