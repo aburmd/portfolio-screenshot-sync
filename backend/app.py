@@ -88,7 +88,8 @@ async def update_portfolio_item(
     return {"updated": stock_name, "quantity": quantity, "avg_buy_price": avg_buy_price}
 
 
-@app.get("/portfolio/{user_id}/csv")async def download_csv(user_id: str):
+@app.get("/portfolio/{user_id}/csv")
+async def download_csv(user_id: str):
     """Generate CSV from DynamoDB portfolio data on-demand."""
     table = ddb.Table(PORTFOLIO_TABLE)
     resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
