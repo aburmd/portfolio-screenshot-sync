@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Amplify } from "aws-amplify";
 import { Authenticator } from "@aws-amplify/ui-react";
+import { fetchUserAttributes } from "aws-amplify/auth";
 import "@aws-amplify/ui-react/styles.css";
 import awsConfig from "./aws-config";
 import Dashboard from "./pages/Dashboard";
@@ -18,30 +19,52 @@ const tabStyle = (active) => ({
   fontSize: 14,
 });
 
-function App() {
+function AppContent({ signOut, user }) {
   const [page, setPage] = useState("dashboard");
+  const [role, setRole] = useState(null);
+
+  useEffect(() => {
+    async function getRole() {
+      try {
+        const attrs = await fetchUserAttributes();
+        setRole(attrs["custom:role"] || "user");
+      } catch {
+        setRole("user");
+      }
+    }
+    getRole();
+  }, [user]);
+
+  const isAdmin = role === "admin";
 
   return (
-    <Authenticator signUpAttributes={["email"]}>
-      {({ signOut, user }) => (
-        <div style={{ fontFamily: "sans-serif", maxWidth: 960, margin: "0 auto", padding: 20 }}>
-          <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-            <h2 style={{ margin: 0 }}>📊 Portfolio Screenshot Sync</h2>
-            <div>
-              <span style={{ marginRight: 12, color: "#666" }}>{user?.signInDetails?.loginId || user?.username}</span>
-              <button onClick={signOut} style={{ padding: "6px 16px", cursor: "pointer" }}>Sign out</button>
-            </div>
-          </header>
-
-          <nav style={{ borderBottom: "1px solid #eee", marginBottom: 20 }}>
-            <button style={tabStyle(page === "dashboard")} onClick={() => setPage("dashboard")}>Dashboard</button>
-            <button style={tabStyle(page === "admin")} onClick={() => setPage("admin")}>Admin</button>
-          </nav>
-
-          {page === "dashboard" && <Dashboard user={user} />}
-          {page === "admin" && <AdminPage />}
+    <div style={{ fontFamily: "sans-serif", maxWidth: 960, margin: "0 auto", padding: 20 }}>
+      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <h2 style={{ margin: 0 }}>📊 Portfolio Screenshot Sync</h2>
+        <div>
+          <span style={{ marginRight: 8, color: "#666" }}>
+            {user?.signInDetails?.loginId || user?.username}
+          </span>
+          {isAdmin && <span style={{ marginRight: 8, background: "#e3f2fd", color: "#1565c0", padding: "2px 8px", borderRadius: 4, fontSize: 12 }}>ADMIN</span>}
+          <button onClick={signOut} style={{ padding: "6px 16px", cursor: "pointer" }}>Sign out</button>
         </div>
-      )}
+      </header>
+
+      <nav style={{ borderBottom: "1px solid #eee", marginBottom: 20 }}>
+        <button style={tabStyle(page === "dashboard")} onClick={() => setPage("dashboard")}>Dashboard</button>
+        {isAdmin && <button style={tabStyle(page === "admin")} onClick={() => setPage("admin")}>Admin</button>}
+      </nav>
+
+      {page === "dashboard" && <Dashboard user={user} />}
+      {page === "admin" && isAdmin && <AdminPage />}
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <Authenticator signUpAttributes={["email"]}>
+      {({ signOut, user }) => <AppContent signOut={signOut} user={user} />}
     </Authenticator>
   );
 }

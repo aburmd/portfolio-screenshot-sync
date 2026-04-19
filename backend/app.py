@@ -22,11 +22,13 @@ app.add_middleware(
 
 REGION = os.environ.get("AWS_REGION", "us-west-1")
 SCREENSHOTS_BUCKET = os.environ.get("SCREENSHOTS_BUCKET", "portfolio-screenshots-dev")
-PORTFOLIO_TABLE = os.environ.get("PORTFOLIO_TABLE", "portfolio-holdings-v2-dev")
+PORTFOLIO_TABLE = os.environ.get("PORTFOLIO_TABLE", "portfolio-holdings-dev")
 SYMBOL_MAP_TABLE = os.environ.get("SYMBOL_MAP_TABLE", "portfolio-symbol-map-dev")
+COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "us-west-1_DRjc1Cz3h")
 
 s3 = boto3.client("s3", region_name=REGION)
 ddb = boto3.resource("dynamodb", region_name=REGION)
+cognito = boto3.client("cognito-idp", region_name=REGION)
 
 
 def _decimal_to_float(items):
@@ -143,3 +145,56 @@ async def get_symbol_map():
         resp = table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
         items.extend(resp.get("Items", []))
     return items
+
+
+# --- Admin: User management ---
+
+@app.get("/admin/users")
+async def list_users():
+    """List all Cognito users with their role."""
+    users = []
+    params = {"UserPoolId": COGNITO_USER_POOL_ID, "Limit": 60}
+    while True:
+        resp = cognito.list_users(**params)
+        for u in resp.get("Users", []):
+            attrs = {a["Name"]: a["Value"] for a in u.get("Attributes", [])}
+            users.append({
+                "username": u["Username"],
+                "email": attrs.get("email", ""),
+                "role": attrs.get("custom:role", "user"),
+                "status": u["UserStatus"],
+                "created": u["UserCreateDate"].isoformat(),
+            })
+        token = resp.get("PaginationToken")
+        if not token:
+            break
+        params["PaginationToken"] = token
+    return users
+
+
+@app.post("/admin/set-role")
+async def set_user_role(username: str = Form(...), role: str = Form(...)):
+    """Set a user's role to admin or user."""
+    role = role.strip().lower()
+    if role not in ("admin", "user"):
+        return {"error": "role must be 'admin' or 'user'"}
+
+    cognito.admin_update_user_attributes(
+        UserPoolId=COGNITO_USER_POOL_ID,
+        Username=username,
+        UserAttributes=[{"Name": "custom:role", "Value": role}],
+    )
+
+    if role == "admin":
+        cognito.admin_add_user_to_group(
+            UserPoolId=COGNITO_USER_POOL_ID, Username=username, GroupName="admin",
+        )
+    else:
+        try:
+            cognito.admin_remove_user_from_group(
+                UserPoolId=COGNITO_USER_POOL_ID, Username=username, GroupName="admin",
+            )
+        except Exception:
+            pass
+
+    return {"username": username, "role": role, "status": "updated"}
