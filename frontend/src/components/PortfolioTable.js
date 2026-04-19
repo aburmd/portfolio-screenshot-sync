@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 
 const tableStyle = { width: "100%", borderCollapse: "collapse", marginTop: 12, fontSize: 13 };
-const thStyle = { textAlign: "left", padding: "6px 8px", borderBottom: "2px solid #ddd", background: "#f5f5f5", whiteSpace: "nowrap" };
+const thBase = { textAlign: "left", padding: "6px 8px", borderBottom: "2px solid #ddd", background: "#f5f5f5", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" };
 const tdStyle = { padding: "6px 8px", borderBottom: "1px solid #eee" };
 const inputStyle = { width: 70, padding: 3, border: "1px solid #ccc", borderRadius: 3 };
 const btnStyle = { padding: "2px 8px", marginRight: 3, cursor: "pointer", fontSize: 11 };
@@ -14,10 +14,14 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
   const [editingRow, setEditingRow] = useState(null);
   const [editQty, setEditQty] = useState("");
   const [editAvg, setEditAvg] = useState("");
+  const [editCurPrice, setEditCurPrice] = useState("");
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newQty, setNewQty] = useState("");
   const [newAvg, setNewAvg] = useState("");
+  const [sortCol, setSortCol] = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const [priceOverrides, setPriceOverrides] = useState({});
 
   if (loading) return <p>Loading...</p>;
 
@@ -25,7 +29,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
   const rows = (data || []).map((row) => {
     const qty = row.quantity || 0;
     const avg = row.avg_buy_price || 0;
-    const curPrice = prices[row.symbol] || null;
+    const curPrice = priceOverrides[row.stock_name] ?? prices[row.symbol] ?? null;
     const invested = qty * avg;
     const currentAmt = curPrice != null ? qty * curPrice : null;
     const pnl = currentAmt != null ? currentAmt - invested : null;
@@ -38,9 +42,63 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
   const totalPnl = totalCurrent - totalInvested;
   const totalPnlPct = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0;
 
-  const startEdit = (row) => { setEditingRow(row.stock_name); setEditQty(String(row.quantity)); setEditAvg(String(row.avg_buy_price)); };
+  // Sorting
+  const columns = [
+    { key: "symbol", label: "Symbol" },
+    { key: "stock_name", label: "Stock Name" },
+    { key: "quantity", label: "Qty" },
+    { key: "avg_buy_price", label: "Avg Buy" },
+    { key: "curPrice", label: "Cur Price" },
+    { key: "invested", label: "Invested" },
+    { key: "currentAmt", label: "Current" },
+    { key: "pnl", label: "P/L" },
+    { key: "pnlPct", label: "P/L %" },
+    { key: "invPct", label: "Inv %" },
+    { key: "curPct", label: "Cur %" },
+    { key: "platform_name", label: "Platform" },
+  ];
+
+  const handleSort = (key) => {
+    if (sortCol === key) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortCol(key);
+      setSortDir("asc");
+    }
+  };
+
+  const sortedRows = useMemo(() => {
+    if (!sortCol) return rows;
+    const sorted = [...rows];
+    // Add invPct and curPct for sorting
+    sorted.forEach((r) => {
+      r.invPct = totalInvested > 0 ? (r.invested / totalInvested) * 100 : 0;
+      r.curPct = totalCurrent > 0 && r.currentAmt != null ? (r.currentAmt / totalCurrent) * 100 : null;
+    });
+    sorted.sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va == null) va = sortDir === "asc" ? Infinity : -Infinity;
+      if (vb == null) vb = sortDir === "asc" ? Infinity : -Infinity;
+      if (typeof va === "string") return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+      return sortDir === "asc" ? va - vb : vb - va;
+    });
+    return sorted;
+  }, [rows, sortCol, sortDir, totalInvested, totalCurrent]);
+
+  const startEdit = (row) => {
+    setEditingRow(row.stock_name);
+    setEditQty(String(row.quantity));
+    setEditAvg(String(row.avg_buy_price));
+    setEditCurPrice(row.curPrice != null ? String(row.curPrice) : "");
+  };
   const cancelEdit = () => setEditingRow(null);
-  const saveEdit = (stockName) => { onUpdate(stockName, parseFloat(editQty), parseFloat(editAvg)); setEditingRow(null); };
+  const saveEdit = (stockName) => {
+    onUpdate(stockName, parseFloat(editQty), parseFloat(editAvg));
+    if (editCurPrice.trim()) {
+      setPriceOverrides({ ...priceOverrides, [stockName]: parseFloat(editCurPrice) });
+    }
+    setEditingRow(null);
+  };
   const handleDelete = (stockName) => { if (window.confirm(`Delete "${stockName}"?`)) onDelete(stockName); };
   const handleAdd = () => {
     if (!newName.trim() || !newQty || !newAvg) return;
@@ -48,28 +106,26 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
     setAdding(false); setNewName(""); setNewQty(""); setNewAvg("");
   };
 
+  const sortArrow = (key) => {
+    if (sortCol !== key) return " ↕";
+    return sortDir === "asc" ? " ↑" : " ↓";
+  };
+
   return (
     <div style={{ overflowX: "auto" }}>
       <table style={tableStyle}>
         <thead>
           <tr>
-            <th style={thStyle}>Symbol</th>
-            <th style={thStyle}>Stock Name</th>
-            <th style={thStyle}>Qty</th>
-            <th style={thStyle}>Avg Buy</th>
-            <th style={thStyle}>Cur Price</th>
-            <th style={thStyle}>Invested</th>
-            <th style={thStyle}>Current</th>
-            <th style={thStyle}>P/L</th>
-            <th style={thStyle}>P/L %</th>
-            <th style={thStyle}>Inv %</th>
-            <th style={thStyle}>Cur %</th>
-            <th style={thStyle}>Platform</th>
-            {!readOnly && <th style={thStyle}>Actions</th>}
+            {columns.map((col) => (
+              <th key={col.key} style={thBase} onClick={() => handleSort(col.key)}>
+                {col.label}<span style={{ fontSize: 10, color: "#999" }}>{sortArrow(col.key)}</span>
+              </th>
+            ))}
+            {!readOnly && <th style={{ ...thBase, cursor: "default" }}>Actions</th>}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
+          {sortedRows.map((row) => {
             const isEditing = editingRow === row.stock_name;
             const invPct = totalInvested > 0 ? (row.invested / totalInvested) * 100 : 0;
             const curPct = totalCurrent > 0 && row.currentAmt != null ? (row.currentAmt / totalCurrent) * 100 : null;
@@ -86,7 +142,17 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
                 <td style={tdStyle}>
                   {isEditing ? <input type="number" step="any" value={editAvg} onChange={(e) => setEditAvg(e.target.value)} style={inputStyle} /> : `$${fmt(row.avg_buy_price)}`}
                 </td>
-                <td style={tdStyle}>{row.curPrice != null ? `$${fmt(row.curPrice)}` : "—"}</td>
+                <td style={tdStyle}>
+                  {isEditing ? (
+                    <input type="number" step="any" value={editCurPrice} onChange={(e) => setEditCurPrice(e.target.value)}
+                      placeholder="auto" style={inputStyle} />
+                  ) : (
+                    <span>
+                      {row.curPrice != null ? `$${fmt(row.curPrice)}` : "—"}
+                      {priceOverrides[row.stock_name] != null && <span style={{ color: "#f57c00", marginLeft: 2, fontSize: 10 }}>✎</span>}
+                    </span>
+                  )}
+                </td>
                 <td style={tdStyle}>${fmt(row.invested)}</td>
                 <td style={tdStyle}>{row.currentAmt != null ? `$${fmt(row.currentAmt)}` : "—"}</td>
                 <td style={{ ...tdStyle, color: clr(row.pnl), fontWeight: "bold" }}>{row.pnl != null ? `$${fmt(row.pnl)}` : "—"}</td>
