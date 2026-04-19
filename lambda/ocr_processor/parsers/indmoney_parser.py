@@ -1,6 +1,7 @@
 """INDmoney screenshot parser: extract stock data from OCR text.
 
-Extracts only: stock_name, symbol, quantity, avg_buy_price
+Approach: Find all (Qty, Avg) pairs in the text, then look backwards from each
+Qty line to find the stock name. This avoids false stock name detection splitting blocks.
 """
 import re
 import logging
@@ -8,55 +9,60 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-SKIP_PATTERNS = {
+SKIP_NAMES = {
     "us stocks", "my stocks", "watchlist", "explore", "rewards", "sip",
     "orders", "invested", "current value", "market value",
     "indstocks", "myind", "funds", "insta plus", "insta", "plus",
-    "hr", "ry", "sm", "treasment", "treasport",
-    "s stocks", "adobe",
+    "hr", "ry", "sm", "s stocks",
 }
-
-# Known non-stock short words that OCR picks up
-SKIP_EXACT = {"t", "a", "i", "m", "x", "spdr", "drip", "etf", "inc", "ltd", "adr"}
 
 
 def _clean_number(s: str) -> Optional[float]:
     if not s:
         return None
     try:
-        # Handle OCR mangling: "242 54" -> "242.54" (space instead of dot)
         cleaned = re.sub(r"[$,]", "", s.strip())
-        # If pattern like "242 54" (digits space digits, no dot), treat space as dot
         cleaned = re.sub(r"(\d+)\s+(\d{1,2})$", r"\1.\2", cleaned)
         return float(cleaned)
     except (ValueError, AttributeError):
         return None
 
 
-def _is_stock_name(line: str) -> bool:
+def _is_valid_stock_name(line: str) -> bool:
+    """Check if a line could be a stock name (used for backward search from Qty)."""
     s = line.strip()
-    if not s or len(s) <= 4:
+    if not s or len(s) <= 2:
         return False
     low = s.lower()
-    if low in SKIP_PATTERNS or low in SKIP_EXACT:
+    if low in SKIP_NAMES:
         return False
-    # Skip lines containing multiple nav/UI keywords
     if any(skip in low for skip in ["invite your", "when they join", "pull down",
                                      "indstocks", "myind", "insta plus",
                                      "watchlist", "rewards", "us stocks"]):
         return False
+    # Must have 2+ consecutive letters
     if not re.search(r"[A-Za-z]{2,}", s):
         return False
+    # Skip number-like lines
     if re.match(r"^[\d.,]+\s*Qty", s, re.IGNORECASE):
         return False
     if re.match(r"(?:Avg|Ava)[:\s]", s, re.IGNORECASE):
         return False
     if re.match(r"^\$[\d,.]+", s):
         return False
-    if re.match(r"^[\d.]+%$", s):
+    if re.match(r"^[+-]?[\d.]+%$", s):
         return False
-    # Skip lines that are all uppercase and <= 10 chars (OCR garbage like TREASMENT, SPDR)
+    # Skip all-caps single words (OCR garbage like TREASMENT, SPDR, CW)
     if re.match(r"^[A-Z]{1,10}$", s):
+        return False
+    # Skip very short lines that are likely fragments
+    if len(s) <= 4:
+        return False
+    # A real stock name should have at least one space or be long enough
+    # Single words like "CoreWeave", "Adobe", "Sprouts" are fragments
+    # Real names: "Credo Technology Group", "Fortinet Inc", "Novo Nordisk A/S"
+    # Exception: names ending with common suffixes
+    if " " not in s and not s.endswith(("...", ".")):
         return False
     return True
 
@@ -64,67 +70,66 @@ def _is_stock_name(line: str) -> bool:
 def _clean_stock_name(name: str) -> str:
     name = re.sub(r"^[Tt]r\)\s*", "", name)
     name = re.sub(r"^[i@&mМЯ]\s+", "", name)
+    # Remove trailing "L..." or similar OCR artifacts
+    name = re.sub(r"\s+[A-Z]\.{2,}$", "", name)
     return name.strip()
 
 
-def _make_symbol(name: str) -> str:
-    return "UNKNOWN"
-
-
 def parse_indmoney(text: str) -> list[dict]:
-    """Parse INDmoney screenshot OCR text. Returns list of {stock_name, symbol, quantity, avg_buy_price}."""
+    """Parse INDmoney screenshot OCR text.
+    
+    Strategy: find all Qty lines, then for each Qty find the nearest Avg line
+    below it, and the nearest stock name above it.
+    """
     if not text or len(text.strip()) < 20:
         return []
 
     lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
-    stock_indices = [i for i, line in enumerate(lines) if _is_stock_name(line)]
-    if not stock_indices:
+
+    # Step 1: Find all Qty line positions
+    qty_positions = []
+    for i, line in enumerate(lines):
+        m = re.match(r"([\d.]+)\s*Qty", line, re.IGNORECASE)
+        if m:
+            qty_positions.append((i, _clean_number(m.group(1))))
+
+    if not qty_positions:
+        logger.warning("No Qty lines found")
         return []
 
-    stocks: list[dict] = []
-    for idx, start in enumerate(stock_indices):
-        end = stock_indices[idx + 1] if idx + 1 < len(stock_indices) else len(lines)
-        block = lines[start:end]
-        name = _clean_stock_name(block[0])
+    stocks = []
+    for qty_idx, qty_val in qty_positions:
+        if not qty_val:
+            continue
 
-        qty: Optional[float] = None
-        avg: Optional[float] = None
-
-        for line in block[1:]:
-            m = re.match(r"([\d.]+)\s*Qty", line, re.IGNORECASE)
+        # Step 2: Find Avg within next 10 lines after Qty
+        avg_val = None
+        for j in range(qty_idx + 1, min(qty_idx + 10, len(lines))):
+            m = re.match(r"(?:Avg|Ava)[:\s]*\$?([\d,. ]+)", lines[j], re.IGNORECASE)
             if m:
-                qty = _clean_number(m.group(1))
-                continue
-            m = re.match(r"(?:Avg|Ava)[:\s]*\$?([\d,. ]+)", line, re.IGNORECASE)
-            if m:
-                avg = _clean_number(m.group(1))
-                continue
+                avg_val = _clean_number(m.group(1))
+                break
 
-        if not qty or not avg:
-            # Try scanning further — sometimes Qty/Avg are in the next "false" block
-            for line in lines[end:min(end + 8, len(lines))]:
-                if _is_stock_name(line):
-                    break
-                if not qty:
-                    m = re.match(r"([\d.]+)\s*Qty", line, re.IGNORECASE)
-                    if m:
-                        qty = _clean_number(m.group(1))
-                        continue
-                if not avg:
-                    m = re.match(r"(?:Avg|Ava)[:\s]*\$?([\d,. ]+)", line, re.IGNORECASE)
-                    if m:
-                        avg = _clean_number(m.group(1))
-                        continue
+        if not avg_val:
+            logger.warning("No Avg found near Qty at line %d", qty_idx)
+            continue
 
-        if not qty or not avg:
-            logger.warning("Missing qty/avg for '%s', skipping", name)
+        # Step 3: Look backwards from Qty to find stock name
+        stock_name = None
+        for j in range(qty_idx - 1, max(qty_idx - 5, -1), -1):
+            if _is_valid_stock_name(lines[j]):
+                stock_name = _clean_stock_name(lines[j])
+                break
+
+        if not stock_name:
+            logger.warning("No stock name found before Qty at line %d", qty_idx)
             continue
 
         stocks.append({
-            "stock_name": name,
-            "symbol": _make_symbol(name),
-            "quantity": qty,
-            "avg_buy_price": avg,
+            "stock_name": stock_name,
+            "symbol": "UNKNOWN",
+            "quantity": qty_val,
+            "avg_buy_price": avg_val,
         })
 
     logger.info("Parsed %d stocks from INDmoney", len(stocks))
