@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import UploadArea from "../components/UploadArea";
 import PortfolioTable from "../components/PortfolioTable";
-import { fetchPortfolio, uploadScreenshots, downloadCsv, deleteStock, updateStock, addStock, fetchPrices, requestShare, getMyShares, revokeShare } from "../services/api";
+import { fetchPortfolio, uploadScreenshots, downloadCsv, deleteStock, updateStock, addStock, fetchPrices, fetchUploadStatus, requestShare, getMyShares, revokeShare } from "../services/api";
 
 const tabStyle = (active) => ({
   padding: "5px 14px", cursor: "pointer", border: "1px solid #ddd",
@@ -9,6 +9,35 @@ const tabStyle = (active) => ({
   background: active ? "#fff" : "#f9f9f9", fontWeight: active ? "bold" : "normal",
   fontSize: 12, borderRadius: "4px 4px 0 0", marginRight: 2,
 });
+
+function ProcessingStatus({ items }) {
+  if (!items || items.length === 0) return null;
+  const completed = items.filter((i) => i.ocr_status === "COMPLETED");
+  const processing = items.filter((i) => i.ocr_status === "PROCESSING");
+  const failed = items.filter((i) => i.ocr_status === "FAILED");
+  const totalStocks = completed.reduce((s, i) => s + (i.extracted_stocks || 0), 0);
+
+  return (
+    <div style={{ background: "#f5f5f5", border: "1px solid #ddd", borderRadius: 4, padding: "8px 12px", marginTop: 8, fontSize: 12 }}>
+      <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+        <span>📊 <strong>{completed.length}/{items.length}</strong> files processed</span>
+        <span>📈 <strong>{totalStocks}</strong> stocks extracted</span>
+        {processing.length > 0 && <span style={{ color: "#f57c00" }}>⏳ {processing.length} processing...</span>}
+        {failed.length > 0 && <span style={{ color: "#d32f2f" }}>❌ {failed.length} failed</span>}
+        {completed.length === items.length && failed.length === 0 && <span style={{ color: "#2e7d32" }}>✅ All done!</span>}
+      </div>
+      {/* Progress bar */}
+      <div style={{ background: "#ddd", borderRadius: 4, height: 4, marginTop: 6 }}>
+        <div style={{
+          background: failed.length > 0 ? "#f57c00" : "#4CAF50",
+          borderRadius: 4, height: 4,
+          width: `${(completed.length / items.length) * 100}%`,
+          transition: "width 0.3s",
+        }} />
+      </div>
+    </div>
+  );
+}
 
 function Dashboard({ user }) {
   const [portfolio, setPortfolio] = useState([]);
@@ -20,6 +49,9 @@ function Dashboard({ user }) {
   const [showShare, setShowShare] = useState(false);
   const [myShares, setMyShares] = useState([]);
   const [platformFilter, setPlatformFilter] = useState("all");
+  const [uploadStatus, setUploadStatus] = useState([]);
+  const [showStatus, setShowStatus] = useState(false);
+  const pollRef = useRef(null);
 
   const userId = user?.userId || user?.username;
 
@@ -42,17 +74,44 @@ function Dashboard({ user }) {
 
   useEffect(() => { loadPortfolio(); loadShares(); }, [loadPortfolio, loadShares]);
 
+  // Cleanup polling on unmount
+  useEffect(() => { return () => { if (pollRef.current) clearInterval(pollRef.current); }; }, []);
+
+  const pollStatus = useCallback(async (uploadedCount) => {
+    if (!userId) return;
+    const status = await fetchUploadStatus(userId);
+    // Get the most recent N uploads matching our batch
+    const recent = status.slice(0, uploadedCount);
+    setUploadStatus(recent);
+
+    const allDone = recent.length >= uploadedCount &&
+      recent.every((s) => s.ocr_status === "COMPLETED" || s.ocr_status === "FAILED");
+
+    if (allDone) {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      const completed = recent.filter((s) => s.ocr_status === "COMPLETED");
+      const totalStocks = completed.reduce((s, i) => s + (i.extracted_stocks || 0), 0);
+      setMessage(`✅ Processing complete: ${totalStocks} stocks from ${completed.length} file(s)`);
+      loadPortfolio();
+    }
+  }, [userId, loadPortfolio]);
+
   const handleUpload = async (files, platform) => {
     if (!userId || files.length === 0) return;
-    setUploading(true); setMessage("");
+    setUploading(true); setMessage(""); setUploadStatus([]); setShowStatus(true);
     try {
       const result = await uploadScreenshots(userId, files, platform);
-      setMessage(`Uploaded ${result.uploaded} file(s) for ${platform}. Processing... click Refresh in a few seconds.`);
-      // Auto-refresh after delay, then show count
-      setTimeout(async () => {
-        await loadPortfolio();
-        setMessage(`Uploaded ${result.uploaded} file(s) for ${platform}. Processing complete — check your portfolio below.`);
-      }, 6000);
+      setMessage(`Uploaded ${result.uploaded} file(s) for ${platform}. Processing...`);
+
+      // Start polling for status every 2 seconds
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(() => pollStatus(result.uploaded), 2000);
+
+      // Safety timeout: stop polling after 60 seconds
+      setTimeout(() => {
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        loadPortfolio();
+      }, 60000);
     } catch (e) { setMessage("Upload failed: " + e.message); }
     setUploading(false);
   };
@@ -71,7 +130,6 @@ function Dashboard({ user }) {
 
   const handleRevoke = async (viewerId) => { await revokeShare(userId, viewerId); setMessage("Share revoked"); loadShares(); };
 
-  // Get unique platforms for filter tabs
   const platforms = [...new Set(portfolio.map((p) => p.platform_name).filter(Boolean))];
   const filteredPortfolio = platformFilter === "all" ? portfolio : portfolio.filter((p) => p.platform_name === platformFilter);
 
@@ -87,6 +145,7 @@ function Dashboard({ user }) {
     <div>
       <UploadArea onUpload={handleUpload} uploading={uploading} />
       {message && <p style={{ color: "#666", marginTop: 10 }}>{message}</p>}
+      {showStatus && uploadStatus.length > 0 && <ProcessingStatus items={uploadStatus} />}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 30 }}>
         <h3 style={{ margin: 0 }}>My Portfolio <span style={{ fontSize: 13, color: "#999", fontWeight: "normal" }}>({portfolio.length} stocks)</span></h3>
@@ -106,7 +165,6 @@ function Dashboard({ user }) {
         </div>
       )}
 
-      {/* Platform filter tabs */}
       {platforms.length > 1 && (
         <div style={{ marginTop: 12 }}>
           <button style={tabStyle(platformFilter === "all")} onClick={() => setPlatformFilter("all")}>All ({portfolio.length})</button>

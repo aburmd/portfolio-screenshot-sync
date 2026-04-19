@@ -6,6 +6,12 @@ export async function fetchPortfolio(userId) {
   return res.json();
 }
 
+export async function fetchUploadStatus(userId) {
+  const res = await fetch(`${API_BASE}/upload-status/${userId}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
 export async function uploadScreenshots(userId, files, platform) {
   const formData = new FormData();
   formData.append("user_id", userId);

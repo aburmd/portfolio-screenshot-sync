@@ -29,6 +29,7 @@ PORTFOLIO_TABLE = os.environ.get("PORTFOLIO_TABLE", "portfolio-holdings-dev")
 SYMBOL_MAP_TABLE = os.environ.get("SYMBOL_MAP_TABLE", "portfolio-symbol-map-dev")
 COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "us-west-1_DRjc1Cz3h")
 SHARES_TABLE = os.environ.get("SHARES_TABLE", "portfolio-shares-dev")
+UPLOADS_TABLE = os.environ.get("UPLOADS_TABLE", "portfolio-uploads-dev")
 
 s3 = boto3.client("s3", region_name=REGION)
 ddb = boto3.resource("dynamodb", region_name=REGION)
@@ -55,6 +56,24 @@ async def upload_screenshots(files: List[UploadFile] = File(...), user_id: str =
         s3.put_object(Bucket=SCREENSHOTS_BUCKET, Key=key, Body=content, ContentType=file.content_type)
         results.append({"s3_key": key, "filename": file.filename})
     return {"uploaded": len(results), "files": results}
+
+
+@app.get("/upload-status/{user_id}")
+async def get_upload_status(user_id: str):
+    """Get recent upload processing status for a user."""
+    table = ddb.Table(UPLOADS_TABLE)
+    resp = table.query(
+        IndexName="user-index",
+        KeyConditionExpression=Key("user_id").eq(user_id),
+        ScanIndexForward=False,
+        Limit=20,
+    )
+    items = resp.get("Items", [])
+    for item in items:
+        for k, v in item.items():
+            if hasattr(v, "is_finite"):
+                item[k] = float(v)
+    return items
 
 
 @app.get("/portfolio/{user_id}")
