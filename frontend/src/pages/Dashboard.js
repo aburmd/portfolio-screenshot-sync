@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import UploadArea from "../components/UploadArea";
 import PortfolioTable from "../components/PortfolioTable";
-import { fetchPortfolio, uploadScreenshots, downloadCsv } from "../services/api";
+import { fetchPortfolio, uploadScreenshots, downloadCsv, deleteStock, updateStock } from "../services/api";
 
 function Dashboard({ user }) {
   const [portfolio, setPortfolio] = useState([]);
@@ -15,17 +15,14 @@ function Dashboard({ user }) {
     if (!userId) return;
     setLoading(true);
     try {
-      const data = await fetchPortfolio(userId);
-      setPortfolio(data);
+      setPortfolio(await fetchPortfolio(userId));
     } catch (e) {
       setMessage("Failed to load portfolio");
     }
     setLoading(false);
   }, [userId]);
 
-  useEffect(() => {
-    loadPortfolio();
-  }, [loadPortfolio]);
+  useEffect(() => { loadPortfolio(); }, [loadPortfolio]);
 
   const handleUpload = async (files) => {
     if (!userId || files.length === 0) return;
@@ -41,8 +38,27 @@ function Dashboard({ user }) {
     setUploading(false);
   };
 
+  const handleDelete = async (stockName) => {
+    try {
+      await deleteStock(userId, stockName);
+      setMessage(`Deleted "${stockName}"`);
+      loadPortfolio();
+    } catch (e) {
+      setMessage("Delete failed: " + e.message);
+    }
+  };
+
+  const handleUpdate = async (stockName, quantity, avgBuyPrice) => {
+    try {
+      await updateStock(userId, stockName, quantity, avgBuyPrice);
+      setMessage(`Updated "${stockName}"`);
+      loadPortfolio();
+    } catch (e) {
+      setMessage("Update failed: " + e.message);
+    }
+  };
+
   const handleDownloadCsv = async () => {
-    if (!userId) return;
     try {
       await downloadCsv(userId);
     } catch (e) {
@@ -67,7 +83,7 @@ function Dashboard({ user }) {
         </div>
       </div>
 
-      <PortfolioTable data={portfolio} loading={loading} />
+      <PortfolioTable data={portfolio} loading={loading} onDelete={handleDelete} onUpdate={handleUpdate} />
     </div>
   );
 }

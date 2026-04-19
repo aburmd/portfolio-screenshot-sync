@@ -61,8 +61,34 @@ async def get_portfolio(user_id: str):
     return _decimal_to_float(resp.get("Items", []))
 
 
-@app.get("/portfolio/{user_id}/csv")
-async def download_csv(user_id: str):
+@app.delete("/portfolio/{user_id}/{stock_name}")
+async def delete_portfolio_item(user_id: str, stock_name: str):
+    """Delete a stock from user's portfolio."""
+    table = ddb.Table(PORTFOLIO_TABLE)
+    table.delete_item(Key={"user_id": user_id, "stock_name": stock_name})
+    return {"deleted": stock_name}
+
+
+@app.put("/portfolio/{user_id}/{stock_name}")
+async def update_portfolio_item(
+    user_id: str, stock_name: str,
+    quantity: float = Form(...), avg_buy_price: float = Form(...),
+):
+    """Edit quantity and avg_buy_price for a stock."""
+    from decimal import Decimal
+    table = ddb.Table(PORTFOLIO_TABLE)
+    table.update_item(
+        Key={"user_id": user_id, "stock_name": stock_name},
+        UpdateExpression="SET quantity = :q, avg_buy_price = :a",
+        ExpressionAttributeValues={
+            ":q": Decimal(str(quantity)),
+            ":a": Decimal(str(avg_buy_price)),
+        },
+    )
+    return {"updated": stock_name, "quantity": quantity, "avg_buy_price": avg_buy_price}
+
+
+@app.get("/portfolio/{user_id}/csv")async def download_csv(user_id: str):
     """Generate CSV from DynamoDB portfolio data on-demand."""
     table = ddb.Table(PORTFOLIO_TABLE)
     resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))

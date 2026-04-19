@@ -12,19 +12,34 @@ export async function uploadScreenshots(userId, files) {
   for (const file of files) {
     formData.append("files", file);
   }
+  const res = await fetch(`${API_BASE}/upload`, { method: "POST", body: formData });
+  if (!res.ok) throw new Error("Upload failed");
+  return res.json();
+}
 
-  const res = await fetch(`${API_BASE}/upload`, {
-    method: "POST",
+export async function deleteStock(userId, stockName) {
+  const res = await fetch(`${API_BASE}/portfolio/${userId}/${encodeURIComponent(stockName)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Delete failed");
+  return res.json();
+}
+
+export async function updateStock(userId, stockName, quantity, avgBuyPrice) {
+  const formData = new FormData();
+  formData.append("quantity", quantity);
+  formData.append("avg_buy_price", avgBuyPrice);
+  const res = await fetch(`${API_BASE}/portfolio/${userId}/${encodeURIComponent(stockName)}`, {
+    method: "PUT",
     body: formData,
   });
-  if (!res.ok) throw new Error("Upload failed");
+  if (!res.ok) throw new Error("Update failed");
   return res.json();
 }
 
 export async function downloadCsv(userId) {
   const res = await fetch(`${API_BASE}/portfolio/${userId}/csv`);
   if (!res.ok) throw new Error("CSV download failed");
-
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
