@@ -59,7 +59,14 @@ function UploadArea({ onUpload, uploading }) {
         {uploading ? (
           <p>Uploading to <strong>{selectedPlatform}</strong>...</p>
         ) : (
-          <p>Drag & drop <strong>{selectedPlatform}</strong> screenshots here, or click to select</p>
+          <div>
+            <p>Drag & drop <strong>{selectedPlatform}</strong> screenshots here, or click to select</p>
+            {platform === "Robinhood" && (
+              <p style={{ fontSize: 11, color: "#888", margin: "4px 0 0" }}>
+                Robinhood needs 2 screenshots of the same stocks: one showing $ values, one showing % returns
+              </p>
+            )}
+          </div>
         )}
       </div>
     </div>

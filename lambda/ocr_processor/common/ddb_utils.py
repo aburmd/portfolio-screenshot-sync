@@ -4,18 +4,19 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import boto3
+from boto3.dynamodb.conditions import Key
 
 logger = logging.getLogger(__name__)
 ddb = boto3.resource("dynamodb")
 
 
 def upsert_portfolio_item(table_name: str, user_id: str, stock: dict, platform: str) -> None:
-    """Upsert a stock record. PK=user_id, SK=stock_name (always unique per stock)."""
+    """Upsert a stock record. PK=user_id, SK=stock_name."""
     table = ddb.Table(table_name)
     stock_name = stock["stock_name"]
     symbol = stock.get("symbol", "UNKNOWN")
 
-    table.put_item(Item={
+    item = {
         "user_id": user_id,
         "stock_name": stock_name,
         "symbol": symbol,
@@ -23,8 +24,50 @@ def upsert_portfolio_item(table_name: str, user_id: str, stock: dict, platform: 
         "avg_buy_price": Decimal(str(stock["avg_buy_price"])),
         "platform_name": platform,
         "uploaded_date": datetime.now(timezone.utc).isoformat(),
-    })
+    }
+
+    # Store current_price if provided (from Robinhood market_value view or manual edit)
+    if stock.get("current_price"):
+        item["current_price"] = Decimal(str(stock["current_price"]))
+
+    # Robinhood merge: if this is a return_pct view, look up existing record for current_price
+    if stock.get("robinhood_view") == "return_pct" and stock.get("return_pct") is not None:
+        existing = _get_portfolio_item(table_name, user_id, stock_name)
+        if existing and existing.get("current_price"):
+            cur_price = float(existing["current_price"])
+            return_pct = stock["return_pct"]
+            avg = cur_price / (1 + return_pct / 100)
+            item["avg_buy_price"] = Decimal(str(round(avg, 2)))
+            item["current_price"] = existing["current_price"]
+            logger.info("Robinhood merge: %s cur=%.2f ret=%.2f%% -> avg=%.2f",
+                        symbol, cur_price, return_pct, avg)
+        else:
+            logger.warning("Robinhood return view for %s but no market_value data yet", symbol)
+
+    # Robinhood merge: if this is market_value view and existing has return_pct pending
+    if stock.get("robinhood_view") == "market_value" and stock.get("current_price"):
+        existing = _get_portfolio_item(table_name, user_id, stock_name)
+        if existing and existing.get("return_pct") is not None:
+            return_pct = float(existing["return_pct"])
+            cur_price = stock["current_price"]
+            avg = cur_price / (1 + return_pct / 100)
+            item["avg_buy_price"] = Decimal(str(round(avg, 2)))
+            logger.info("Robinhood merge (reverse): %s cur=%.2f ret=%.2f%% -> avg=%.2f",
+                        symbol, cur_price, return_pct, avg)
+
+    # Store return_pct temporarily for merge
+    if stock.get("return_pct") is not None:
+        item["return_pct"] = Decimal(str(stock["return_pct"]))
+
+    table.put_item(Item=item)
     logger.info("Upserted %s (%s) for user %s", stock_name, symbol, user_id)
+
+
+def _get_portfolio_item(table_name: str, user_id: str, stock_name: str) -> dict | None:
+    """Get a single portfolio item."""
+    table = ddb.Table(table_name)
+    resp = table.get_item(Key={"user_id": user_id, "stock_name": stock_name})
+    return resp.get("Item")
 
 
 def update_upload_status(table_name: str, upload_id: str, user_id: str,
