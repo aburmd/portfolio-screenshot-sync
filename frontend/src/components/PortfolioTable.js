@@ -10,7 +10,7 @@ const fmt = (v) => v != null ? v.toFixed(2) : "—";
 const pct = (v) => v != null ? v.toFixed(2) + "%" : "—";
 const clr = (v) => v > 0 ? "#2e7d32" : v < 0 ? "#c62828" : "#666";
 
-function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd }) {
+function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, readOnly }) {
   const [editingRow, setEditingRow] = useState(null);
   const [editQty, setEditQty] = useState("");
   const [editAvg, setEditAvg] = useState("");
@@ -65,7 +65,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd }) {
             <th style={thStyle}>Inv %</th>
             <th style={thStyle}>Cur %</th>
             <th style={thStyle}>Platform</th>
-            <th style={thStyle}>Actions</th>
+            {!readOnly && <th style={thStyle}>Actions</th>}
           </tr>
         </thead>
         <tbody>
@@ -94,6 +94,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd }) {
                 <td style={tdStyle}>{pct(invPct)}</td>
                 <td style={tdStyle}>{curPct != null ? pct(curPct) : "—"}</td>
                 <td style={tdStyle}>{row.platform_name}</td>
+                {!readOnly && (
                 <td style={tdStyle}>
                   {isEditing ? (
                     <>
@@ -107,6 +108,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd }) {
                     </>
                   )}
                 </td>
+                )}
               </tr>
             );
           })}
@@ -121,12 +123,12 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd }) {
               <td style={{ ...tdStyle, color: clr(totalPnlPct) }}>{pct(totalPnlPct)}</td>
               <td style={tdStyle}>100%</td>
               <td style={tdStyle}>100%</td>
-              <td style={tdStyle} colSpan={2}></td>
+              {!readOnly && <td style={tdStyle} colSpan={2}></td>}
             </tr>
           )}
 
           {/* Add row */}
-          {adding ? (
+          {!readOnly && (adding ? (
             <tr style={{ background: "#e8f5e9" }}>
               <td style={tdStyle}>—</td>
               <td style={tdStyle}><input type="text" placeholder="Stock name" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ ...inputStyle, width: 140 }} /></td>
@@ -144,7 +146,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd }) {
                 <button style={{ ...btnStyle, border: "1px solid #4CAF50", color: "#4CAF50", padding: "5px 14px" }} onClick={() => setAdding(true)}>+ Add Stock Manually</button>
               </td>
             </tr>
-          )}
+          ))}
         </tbody>
       </table>
     </div>

@@ -27,6 +27,7 @@ SCREENSHOTS_BUCKET = os.environ.get("SCREENSHOTS_BUCKET", "portfolio-screenshots
 PORTFOLIO_TABLE = os.environ.get("PORTFOLIO_TABLE", "portfolio-holdings-dev")
 SYMBOL_MAP_TABLE = os.environ.get("SYMBOL_MAP_TABLE", "portfolio-symbol-map-dev")
 COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "us-west-1_DRjc1Cz3h")
+SHARES_TABLE = os.environ.get("SHARES_TABLE", "portfolio-shares-dev")
 
 s3 = boto3.client("s3", region_name=REGION)
 ddb = boto3.resource("dynamodb", region_name=REGION)
@@ -276,3 +277,125 @@ async def set_user_role(username: str = Form(...), role: str = Form(...)):
             pass
 
     return {"username": username, "role": role, "status": "updated"}
+
+
+# --- Sharing endpoints ---
+
+def _resolve_email_to_username(email: str) -> str | None:
+    """Look up Cognito username by email."""
+    resp = cognito.list_users(
+        UserPoolId=COGNITO_USER_POOL_ID, Filter=f'email = "{email}"', Limit=1,
+    )
+    users = resp.get("Users", [])
+    return users[0]["Username"] if users else None
+
+
+def _resolve_username_to_email(username: str) -> str:
+    """Look up email by Cognito username."""
+    try:
+        resp = cognito.admin_get_user(UserPoolId=COGNITO_USER_POOL_ID, Username=username)
+        attrs = {a["Name"]: a["Value"] for a in resp.get("UserAttributes", [])}
+        return attrs.get("email", username)
+    except Exception:
+        return username
+
+
+@app.post("/shares/request")
+async def request_share(owner_id: str = Form(...), viewer_email: str = Form(...)):
+    """Owner requests to share dashboard with a viewer. Goes to admin for approval."""
+    viewer_id = _resolve_email_to_username(viewer_email.strip())
+    if not viewer_id:
+        return {"error": f"No user found with email {viewer_email}"}
+    if viewer_id == owner_id:
+        return {"error": "Cannot share with yourself"}
+
+    table = ddb.Table(SHARES_TABLE)
+    from datetime import datetime, timezone as tz
+    table.put_item(Item={
+        "owner_id": owner_id,
+        "viewer_id": viewer_id,
+        "owner_email": _resolve_username_to_email(owner_id),
+        "viewer_email": viewer_email.strip(),
+        "status": "pending_admin",
+        "created_at": datetime.now(tz.utc).isoformat(),
+    })
+    return {"status": "pending_admin", "viewer_email": viewer_email}
+
+
+@app.get("/shares/my-shares/{user_id}")
+async def get_my_shares(user_id: str):
+    """Get shares where I am the owner."""
+    table = ddb.Table(SHARES_TABLE)
+    resp = table.query(KeyConditionExpression=Key("owner_id").eq(user_id))
+    return resp.get("Items", [])
+
+
+@app.get("/shares/shared-with-me/{user_id}")
+async def get_shared_with_me(user_id: str):
+    """Get approved shares where I am the viewer."""
+    table = ddb.Table(SHARES_TABLE)
+    resp = table.query(
+        IndexName="viewer-index",
+        KeyConditionExpression=Key("viewer_id").eq(user_id) & Key("status").eq("approved"),
+    )
+    return resp.get("Items", [])
+
+
+@app.get("/shares/pending-viewer/{user_id}")
+async def get_pending_viewer(user_id: str):
+    """Get share requests pending my (viewer) approval."""
+    table = ddb.Table(SHARES_TABLE)
+    resp = table.query(
+        IndexName="viewer-index",
+        KeyConditionExpression=Key("viewer_id").eq(user_id) & Key("status").eq("pending_viewer"),
+    )
+    return resp.get("Items", [])
+
+
+@app.post("/shares/viewer-respond")
+async def viewer_respond(owner_id: str = Form(...), viewer_id: str = Form(...), action: str = Form(...)):
+    """Viewer approves or rejects a share request."""
+    new_status = "approved" if action == "approve" else "rejected"
+    table = ddb.Table(SHARES_TABLE)
+    table.update_item(
+        Key={"owner_id": owner_id, "viewer_id": viewer_id},
+        UpdateExpression="SET #s = :s",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":s": new_status},
+    )
+    return {"status": new_status}
+
+
+@app.delete("/shares/{owner_id}/{viewer_id}")
+async def revoke_share(owner_id: str, viewer_id: str):
+    """Either owner or viewer can revoke a share. No admin approval needed."""
+    table = ddb.Table(SHARES_TABLE)
+    table.delete_item(Key={"owner_id": owner_id, "viewer_id": viewer_id})
+    return {"revoked": True}
+
+
+# --- Admin: Share approval ---
+
+@app.get("/admin/pending-shares")
+async def get_pending_shares():
+    """Get all share requests pending admin approval."""
+    table = ddb.Table(SHARES_TABLE)
+    resp = table.query(
+        IndexName="status-index",
+        KeyConditionExpression=Key("status").eq("pending_admin"),
+    )
+    return resp.get("Items", [])
+
+
+@app.post("/admin/share-respond")
+async def admin_share_respond(owner_id: str = Form(...), viewer_id: str = Form(...), action: str = Form(...)):
+    """Admin approves (→ pending_viewer) or rejects a share request."""
+    new_status = "pending_viewer" if action == "approve" else "rejected"
+    table = ddb.Table(SHARES_TABLE)
+    table.update_item(
+        Key={"owner_id": owner_id, "viewer_id": viewer_id},
+        UpdateExpression="SET #s = :s",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":s": new_status},
+    )
+    return {"status": new_status}

@@ -18,10 +18,12 @@ function AdminPage() {
     <div>
       <div style={{ marginBottom: -1 }}>
         <button style={tabStyle(tab === "symbols")} onClick={() => setTab("symbols")}>⚠️ Unknown Symbols</button>
+        <button style={tabStyle(tab === "shares")} onClick={() => setTab("shares")}>🔗 Share Requests</button>
         <button style={tabStyle(tab === "users")} onClick={() => setTab("users")}>👥 Manage Users</button>
       </div>
       <div style={{ border: "1px solid #ddd", padding: 16, borderRadius: "0 4px 4px 4px" }}>
         {tab === "symbols" && <SymbolsTab />}
+        {tab === "shares" && <SharesTab />}
         {tab === "users" && <UsersTab />}
       </div>
     </div>
@@ -187,6 +189,61 @@ function UsersTab() {
         </table>
       )}
       <button onClick={loadUsers} style={{ marginTop: 12 }} disabled={loading}>{loading ? "Loading..." : "Refresh"}</button>
+    </div>
+  );
+}
+
+function SharesTab() {
+  const [pending, setPending] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const loadPending = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/admin/pending-shares`);
+      setPending(await res.json());
+    } catch (e) { setMessage("Failed to load"); }
+    setLoading(false);
+  };
+
+  useEffect(() => { loadPending(); }, []);
+
+  const handleRespond = async (ownerId, viewerId, action) => {
+    const fd = new FormData();
+    fd.append("owner_id", ownerId); fd.append("viewer_id", viewerId); fd.append("action", action);
+    await fetch(`${API_BASE}/admin/share-respond`, { method: "POST", body: fd });
+    setMessage(action === "approve" ? "Approved → sent to viewer for acceptance" : "Rejected");
+    loadPending();
+  };
+
+  return (
+    <div>
+      {message && <p style={{ color: "#2e7d32", background: "#e8f5e9", padding: 8, borderRadius: 4 }}>{message}</p>}
+      <h4>Pending Share Requests ({pending.length})</h4>
+      {loading ? <p>Loading...</p> : pending.length === 0 ? (
+        <p style={{ color: "#999" }}>No pending share requests ✅</p>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr><th style={th}>Owner</th><th style={th}>Viewer</th><th style={th}>Requested</th><th style={th}>Action</th></tr></thead>
+          <tbody>
+            {pending.map((p) => (
+              <tr key={`${p.owner_id}-${p.viewer_id}`} style={{ background: "#fff8e1" }}>
+                <td style={td}>{p.owner_email}</td>
+                <td style={td}>{p.viewer_email}</td>
+                <td style={td}>{p.created_at?.split("T")[0]}</td>
+                <td style={td}>
+                  <button style={{ padding: "3px 10px", marginRight: 4, background: "#4CAF50", color: "#fff", border: "none", cursor: "pointer", fontSize: 12 }}
+                    onClick={() => handleRespond(p.owner_id, p.viewer_id, "approve")}>Approve</button>
+                  <button style={{ padding: "3px 10px", border: "1px solid #d32f2f", color: "#d32f2f", cursor: "pointer", fontSize: 12 }}
+                    onClick={() => handleRespond(p.owner_id, p.viewer_id, "reject")}>Reject</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <button onClick={loadPending} style={{ marginTop: 12 }} disabled={loading}>{loading ? "Loading..." : "Refresh"}</button>
     </div>
   );
 }

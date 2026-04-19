@@ -71,3 +71,26 @@ export async function downloadCsv(userId) {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+// --- Sharing ---
+export async function requestShare(ownerId, viewerEmail) {
+  const fd = new FormData(); fd.append("owner_id", ownerId); fd.append("viewer_email", viewerEmail);
+  const res = await fetch(`${API_BASE}/shares/request`, { method: "POST", body: fd });
+  return res.json();
+}
+export async function getMyShares(userId) {
+  const res = await fetch(`${API_BASE}/shares/my-shares/${userId}`); return res.json();
+}
+export async function getSharedWithMe(userId) {
+  const res = await fetch(`${API_BASE}/shares/shared-with-me/${userId}`); return res.json();
+}
+export async function getPendingViewer(userId) {
+  const res = await fetch(`${API_BASE}/shares/pending-viewer/${userId}`); return res.json();
+}
+export async function viewerRespond(ownerId, viewerId, action) {
+  const fd = new FormData(); fd.append("owner_id", ownerId); fd.append("viewer_id", viewerId); fd.append("action", action);
+  const res = await fetch(`${API_BASE}/shares/viewer-respond`, { method: "POST", body: fd }); return res.json();
+}
+export async function revokeShare(ownerId, viewerId) {
+  const res = await fetch(`${API_BASE}/shares/${ownerId}/${viewerId}`, { method: "DELETE" }); return res.json();
+}
