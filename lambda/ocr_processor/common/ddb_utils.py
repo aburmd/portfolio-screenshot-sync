@@ -10,18 +10,21 @@ ddb = boto3.resource("dynamodb")
 
 
 def upsert_portfolio_item(table_name: str, user_id: str, stock: dict, platform: str) -> None:
-    """Upsert a stock record. PK=user_id, SK=symbol."""
+    """Upsert a stock record. PK=user_id, SK=stock_name (always unique per stock)."""
     table = ddb.Table(table_name)
+    stock_name = stock["stock_name"]
+    symbol = stock.get("symbol", "UNKNOWN")
+
     table.put_item(Item={
         "user_id": user_id,
-        "symbol": stock["symbol"],
-        "stock_name": stock["stock_name"],
+        "stock_name": stock_name,
+        "symbol": symbol,
         "quantity": Decimal(str(stock["quantity"])),
         "avg_buy_price": Decimal(str(stock["avg_buy_price"])),
         "platform_name": platform,
         "uploaded_date": datetime.now(timezone.utc).isoformat(),
     })
-    logger.info("Upserted %s for user %s", stock["symbol"], user_id)
+    logger.info("Upserted %s (%s) for user %s", stock_name, symbol, user_id)
 
 
 def update_upload_status(table_name: str, upload_id: str, user_id: str,
