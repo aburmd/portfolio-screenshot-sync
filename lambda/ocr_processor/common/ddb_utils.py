@@ -11,10 +11,23 @@ ddb = boto3.resource("dynamodb")
 
 
 def upsert_portfolio_item(table_name: str, user_id: str, stock: dict, platform: str) -> None:
-    """Upsert a stock record. PK=user_id, SK=stock_name."""
+    """Upsert a stock record. PK=user_id, SK=stock_name.
+    
+    Dedup: if symbol is known (not UNKNOWN), find any existing record with the
+    same symbol for this user and delete it before inserting — prevents duplicates
+    from OCR variations like 'Adobe Systems Incorporat.' vs 'Adobe Systems Incorporated'.
+    """
     table = ddb.Table(table_name)
     stock_name = stock["stock_name"]
     symbol = stock.get("symbol", "UNKNOWN")
+
+    # Dedup by symbol: if known symbol, remove any existing entry with same symbol but different name
+    if symbol != "UNKNOWN":
+        resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+        for existing in resp.get("Items", []):
+            if existing.get("symbol") == symbol and existing["stock_name"] != stock_name:
+                table.delete_item(Key={"user_id": user_id, "stock_name": existing["stock_name"]})
+                logger.info("Dedup: deleted old entry '%s' for symbol %s", existing["stock_name"], symbol)
 
     item = {
         "user_id": user_id,
