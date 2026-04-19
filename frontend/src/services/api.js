@@ -50,6 +50,16 @@ export async function updateStock(userId, stockName, quantity, avgBuyPrice) {
   return res.json();
 }
 
+export async function fetchPrices(symbols) {
+  const res = await fetch(`${API_BASE}/prices`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(symbols),
+  });
+  if (!res.ok) return {};
+  return res.json();
+}
+
 export async function downloadCsv(userId) {
   const res = await fetch(`${API_BASE}/portfolio/${userId}/csv`);
   if (!res.ok) throw new Error("CSV download failed");

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from "react";
 import UploadArea from "../components/UploadArea";
 import PortfolioTable from "../components/PortfolioTable";
-import { fetchPortfolio, uploadScreenshots, downloadCsv, deleteStock, updateStock, addStock } from "../services/api";
+import { fetchPortfolio, uploadScreenshots, downloadCsv, deleteStock, updateStock, addStock, fetchPrices } from "../services/api";
 
 function Dashboard({ user }) {
   const [portfolio, setPortfolio] = useState([]);
+  const [prices, setPrices] = useState({});
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState("");
@@ -15,7 +16,14 @@ function Dashboard({ user }) {
     if (!userId) return;
     setLoading(true);
     try {
-      setPortfolio(await fetchPortfolio(userId));
+      const data = await fetchPortfolio(userId);
+      setPortfolio(data);
+      // Fetch live prices for all known symbols
+      const symbols = [...new Set(data.map((d) => d.symbol).filter((s) => s && s !== "UNKNOWN"))];
+      if (symbols.length > 0) {
+        const priceData = await fetchPrices(symbols);
+        setPrices(priceData);
+      }
     } catch (e) {
       setMessage("Failed to load portfolio");
     }
@@ -69,11 +77,7 @@ function Dashboard({ user }) {
   };
 
   const handleDownloadCsv = async () => {
-    try {
-      await downloadCsv(userId);
-    } catch (e) {
-      setMessage("CSV download failed");
-    }
+    try { await downloadCsv(userId); } catch (e) { setMessage("CSV download failed"); }
   };
 
   return (
@@ -93,7 +97,8 @@ function Dashboard({ user }) {
         </div>
       </div>
 
-      <PortfolioTable data={portfolio} loading={loading} onDelete={handleDelete} onUpdate={handleUpdate} onAdd={handleAdd} />
+      <PortfolioTable data={portfolio} prices={prices} loading={loading}
+        onDelete={handleDelete} onUpdate={handleUpdate} onAdd={handleAdd} />
     </div>
   );
 }

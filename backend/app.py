@@ -11,6 +11,8 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+import yfinance as yf
+
 app = FastAPI(title="Portfolio Screenshot Sync")
 
 app.add_middleware(
@@ -59,6 +61,29 @@ async def get_portfolio(user_id: str):
     table = ddb.Table(PORTFOLIO_TABLE)
     resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
     return _decimal_to_float(resp.get("Items", []))
+
+
+@app.post("/prices")
+async def get_prices(symbols: list[str]):
+    """Fetch current prices for a list of ticker symbols via Yahoo Finance."""
+    if not symbols:
+        return {}
+    # Filter out UNKNOWN and empty
+    valid = [s for s in symbols if s and s != "UNKNOWN"]
+    if not valid:
+        return {}
+    try:
+        tickers = yf.Tickers(" ".join(valid))
+        prices = {}
+        for sym in valid:
+            try:
+                info = tickers.tickers[sym].fast_info
+                prices[sym] = round(info.get("lastPrice", 0) or info.get("previousClose", 0), 2)
+            except Exception:
+                prices[sym] = None
+        return prices
+    except Exception:
+        return {}
 
 @app.post("/portfolio/{user_id}/add")
 async def add_portfolio_item(
