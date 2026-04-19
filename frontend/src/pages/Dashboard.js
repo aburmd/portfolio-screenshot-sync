@@ -54,7 +54,7 @@ function Dashboard({ user }) {
   };
 
   const handleDelete = async (sn) => { try { await deleteStock(userId, sn); setMessage(`Deleted "${sn}"`); loadPortfolio(); } catch (e) { setMessage("Delete failed"); } };
-  const handleUpdate = async (sn, q, a) => { try { await updateStock(userId, sn, q, a); setMessage(`Updated "${sn}"`); loadPortfolio(); } catch (e) { setMessage("Update failed"); } };
+  const handleUpdate = async (sn, q, a, cp) => { try { await updateStock(userId, sn, q, a, cp); setMessage(`Updated "${sn}"`); loadPortfolio(); } catch (e) { setMessage("Update failed"); } };
   const handleAdd = async (sn, q, a) => { try { const r = await addStock(userId, sn, q, a); setMessage(`Added "${sn}" (${r.symbol})`); loadPortfolio(); } catch (e) { setMessage("Add failed"); } };
   const handleDownloadCsv = async () => { try { await downloadCsv(userId); } catch (e) { setMessage("CSV download failed"); } };
 

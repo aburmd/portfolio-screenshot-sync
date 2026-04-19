@@ -39,10 +39,13 @@ export async function deleteStock(userId, stockName) {
   return res.json();
 }
 
-export async function updateStock(userId, stockName, quantity, avgBuyPrice) {
+export async function updateStock(userId, stockName, quantity, avgBuyPrice, currentPrice) {
   const formData = new FormData();
   formData.append("quantity", quantity);
   formData.append("avg_buy_price", avgBuyPrice);
+  if (currentPrice != null && currentPrice !== "") {
+    formData.append("current_price", currentPrice);
+  }
   const res = await fetch(`${API_BASE}/portfolio/${userId}/${encodeURIComponent(stockName)}`, {
     method: "PUT",
     body: formData,

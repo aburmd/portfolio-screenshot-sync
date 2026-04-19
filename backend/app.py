@@ -126,19 +126,25 @@ async def delete_portfolio_item(user_id: str, stock_name: str):
 async def update_portfolio_item(
     user_id: str, stock_name: str,
     quantity: float = Form(...), avg_buy_price: float = Form(...),
+    current_price: float = Form(None),
 ):
-    """Edit quantity and avg_buy_price for a stock."""
+    """Edit quantity, avg_buy_price, and optionally current_price for a stock."""
     from decimal import Decimal
     table = ddb.Table(PORTFOLIO_TABLE)
+    update_expr = "SET quantity = :q, avg_buy_price = :a"
+    expr_vals = {
+        ":q": Decimal(str(quantity)),
+        ":a": Decimal(str(avg_buy_price)),
+    }
+    if current_price is not None:
+        update_expr += ", current_price = :cp"
+        expr_vals[":cp"] = Decimal(str(current_price))
     table.update_item(
         Key={"user_id": user_id, "stock_name": stock_name},
-        UpdateExpression="SET quantity = :q, avg_buy_price = :a",
-        ExpressionAttributeValues={
-            ":q": Decimal(str(quantity)),
-            ":a": Decimal(str(avg_buy_price)),
-        },
+        UpdateExpression=update_expr,
+        ExpressionAttributeValues=expr_vals,
     )
-    return {"updated": stock_name, "quantity": quantity, "avg_buy_price": avg_buy_price}
+    return {"updated": stock_name, "quantity": quantity, "avg_buy_price": avg_buy_price, "current_price": current_price}
 
 
 @app.get("/portfolio/{user_id}/csv")

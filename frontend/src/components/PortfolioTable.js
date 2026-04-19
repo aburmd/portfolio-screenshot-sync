@@ -21,13 +21,12 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
   const [newAvg, setNewAvg] = useState("");
   const [sortCol, setSortCol] = useState(null);
   const [sortDir, setSortDir] = useState("asc");
-  const [priceOverrides, setPriceOverrides] = useState({});
 
-  // Calculate derived values
+  // Calculate derived values — DDB current_price overrides Yahoo price
   const rows = (data || []).map((row) => {
     const qty = row.quantity || 0;
     const avg = row.avg_buy_price || 0;
-    const curPrice = priceOverrides[row.stock_name] ?? prices[row.symbol] ?? null;
+    const curPrice = row.current_price || prices[row.symbol] || null;
     const invested = qty * avg;
     const currentAmt = curPrice != null ? qty * curPrice : null;
     const pnl = currentAmt != null ? currentAmt - invested : null;
@@ -92,10 +91,8 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
   };
   const cancelEdit = () => setEditingRow(null);
   const saveEdit = (stockName) => {
-    onUpdate(stockName, parseFloat(editQty), parseFloat(editAvg));
-    if (editCurPrice.trim()) {
-      setPriceOverrides({ ...priceOverrides, [stockName]: parseFloat(editCurPrice) });
-    }
+    const cp = editCurPrice.trim() ? parseFloat(editCurPrice) : null;
+    onUpdate(stockName, parseFloat(editQty), parseFloat(editAvg), cp);
     setEditingRow(null);
   };
   const handleDelete = (stockName) => { if (window.confirm(`Delete "${stockName}"?`)) onDelete(stockName); };
@@ -148,7 +145,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
                   ) : (
                     <span>
                       {row.curPrice != null ? `$${fmt(row.curPrice)}` : "—"}
-                      {priceOverrides[row.stock_name] != null && <span style={{ color: "#f57c00", marginLeft: 2, fontSize: 10 }}>✎</span>}
+                      {row.current_price != null && <span style={{ color: "#f57c00", marginLeft: 2, fontSize: 10 }}>✎</span>}
                     </span>
                   )}
                 </td>
