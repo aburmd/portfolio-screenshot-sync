@@ -1,0 +1,33 @@
+const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:8000";
+
+export async function fetchPortfolio(userId) {
+  const res = await fetch(`${API_BASE}/portfolio/${userId}`);
+  if (!res.ok) throw new Error("Failed to fetch portfolio");
+  return res.json();
+}
+
+export async function uploadScreenshot(userId, file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("user_id", userId);
+
+  const res = await fetch(`${API_BASE}/upload`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error("Upload failed");
+  return res.json();
+}
+
+export async function downloadCsv(userId) {
+  const res = await fetch(`${API_BASE}/portfolio/${userId}/csv`);
+  if (!res.ok) throw new Error("CSV download failed");
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "portfolio.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
