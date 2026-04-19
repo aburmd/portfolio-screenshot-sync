@@ -12,7 +12,8 @@ SKIP_PATTERNS = {
     "us stocks", "my stocks", "watchlist", "explore", "rewards", "sip",
     "orders", "invested", "current value", "market value",
     "indstocks", "myind", "funds", "insta plus", "insta", "plus",
-    "hr", "ry", "sm", "treasment",
+    "hr", "ry", "sm", "treasment", "treasport",
+    "s stocks", "adobe",
 }
 
 # Known non-stock short words that OCR picks up
@@ -23,7 +24,11 @@ def _clean_number(s: str) -> Optional[float]:
     if not s:
         return None
     try:
-        return float(re.sub(r"[$,\s]", "", s))
+        # Handle OCR mangling: "242 54" -> "242.54" (space instead of dot)
+        cleaned = re.sub(r"[$,]", "", s.strip())
+        # If pattern like "242 54" (digits space digits, no dot), treat space as dot
+        cleaned = re.sub(r"(\d+)\s+(\d{1,2})$", r"\1.\2", cleaned)
+        return float(cleaned)
     except (ValueError, AttributeError):
         return None
 
@@ -44,7 +49,7 @@ def _is_stock_name(line: str) -> bool:
         return False
     if re.match(r"^[\d.,]+\s*Qty", s, re.IGNORECASE):
         return False
-    if re.match(r"Avg[:\s]", s, re.IGNORECASE):
+    if re.match(r"(?:Avg|Ava)[:\s]", s, re.IGNORECASE):
         return False
     if re.match(r"^\$[\d,.]+", s):
         return False
@@ -90,14 +95,13 @@ def parse_indmoney(text: str) -> list[dict]:
             if m:
                 qty = _clean_number(m.group(1))
                 continue
-            m = re.match(r"Avg[:\s]*\$?([\d,.]+)", line, re.IGNORECASE)
+            m = re.match(r"(?:Avg|Ava)[:\s]*\$?([\d,. ]+)", line, re.IGNORECASE)
             if m:
                 avg = _clean_number(m.group(1))
                 continue
 
         if not qty or not avg:
             # Try scanning further — sometimes Qty/Avg are in the next "false" block
-            # Look ahead up to 8 more lines past the block end
             for line in lines[end:min(end + 8, len(lines))]:
                 if _is_stock_name(line):
                     break
@@ -107,7 +111,7 @@ def parse_indmoney(text: str) -> list[dict]:
                         qty = _clean_number(m.group(1))
                         continue
                 if not avg:
-                    m = re.match(r"Avg[:\s]*\$?([\d,.]+)", line, re.IGNORECASE)
+                    m = re.match(r"(?:Avg|Ava)[:\s]*\$?([\d,. ]+)", line, re.IGNORECASE)
                     if m:
                         avg = _clean_number(m.group(1))
                         continue
