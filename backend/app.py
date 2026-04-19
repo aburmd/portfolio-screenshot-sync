@@ -67,8 +67,13 @@ async def add_portfolio_item(
 ):
     """Manually add a stock to portfolio."""
     from decimal import Decimal
-    from common.symbol_lookup import lookup_symbol
-    symbol = lookup_symbol(stock_name) or "UNKNOWN"
+    from datetime import datetime, timezone as tz
+
+    # Symbol lookup from symbol-map table
+    sym_table = ddb.Table(SYMBOL_MAP_TABLE)
+    sym_resp = sym_table.get_item(Key={"stock_name": stock_name.strip().lower()})
+    symbol = sym_resp.get("Item", {}).get("symbol", "UNKNOWN")
+
     table = ddb.Table(PORTFOLIO_TABLE)
     table.put_item(Item={
         "user_id": user_id,
@@ -77,7 +82,7 @@ async def add_portfolio_item(
         "quantity": Decimal(str(quantity)),
         "avg_buy_price": Decimal(str(avg_buy_price)),
         "platform_name": "manual",
-        "uploaded_date": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "uploaded_date": datetime.now(tz.utc).isoformat(),
     })
     return {"added": stock_name, "symbol": symbol}
 
