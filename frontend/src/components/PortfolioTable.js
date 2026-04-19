@@ -27,7 +27,7 @@ const DEFAULT_COLUMNS = [
 
 const STORAGE_KEY = "portfolio_column_order";
 
-function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, readOnly }) {
+function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdate, onAdd, readOnly }) {
   const [editingRow, setEditingRow] = useState(null);
   const [editQty, setEditQty] = useState("");
   const [editAvg, setEditAvg] = useState("");
@@ -40,6 +40,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
   const [sortDir, setSortDir] = useState("asc");
   const [columns, setColumns] = useState(DEFAULT_COLUMNS);
   const [dragIdx, setDragIdx] = useState(null);
+  const [selected, setSelected] = useState(new Set());
 
   // Load column order from localStorage
   useEffect(() => {
@@ -113,6 +114,30 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
 
   if (loading) return <p>Loading...</p>;
 
+  const toggleSelect = (sn) => {
+    const next = new Set(selected);
+    next.has(sn) ? next.delete(sn) : next.add(sn);
+    setSelected(next);
+  };
+  const toggleSelectAll = () => {
+    if (selected.size === sortedRows.length) setSelected(new Set());
+    else setSelected(new Set(sortedRows.map((r) => r.stock_name)));
+  };
+  const handleDeleteSelected = () => {
+    if (selected.size === 0) return;
+    if (window.confirm(`Delete ${selected.size} selected stock(s)?`)) {
+      onBulkDelete([...selected]);
+      setSelected(new Set());
+    }
+  };
+  const handleDeleteAll = () => {
+    if (sortedRows.length === 0) return;
+    if (window.confirm(`Delete ALL ${sortedRows.length} stocks from portfolio?`)) {
+      onBulkDelete(sortedRows.map((r) => r.stock_name));
+      setSelected(new Set());
+    }
+  };
+
   const startEdit = (row) => {
     setEditingRow(row.stock_name); setEditQty(String(row.quantity));
     setEditAvg(String(row.avg_buy_price)); setEditCurPrice(row.curPrice != null ? String(row.curPrice) : "");
@@ -170,10 +195,27 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
 
   return (
     <div style={{ overflowX: "auto" }}>
-      <div style={{ fontSize: 10, color: "#999", marginBottom: 2 }}>💡 Drag column headers to reorder</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+        <span style={{ fontSize: 10, color: "#999" }}>💡 Drag column headers to reorder</span>
+        {!readOnly && selected.size > 0 && (
+          <button style={{ ...btnStyle, border: "1px solid #d32f2f", color: "#d32f2f", padding: "4px 12px" }} onClick={handleDeleteSelected}>
+            🗑 Delete Selected ({selected.size})
+          </button>
+        )}
+        {!readOnly && sortedRows.length > 0 && selected.size === 0 && (
+          <button style={{ ...btnStyle, border: "1px solid #999", color: "#999", padding: "4px 12px" }} onClick={handleDeleteAll}>
+            Delete All
+          </button>
+        )}
+      </div>
       <table style={tableStyle}>
         <thead>
           <tr>
+            {!readOnly && (
+              <th style={{ ...thStyle(false), cursor: "pointer", width: 30 }} onClick={toggleSelectAll}>
+                <input type="checkbox" checked={sortedRows.length > 0 && selected.size === sortedRows.length} onChange={toggleSelectAll} />
+              </th>
+            )}
             {columns.map((col, i) => (
               <th key={col.key} style={thStyle(dragIdx === i)}
                 draggable onDragStart={() => handleDragStart(i)}
@@ -187,7 +229,12 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
         </thead>
         <tbody>
           {sortedRows.map((row, idx) => (
-            <tr key={row.stock_name}>
+            <tr key={row.stock_name} style={selected.has(row.stock_name) ? { background: "#fff3e0" } : {}}>
+              {!readOnly && (
+                <td style={tdStyle}>
+                  <input type="checkbox" checked={selected.has(row.stock_name)} onChange={() => toggleSelect(row.stock_name)} />
+                </td>
+              )}
               {columns.map((col) => (
                 <td key={col.key} style={tdStyle}>{renderCell(col, row, idx)}</td>
               ))}
@@ -211,6 +258,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
 
           {rows.length > 0 && (
             <tr style={{ background: "#f5f5f5", fontWeight: "bold" }}>
+              {!readOnly && <td style={tdStyle}></td>}
               {columns.map((col, i) => {
                 const val = renderTotalCell(col);
                 if (col.key === "symbol") return <td key={col.key} style={tdStyle}>TOTAL</td>;
@@ -222,6 +270,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
 
           {!readOnly && (adding ? (
             <tr style={{ background: "#e8f5e9" }}>
+              <td style={tdStyle}></td>
               {columns.map((col) => {
                 if (col.key === "serial") return <td key={col.key} style={tdStyle}>—</td>;
                 if (col.key === "stock_name") return <td key={col.key} style={tdStyle}><input type="text" placeholder="Stock name" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ ...inputStyle, width: 140 }} /></td>;
@@ -237,7 +286,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
             </tr>
           ) : (
             <tr>
-              <td colSpan={columns.length + (readOnly ? 0 : 1)} style={{ ...tdStyle, textAlign: "center" }}>
+              <td colSpan={columns.length + (readOnly ? 0 : 2)} style={{ ...tdStyle, textAlign: "center" }}>
                 <button style={{ ...btnStyle, border: "1px solid #4CAF50", color: "#4CAF50", padding: "5px 14px" }} onClick={() => setAdding(true)}>+ Add Stock Manually</button>
               </td>
             </tr>

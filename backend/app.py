@@ -141,6 +141,17 @@ async def delete_portfolio_item(user_id: str, stock_name: str):
     return {"deleted": stock_name}
 
 
+@app.post("/portfolio/{user_id}/bulk-delete")
+async def bulk_delete_portfolio(user_id: str, stock_names: list[str]):
+    """Delete multiple stocks from user's portfolio."""
+    table = ddb.Table(PORTFOLIO_TABLE)
+    deleted = []
+    for sn in stock_names:
+        table.delete_item(Key={"user_id": user_id, "stock_name": sn})
+        deleted.append(sn)
+    return {"deleted": deleted, "count": len(deleted)}
+
+
 @app.put("/portfolio/{user_id}/{stock_name}")
 async def update_portfolio_item(
     user_id: str, stock_name: str,

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import UploadArea from "../components/UploadArea";
 import PortfolioTable from "../components/PortfolioTable";
-import { fetchPortfolio, uploadScreenshots, downloadCsv, deleteStock, updateStock, addStock, fetchPrices, fetchUploadStatus, requestShare, getMyShares, revokeShare } from "../services/api";
+import { fetchPortfolio, uploadScreenshots, downloadCsv, deleteStock, bulkDeleteStocks, updateStock, addStock, fetchPrices, fetchUploadStatus, requestShare, getMyShares, revokeShare } from "../services/api";
 
 const tabStyle = (active) => ({
   padding: "5px 14px", cursor: "pointer", border: "1px solid #ddd",
@@ -117,6 +117,13 @@ function Dashboard({ user }) {
   };
 
   const handleDelete = async (sn) => { try { await deleteStock(userId, sn); setMessage(`Deleted "${sn}"`); loadPortfolio(); } catch (e) { setMessage("Delete failed"); } };
+  const handleBulkDelete = async (stockNames) => {
+    try {
+      const result = await bulkDeleteStocks(userId, stockNames);
+      setMessage(`Deleted ${result.count} stock(s)`);
+      loadPortfolio();
+    } catch (e) { setMessage("Bulk delete failed"); }
+  };
   const handleUpdate = async (sn, q, a, cp) => { try { await updateStock(userId, sn, q, a, cp); setMessage(`Updated "${sn}"`); loadPortfolio(); } catch (e) { setMessage("Update failed"); } };
   const handleAdd = async (sn, q, a) => { try { const r = await addStock(userId, sn, q, a); setMessage(`Added "${sn}" (${r.symbol})`); loadPortfolio(); } catch (e) { setMessage("Add failed"); } };
   const handleDownloadCsv = async () => { try { await downloadCsv(userId); } catch (e) { setMessage("CSV download failed"); } };
@@ -176,7 +183,7 @@ function Dashboard({ user }) {
         </div>
       )}
 
-      <PortfolioTable data={filteredPortfolio} prices={prices} loading={loading} onDelete={handleDelete} onUpdate={handleUpdate} onAdd={handleAdd} />
+      <PortfolioTable data={filteredPortfolio} prices={prices} loading={loading} onDelete={handleDelete} onBulkDelete={handleBulkDelete} onUpdate={handleUpdate} onAdd={handleAdd} />
 
       {myShares.length > 0 && (
         <div style={{ marginTop: 30 }}>

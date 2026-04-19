@@ -45,6 +45,16 @@ export async function deleteStock(userId, stockName) {
   return res.json();
 }
 
+export async function bulkDeleteStocks(userId, stockNames) {
+  const res = await fetch(`${API_BASE}/portfolio/${userId}/bulk-delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(stockNames),
+  });
+  if (!res.ok) throw new Error("Bulk delete failed");
+  return res.json();
+}
+
 export async function updateStock(userId, stockName, quantity, avgBuyPrice, currentPrice) {
   const formData = new FormData();
   formData.append("quantity", quantity);
