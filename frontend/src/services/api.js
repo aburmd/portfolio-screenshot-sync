@@ -17,6 +17,19 @@ export async function uploadScreenshots(userId, files) {
   return res.json();
 }
 
+export async function addStock(userId, stockName, quantity, avgBuyPrice) {
+  const formData = new FormData();
+  formData.append("stock_name", stockName);
+  formData.append("quantity", quantity);
+  formData.append("avg_buy_price", avgBuyPrice);
+  const res = await fetch(`${API_BASE}/portfolio/${userId}/add`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error("Add failed");
+  return res.json();
+}
+
 export async function deleteStock(userId, stockName) {
   const res = await fetch(`${API_BASE}/portfolio/${userId}/${encodeURIComponent(stockName)}`, {
     method: "DELETE",

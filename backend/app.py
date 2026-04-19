@@ -60,6 +60,27 @@ async def get_portfolio(user_id: str):
     resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
     return _decimal_to_float(resp.get("Items", []))
 
+@app.post("/portfolio/{user_id}/add")
+async def add_portfolio_item(
+    user_id: str, stock_name: str = Form(...),
+    quantity: float = Form(...), avg_buy_price: float = Form(...),
+):
+    """Manually add a stock to portfolio."""
+    from decimal import Decimal
+    from common.symbol_lookup import lookup_symbol
+    symbol = lookup_symbol(stock_name) or "UNKNOWN"
+    table = ddb.Table(PORTFOLIO_TABLE)
+    table.put_item(Item={
+        "user_id": user_id,
+        "stock_name": stock_name,
+        "symbol": symbol,
+        "quantity": Decimal(str(quantity)),
+        "avg_buy_price": Decimal(str(avg_buy_price)),
+        "platform_name": "manual",
+        "uploaded_date": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+    })
+    return {"added": stock_name, "symbol": symbol}
+
 
 @app.delete("/portfolio/{user_id}/{stock_name}")
 async def delete_portfolio_item(user_id: str, stock_name: str):

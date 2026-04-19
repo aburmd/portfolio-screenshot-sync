@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import UploadArea from "../components/UploadArea";
 import PortfolioTable from "../components/PortfolioTable";
-import { fetchPortfolio, uploadScreenshots, downloadCsv, deleteStock, updateStock } from "../services/api";
+import { fetchPortfolio, uploadScreenshots, downloadCsv, deleteStock, updateStock, addStock } from "../services/api";
 
 function Dashboard({ user }) {
   const [portfolio, setPortfolio] = useState([]);
@@ -58,6 +58,16 @@ function Dashboard({ user }) {
     }
   };
 
+  const handleAdd = async (stockName, quantity, avgBuyPrice) => {
+    try {
+      const result = await addStock(userId, stockName, quantity, avgBuyPrice);
+      setMessage(`Added "${stockName}" (${result.symbol})`);
+      loadPortfolio();
+    } catch (e) {
+      setMessage("Add failed: " + e.message);
+    }
+  };
+
   const handleDownloadCsv = async () => {
     try {
       await downloadCsv(userId);
@@ -83,7 +93,7 @@ function Dashboard({ user }) {
         </div>
       </div>
 
-      <PortfolioTable data={portfolio} loading={loading} onDelete={handleDelete} onUpdate={handleUpdate} />
+      <PortfolioTable data={portfolio} loading={loading} onDelete={handleDelete} onUpdate={handleUpdate} onAdd={handleAdd} />
     </div>
   );
 }
