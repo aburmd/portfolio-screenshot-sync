@@ -23,8 +23,6 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
   const [sortDir, setSortDir] = useState("asc");
   const [priceOverrides, setPriceOverrides] = useState({});
 
-  if (loading) return <p>Loading...</p>;
-
   // Calculate derived values
   const rows = (data || []).map((row) => {
     const qty = row.quantity || 0;
@@ -70,7 +68,6 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
   const sortedRows = useMemo(() => {
     if (!sortCol) return rows;
     const sorted = [...rows];
-    // Add invPct and curPct for sorting
     sorted.forEach((r) => {
       r.invPct = totalInvested > 0 ? (r.invested / totalInvested) * 100 : 0;
       r.curPct = totalCurrent > 0 && r.currentAmt != null ? (r.currentAmt / totalCurrent) * 100 : null;
@@ -84,6 +81,8 @@ function PortfolioTable({ data, prices, loading, onDelete, onUpdate, onAdd, read
     });
     return sorted;
   }, [rows, sortCol, sortDir, totalInvested, totalCurrent]);
+
+  if (loading) return <p>Loading...</p>;
 
   const startEdit = (row) => {
     setEditingRow(row.stock_name);
