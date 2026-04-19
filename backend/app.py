@@ -46,11 +46,11 @@ def _decimal_to_float(items):
 # --- User endpoints ---
 
 @app.post("/upload")
-async def upload_screenshots(files: List[UploadFile] = File(...), user_id: str = Form(...)):
+async def upload_screenshots(files: List[UploadFile] = File(...), user_id: str = Form(...), platform: str = Form("unknown")):
     """Upload one or more screenshots to S3. Lambda triggers on each."""
     results = []
     for file in files:
-        key = f"uploads/{user_id}/{uuid.uuid4().hex[:8]}_{file.filename}"
+        key = f"uploads/{user_id}/{platform}/{uuid.uuid4().hex[:8]}_{file.filename}"
         content = await file.read()
         s3.put_object(Bucket=SCREENSHOTS_BUCKET, Key=key, Body=content, ContentType=file.content_type)
         results.append({"s3_key": key, "filename": file.filename})

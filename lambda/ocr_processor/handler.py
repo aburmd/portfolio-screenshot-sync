@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 
 from ocr.engine import extract_text_from_s3
-from parsers.parser_router import detect_broker, route_and_parse
+from parsers.parser_router import route_and_parse
 from common.ddb_utils import upsert_portfolio_item, update_upload_status
 from common.symbol_lookup import resolve_symbols
 
@@ -23,12 +23,20 @@ def lambda_handler(event: dict, context) -> dict:
         key = record["s3"]["object"]["key"]
         logger.info("Processing s3://%s/%s", bucket, key)
 
+        # Key format: uploads/{user_id}/{platform}/{filename}
         parts = key.split("/")
-        if len(parts) < 3 or parts[0] != "uploads":
-            logger.warning("Unexpected key format: %s", key)
-            continue
+        if len(parts) < 4 or parts[0] != "uploads":
+            # Fallback for old format: uploads/{user_id}/{filename}
+            if len(parts) >= 3 and parts[0] == "uploads":
+                user_id = parts[1]
+                platform = "unknown"
+            else:
+                logger.warning("Unexpected key format: %s", key)
+                continue
+        else:
+            user_id = parts[1]
+            platform = parts[2]
 
-        user_id = parts[1]
         upload_id = f"{user_id}_{parts[-1]}_{datetime.now(timezone.utc).isoformat()}"
 
         try:
@@ -37,8 +45,7 @@ def lambda_handler(event: dict, context) -> dict:
             raw_text = extract_text_from_s3(bucket, key)
             logger.info("Textract extracted %d chars", len(raw_text))
 
-            platform = detect_broker(raw_text, key)
-            stocks = route_and_parse(raw_text, key)
+            stocks = route_and_parse(raw_text, key, platform)
             stocks = resolve_symbols(stocks)
             logger.info("Parsed %d stocks from %s", len(stocks), platform)
 

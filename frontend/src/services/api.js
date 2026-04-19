@@ -6,9 +6,10 @@ export async function fetchPortfolio(userId) {
   return res.json();
 }
 
-export async function uploadScreenshots(userId, files) {
+export async function uploadScreenshots(userId, files, platform) {
   const formData = new FormData();
   formData.append("user_id", userId);
+  formData.append("platform", platform || "unknown");
   for (const file of files) {
     formData.append("files", file);
   }

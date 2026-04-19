@@ -3,6 +3,13 @@ import UploadArea from "../components/UploadArea";
 import PortfolioTable from "../components/PortfolioTable";
 import { fetchPortfolio, uploadScreenshots, downloadCsv, deleteStock, updateStock, addStock, fetchPrices, requestShare, getMyShares, revokeShare } from "../services/api";
 
+const tabStyle = (active) => ({
+  padding: "5px 14px", cursor: "pointer", border: "1px solid #ddd",
+  borderBottom: active ? "2px solid #1976d2" : "1px solid #ddd",
+  background: active ? "#fff" : "#f9f9f9", fontWeight: active ? "bold" : "normal",
+  fontSize: 12, borderRadius: "4px 4px 0 0", marginRight: 2,
+});
+
 function Dashboard({ user }) {
   const [portfolio, setPortfolio] = useState([]);
   const [prices, setPrices] = useState({});
@@ -12,6 +19,7 @@ function Dashboard({ user }) {
   const [shareEmail, setShareEmail] = useState("");
   const [showShare, setShowShare] = useState(false);
   const [myShares, setMyShares] = useState([]);
+  const [platformFilter, setPlatformFilter] = useState("all");
 
   const userId = user?.userId || user?.username;
 
@@ -34,12 +42,12 @@ function Dashboard({ user }) {
 
   useEffect(() => { loadPortfolio(); loadShares(); }, [loadPortfolio, loadShares]);
 
-  const handleUpload = async (files) => {
+  const handleUpload = async (files, platform) => {
     if (!userId || files.length === 0) return;
     setUploading(true); setMessage("");
     try {
-      const result = await uploadScreenshots(userId, files);
-      setMessage(`Uploaded ${result.uploaded} file(s). Processing...`);
+      const result = await uploadScreenshots(userId, files, platform);
+      setMessage(`Uploaded ${result.uploaded} file(s) for ${platform}. Processing...`);
       setTimeout(loadPortfolio, 5000);
     } catch (e) { setMessage("Upload failed: " + e.message); }
     setUploading(false);
@@ -57,11 +65,11 @@ function Dashboard({ user }) {
     else { setMessage(`Share request sent to ${shareEmail} (pending admin approval)`); setShareEmail(""); setShowShare(false); loadShares(); }
   };
 
-  const handleRevoke = async (viewerId) => {
-    await revokeShare(userId, viewerId);
-    setMessage("Share revoked");
-    loadShares();
-  };
+  const handleRevoke = async (viewerId) => { await revokeShare(userId, viewerId); setMessage("Share revoked"); loadShares(); };
+
+  // Get unique platforms for filter tabs
+  const platforms = [...new Set(portfolio.map((p) => p.platform_name).filter(Boolean))];
+  const filteredPortfolio = platformFilter === "all" ? portfolio : portfolio.filter((p) => p.platform_name === platformFilter);
 
   const statusLabel = (s) => {
     if (s === "pending_admin") return "⏳ Pending Admin";
@@ -94,15 +102,25 @@ function Dashboard({ user }) {
         </div>
       )}
 
-      <PortfolioTable data={portfolio} prices={prices} loading={loading} onDelete={handleDelete} onUpdate={handleUpdate} onAdd={handleAdd} />
+      {/* Platform filter tabs */}
+      {platforms.length > 1 && (
+        <div style={{ marginTop: 12 }}>
+          <button style={tabStyle(platformFilter === "all")} onClick={() => setPlatformFilter("all")}>All ({portfolio.length})</button>
+          {platforms.map((p) => (
+            <button key={p} style={tabStyle(platformFilter === p)} onClick={() => setPlatformFilter(p)}>
+              {p} ({portfolio.filter((s) => s.platform_name === p).length})
+            </button>
+          ))}
+        </div>
+      )}
+
+      <PortfolioTable data={filteredPortfolio} prices={prices} loading={loading} onDelete={handleDelete} onUpdate={handleUpdate} onAdd={handleAdd} />
 
       {myShares.length > 0 && (
         <div style={{ marginTop: 30 }}>
           <h4>My Shared Dashboards</h4>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>
-              <th style={th}>Shared With</th><th style={th}>Status</th><th style={th}>Action</th>
-            </tr></thead>
+            <thead><tr><th style={th}>Shared With</th><th style={th}>Status</th><th style={th}>Action</th></tr></thead>
             <tbody>
               {myShares.map((s) => (
                 <tr key={s.viewer_id}>
