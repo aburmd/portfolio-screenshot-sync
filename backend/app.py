@@ -10,6 +10,7 @@ from boto3.dynamodb.conditions import Key, Attr
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from mangum import Mangum
 
 import yfinance as yf
 
@@ -17,7 +18,7 @@ app = FastAPI(title="Portfolio Screenshot Sync")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -399,3 +400,7 @@ async def admin_share_respond(owner_id: str = Form(...), viewer_id: str = Form(.
         ExpressionAttributeValues={":s": new_status},
     )
     return {"status": new_status}
+
+
+# Lambda handler via Mangum
+handler = Mangum(app)
