@@ -3,12 +3,13 @@ import logging
 from typing import Optional
 
 from parsers.indmoney_parser import parse_indmoney
+from parsers.webull_parser import parse_webull
 
 logger = logging.getLogger(__name__)
 
 PARSER_REGISTRY = {
     "indmoney": parse_indmoney,
-    # "webull": parse_webull,       # TODO: add after sample screenshot
+    "webull": parse_webull,
     # "robinhood": parse_robinhood,
     # "fidelity": parse_fidelity,
 }
