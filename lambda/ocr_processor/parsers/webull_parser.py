@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 SKIP_LINES = {
     "stocks &", "options", "mkt value/", "qty", "open p&l", "last",
     "/avg price", "individual cash", "assets", "p&l", "orders",
-    "transfers", "history", "ai position", "watchlists", "markets",
+    "transfers", "history", "ai position", "ai position analvsis",
+    "ai position analysis", "position analysis", "watchlists", "markets",
     "account", "feeds", "menu", "try", "&", "—",
 }
 
@@ -104,6 +105,9 @@ def parse_webull(text: str) -> list[dict]:
 
             # Stock name: has 2+ letters, not purely numeric
             if re.search(r"[A-Za-z]{2,}", line) and not re.match(r"^[\d.,]+$", line):
+                # Skip UI chrome that leaked into block
+                if any(w in line.lower() for w in ["position", "analysis", "analvsis", "watchlist", "market", "account", "feed", "menu", "order", "transfer", "history"]):
+                    continue
                 stock_name = line
                 continue
 
