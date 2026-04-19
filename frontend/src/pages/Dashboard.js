@@ -47,8 +47,12 @@ function Dashboard({ user }) {
     setUploading(true); setMessage("");
     try {
       const result = await uploadScreenshots(userId, files, platform);
-      setMessage(`Uploaded ${result.uploaded} file(s) for ${platform}. Processing...`);
-      setTimeout(loadPortfolio, 5000);
+      setMessage(`Uploaded ${result.uploaded} file(s) for ${platform}. Processing... click Refresh in a few seconds.`);
+      // Auto-refresh after delay, then show count
+      setTimeout(async () => {
+        await loadPortfolio();
+        setMessage(`Uploaded ${result.uploaded} file(s) for ${platform}. Processing complete — check your portfolio below.`);
+      }, 6000);
     } catch (e) { setMessage("Upload failed: " + e.message); }
     setUploading(false);
   };
@@ -85,7 +89,7 @@ function Dashboard({ user }) {
       {message && <p style={{ color: "#666", marginTop: 10 }}>{message}</p>}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 30 }}>
-        <h3 style={{ margin: 0 }}>My Portfolio</h3>
+        <h3 style={{ margin: 0 }}>My Portfolio <span style={{ fontSize: 13, color: "#999", fontWeight: "normal" }}>({portfolio.length} stocks)</span></h3>
         <div>
           <button onClick={() => setShowShare(!showShare)} style={{ marginRight: 8 }}>🔗 Share</button>
           <button onClick={loadPortfolio} disabled={loading} style={{ marginRight: 8 }}>{loading ? "Loading..." : "Refresh"}</button>

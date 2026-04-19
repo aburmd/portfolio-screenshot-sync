@@ -11,7 +11,12 @@ logger = logging.getLogger(__name__)
 SKIP_PATTERNS = {
     "us stocks", "my stocks", "watchlist", "explore", "rewards", "sip",
     "orders", "invested", "current value", "market value",
+    "indstocks", "myind", "funds", "insta plus", "insta", "plus",
+    "hr", "ry", "sm",
 }
+
+# Known non-stock short words that OCR picks up
+SKIP_EXACT = {"t", "a", "i", "m", "x", "spdr", "drip", "etf", "inc", "ltd", "adr"}
 
 
 def _clean_number(s: str) -> Optional[float]:
@@ -24,20 +29,27 @@ def _clean_number(s: str) -> Optional[float]:
 
 
 def _is_stock_name(line: str) -> bool:
-    if not line or len(line.strip()) <= 2:
+    s = line.strip()
+    if not s or len(s) <= 4:
         return False
-    low = line.lower().strip()
-    if low in SKIP_PATTERNS or any(s in low for s in ["invite your", "when they join"]):
+    low = s.lower()
+    if low in SKIP_PATTERNS or low in SKIP_EXACT:
         return False
-    if not re.search(r"[A-Za-z]{2,}", line):
+    if any(skip in low for skip in ["invite your", "when they join", "pull down",
+                                     "indstocks", "myind", "insta plus"]):
         return False
-    if re.match(r"^[\d.,]+\s*Qty", line, re.IGNORECASE):
+    if not re.search(r"[A-Za-z]{2,}", s):
         return False
-    if re.match(r"Avg[:\s]", line, re.IGNORECASE):
+    if re.match(r"^[\d.,]+\s*Qty", s, re.IGNORECASE):
         return False
-    if re.match(r"^\$[\d,.]+", line):
+    if re.match(r"Avg[:\s]", s, re.IGNORECASE):
         return False
-    if re.match(r"^[\d.]+%$", line):
+    if re.match(r"^\$[\d,.]+", s):
+        return False
+    if re.match(r"^[\d.]+%$", s):
+        return False
+    # Skip lines that are all uppercase and <= 5 chars (likely ticker symbols, not names)
+    if re.match(r"^[A-Z]{1,5}$", s):
         return False
     return True
 
@@ -49,7 +61,6 @@ def _clean_stock_name(name: str) -> str:
 
 
 def _make_symbol(name: str) -> str:
-    """Placeholder — returns UNKNOWN. Real symbol comes from DDB lookup."""
     return "UNKNOWN"
 
 
@@ -83,6 +94,24 @@ def parse_indmoney(text: str) -> list[dict]:
                 continue
 
         if not qty or not avg:
+            # Try scanning further — sometimes Qty/Avg are in the next "false" block
+            # Look ahead up to 8 more lines past the block end
+            for line in lines[end:min(end + 8, len(lines))]:
+                if _is_stock_name(line):
+                    break
+                if not qty:
+                    m = re.match(r"([\d.]+)\s*Qty", line, re.IGNORECASE)
+                    if m:
+                        qty = _clean_number(m.group(1))
+                        continue
+                if not avg:
+                    m = re.match(r"Avg[:\s]*\$?([\d,.]+)", line, re.IGNORECASE)
+                    if m:
+                        avg = _clean_number(m.group(1))
+                        continue
+
+        if not qty or not avg:
+            logger.warning("Missing qty/avg for '%s', skipping", name)
             continue
 
         stocks.append({
@@ -92,4 +121,5 @@ def parse_indmoney(text: str) -> list[dict]:
             "avg_buy_price": avg,
         })
 
+    logger.info("Parsed %d stocks from INDmoney", len(stocks))
     return stocks
