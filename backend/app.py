@@ -116,14 +116,44 @@ async def get_prices(data: dict):
 
 @app.get("/exchange-rate/{from_currency}/{to_currency}")
 async def get_exchange_rate(from_currency: str, to_currency: str):
-    """Get live exchange rate using Yahoo Finance."""
+    """Get exchange rate. Cached in DDB for 24 hours."""
+    from datetime import datetime, timezone as tz
+    cache_key = f"{from_currency}_{to_currency}"
+    table = ddb.Table(PORTFOLIO_TABLE)
+
+    # Check cache (stored as a special record)
+    try:
+        resp = table.get_item(Key={"user_id": "__cache__", "stock_name": cache_key})
+        item = resp.get("Item")
+        if item:
+            cached_at = item.get("uploaded_date", "")
+            if cached_at:
+                from datetime import datetime as dt
+                age_hours = (dt.now(tz.utc) - dt.fromisoformat(cached_at)).total_seconds() / 3600
+                if age_hours < 24:
+                    return {"pair": f"{from_currency}/{to_currency}", "rate": float(item["avg_buy_price"]), "cached": True}
+    except Exception:
+        pass
+
+    # Fetch fresh rate
     try:
         pair = f"{from_currency}{to_currency}=X"
         ticker = yf.Ticker(pair)
         rate = ticker.fast_info.get("lastPrice") or ticker.fast_info.get("previousClose")
-        return {"pair": f"{from_currency}/{to_currency}", "rate": round(rate, 4) if rate else None}
+        if rate:
+            rate = round(rate, 4)
+            # Cache it
+            from decimal import Decimal
+            table.put_item(Item={
+                "user_id": "__cache__",
+                "stock_name": cache_key,
+                "avg_buy_price": Decimal(str(rate)),
+                "uploaded_date": datetime.now(tz.utc).isoformat(),
+            })
+            return {"pair": f"{from_currency}/{to_currency}", "rate": rate, "cached": False}
     except Exception:
-        return {"pair": f"{from_currency}/{to_currency}", "rate": None}
+        pass
+    return {"pair": f"{from_currency}/{to_currency}", "rate": None}
 
 @app.post("/portfolio/{user_id}/add")
 async def add_portfolio_item(

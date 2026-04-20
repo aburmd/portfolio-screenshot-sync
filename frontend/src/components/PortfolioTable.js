@@ -84,13 +84,18 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
     const pnl = currentAmt != null ? currentAmt - invested : null;
     const pnlPct = invested > 0 && pnl != null ? (pnl / invested) * 100 : null;
 
-    // Currency conversion for display in "All" tab
+    // Currency conversion for display
     let convRate = 1;
-    if (displayCurrency && exchangeRate && rowCurrency !== displayCurrency) {
+    let dispSymbol = rowCurrency === "INR" ? "₹" : "$";
+    if (displayCurrency && displayCurrency !== "default" && exchangeRate && rowCurrency !== displayCurrency) {
       if (rowCurrency === "INR" && displayCurrency === "USD") convRate = 1 / exchangeRate;
       else if (rowCurrency === "USD" && displayCurrency === "INR") convRate = exchangeRate;
+      dispSymbol = displayCurrency === "INR" ? "₹" : "$";
     }
-    const dispSymbol = (!displayCurrency || displayCurrency === rowCurrency) ? (rowCurrency === "INR" ? "₹" : "$") : (displayCurrency === "INR" ? "₹" : "$");
+    // If displayCurrency is set (not default), force the symbol
+    if (displayCurrency && displayCurrency !== "default") {
+      dispSymbol = displayCurrency === "INR" ? "₹" : "$";
+    }
 
     return { ...row, curPrice, invested, currentAmt, pnl, pnlPct, convRate, dispSymbol, rowCurrency };
   });
@@ -182,7 +187,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
     }
   };
 
-  const totalDispSymbol = displayCurrency === "INR" ? "₹" : "$";
+  const totalDispSymbol = (!displayCurrency || displayCurrency === "default") ? "$" : (displayCurrency === "INR" ? "₹" : "$");
 
   const renderTotalCell = (col) => {
     switch (col.key) {

@@ -51,8 +51,8 @@ function Dashboard({ user }) {
   const [platformFilter, setPlatformFilter] = useState("all");
   const [uploadStatus, setUploadStatus] = useState([]);
   const [showStatus, setShowStatus] = useState(false);
-  const [displayCurrency, setDisplayCurrency] = useState("USD");
-  const [exchangeRate, setExchangeRate] = useState(null); // INR per USD
+  const [displayCurrency, setDisplayCurrency] = useState("default");
+  const [exchangeRate, setExchangeRate] = useState(null);
   const pollRef = useRef(null);
 
   const userId = user?.userId || user?.username;
@@ -66,9 +66,8 @@ function Dashboard({ user }) {
       const usdSymbols = [...new Set(data.filter((d) => (!d.currency || d.currency === "USD") && d.symbol && d.symbol !== "UNKNOWN").map((d) => d.symbol))];
       const inrSymbols = [...new Set(data.filter((d) => d.currency === "INR" && d.symbol && d.symbol !== "UNKNOWN").map((d) => d.symbol))];
       if (usdSymbols.length > 0 || inrSymbols.length > 0) setPrices(await fetchPrices(usdSymbols, inrSymbols));
-      // Fetch exchange rate if we have mixed currencies
-      const hasMixed = data.some((d) => d.currency === "INR") && data.some((d) => !d.currency || d.currency === "USD");
-      if (hasMixed && !exchangeRate) {
+      // Always fetch exchange rate
+      if (!exchangeRate) {
         const rate = await fetchExchangeRate("USD", "INR");
         if (rate) setExchangeRate(rate);
       }
@@ -191,20 +190,27 @@ function Dashboard({ user }) {
               </button>
             ))}
           </div>
-          {platformFilter === "all" && exchangeRate && (
-            <div style={{ marginLeft: "auto", fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
-              <span>Show in:</span>
-              <button onClick={() => setDisplayCurrency("USD")} style={{ padding: "2px 8px", border: displayCurrency === "USD" ? "2px solid #1976d2" : "1px solid #ccc", borderRadius: 3, background: displayCurrency === "USD" ? "#e3f2fd" : "#fff", cursor: "pointer" }}>USD</button>
-              <button onClick={() => setDisplayCurrency("INR")} style={{ padding: "2px 8px", border: displayCurrency === "INR" ? "2px solid #1976d2" : "1px solid #ccc", borderRadius: 3, background: displayCurrency === "INR" ? "#e3f2fd" : "#fff", cursor: "pointer" }}>INR</button>
-              <span style={{ color: "#999" }}>1 USD = ₹{exchangeRate?.toFixed(2)}</span>
-            </div>
-          )}
+        </div>
+      )}
+
+      {/* Currency toggle - always visible */}
+      {exchangeRate && (
+        <div style={{ marginTop: 8, fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          <span>Currency:</span>
+          {["default", "USD", "INR"].map((c) => (
+            <button key={c} onClick={() => setDisplayCurrency(c)} style={{
+              padding: "3px 10px", border: displayCurrency === c ? "2px solid #1976d2" : "1px solid #ccc",
+              borderRadius: 3, background: displayCurrency === c ? "#e3f2fd" : "#fff",
+              cursor: "pointer", fontWeight: displayCurrency === c ? "bold" : "normal",
+            }}>{c === "default" ? "Default" : c}</button>
+          ))}
+          <span style={{ color: "#999", marginLeft: 4 }}>1 USD = ₹{exchangeRate?.toFixed(2)}</span>
         </div>
       )}
 
       <PortfolioTable data={filteredPortfolio} prices={prices} loading={loading}
         onDelete={handleDelete} onBulkDelete={handleBulkDelete} onUpdate={handleUpdate} onAdd={handleAdd}
-        displayCurrency={platformFilter === "all" ? displayCurrency : null}
+        displayCurrency={displayCurrency}
         exchangeRate={exchangeRate} />
 
       {myShares.length > 0 && (
