@@ -161,6 +161,7 @@ async def get_exchange_rate(from_currency: str, to_currency: str):
 async def add_portfolio_item(
     user_id: str, stock_name: str = Form(...),
     quantity: float = Form(...), avg_buy_price: float = Form(...),
+    platform: str = Form("manual"), currency: str = Form("USD"),
 ):
     """Manually add a stock to portfolio."""
     from decimal import Decimal
@@ -178,10 +179,11 @@ async def add_portfolio_item(
         "symbol": symbol,
         "quantity": Decimal(str(quantity)),
         "avg_buy_price": Decimal(str(avg_buy_price)),
-        "platform_name": "manual",
+        "platform_name": platform,
+        "currency": currency.upper(),
         "uploaded_date": datetime.now(tz.utc).isoformat(),
     })
-    return {"added": stock_name, "symbol": symbol}
+    return {"added": stock_name, "symbol": symbol, "platform": platform, "currency": currency}
 
 
 @app.delete("/portfolio/{user_id}/{stock_name}")

@@ -36,6 +36,8 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
   const [newName, setNewName] = useState("");
   const [newQty, setNewQty] = useState("");
   const [newAvg, setNewAvg] = useState("");
+  const [newPlatform, setNewPlatform] = useState("manual");
+  const [newCurrency, setNewCurrency] = useState("USD");
   const [sortCol, setSortCol] = useState(null);
   const [sortDir, setSortDir] = useState("asc");
   const [columns, setColumns] = useState(DEFAULT_COLUMNS);
@@ -160,7 +162,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
   const cancelEdit = () => setEditingRow(null);
   const saveEdit = (sn) => { onUpdate(sn, parseFloat(editQty), parseFloat(editAvg), editCurPrice.trim() ? parseFloat(editCurPrice) : null); setEditingRow(null); };
   const handleDelete = (sn) => { if (window.confirm(`Delete "${sn}"?`)) onDelete(sn); };
-  const handleAdd = () => { if (!newName.trim() || !newQty || !newAvg) return; onAdd(newName.trim(), parseFloat(newQty), parseFloat(newAvg)); setAdding(false); setNewName(""); setNewQty(""); setNewAvg(""); };
+  const handleAdd = () => { if (!newName.trim() || !newQty || !newAvg) return; onAdd(newName.trim(), parseFloat(newQty), parseFloat(newAvg), newPlatform, newCurrency); setAdding(false); setNewName(""); setNewQty(""); setNewAvg(""); setNewPlatform("manual"); setNewCurrency("USD"); };
 
   const sortArrow = (key) => sortCol !== key ? " ↕" : sortDir === "asc" ? " ↑" : " ↓";
 
@@ -301,6 +303,11 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
                 if (col.key === "stock_name") return <td key={col.key} style={tdStyle}><input type="text" placeholder="Stock name" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ ...inputStyle, width: 140 }} /></td>;
                 if (col.key === "quantity") return <td key={col.key} style={tdStyle}><input type="number" step="any" placeholder="Qty" value={newQty} onChange={(e) => setNewQty(e.target.value)} style={inputStyle} /></td>;
                 if (col.key === "avg_buy_price") return <td key={col.key} style={tdStyle}><input type="number" step="any" placeholder="Avg" value={newAvg} onChange={(e) => setNewAvg(e.target.value)} style={inputStyle} /></td>;
+                if (col.key === "platform_name") return <td key={col.key} style={tdStyle}>
+                  <select value={newPlatform} onChange={(e) => { setNewPlatform(e.target.value); setNewCurrency(e.target.value === "prostocks" ? "INR" : "USD"); }} style={{ ...inputStyle, width: 90 }}>
+                    <option value="manual">manual</option><option value="prostocks">prostocks</option><option value="INDmoney">INDmoney</option><option value="Webull">Webull</option><option value="Robinhood">Robinhood</option>
+                  </select>
+                </td>;
                 if (col.key === "symbol") return <td key={col.key} style={tdStyle}>
                   <button style={{ ...btnStyle, background: "#4CAF50", color: "#fff", border: "none" }} onClick={handleAdd} disabled={!newName.trim() || !newQty || !newAvg}>Save</button>
                   <button style={{ ...btnStyle, border: "1px solid #ccc" }} onClick={() => setAdding(false)}>✕</button>

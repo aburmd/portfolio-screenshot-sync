@@ -24,11 +24,13 @@ export async function uploadScreenshots(userId, files, platform) {
   return res.json();
 }
 
-export async function addStock(userId, stockName, quantity, avgBuyPrice) {
+export async function addStock(userId, stockName, quantity, avgBuyPrice, platform, currency) {
   const formData = new FormData();
   formData.append("stock_name", stockName);
   formData.append("quantity", quantity);
   formData.append("avg_buy_price", avgBuyPrice);
+  if (platform) formData.append("platform", platform);
+  if (currency) formData.append("currency", currency);
   const res = await fetch(`${API_BASE}/portfolio/${userId}/add`, {
     method: "POST",
     body: formData,
