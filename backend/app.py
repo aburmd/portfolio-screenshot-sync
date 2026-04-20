@@ -761,13 +761,32 @@ async def delete_cash_flow(user_id: str, sk: str):
 
 @app.get("/position-tracker/{user_id}/positions")
 async def get_positions(user_id: str):
-    """Get open + closed positions."""
+    """Get open + closed positions with live prices."""
     holdings_table = ddb.Table(PORTFOLIO_TABLE)
     txn_table = ddb.Table(TRANSACTIONS_TABLE)
 
     # Open positions = current holdings
     resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
-    open_positions = _decimal_to_float(resp.get("Items", []))
+    open_items = _decimal_to_float(resp.get("Items", []))
+
+    # Fetch live prices
+    usd_syms = [h["symbol"] for h in open_items if h.get("currency", "USD") == "USD" and h["symbol"] != "UNKNOWN"]
+    inr_syms = [h["symbol"] for h in open_items if h.get("currency") == "INR" and h["symbol"] != "UNKNOWN"]
+    live_prices = _fetch_live_prices(usd_syms, inr_syms)
+
+    total_invested = 0
+    total_current = 0
+    open_positions = []
+    for h in open_items:
+        invested = h["quantity"] * h["avg_buy_price"]
+        cur_price = live_prices.get(h["symbol"]) or h.get("current_price") or h["avg_buy_price"]
+        cur_value = h["quantity"] * cur_price
+        pnl = cur_value - invested
+        total_invested += invested
+        total_current += cur_value
+        open_positions.append({**h, "cur_price": cur_price, "cur_value": round(cur_value, 2),
+            "invested": round(invested, 2), "pnl": round(pnl, 2),
+            "pnl_pct": round(pnl / invested * 100, 2) if invested else 0})
 
     # Closed positions = SELL transactions
     txn_resp = txn_table.query(KeyConditionExpression=Key("user_id").eq(user_id), ScanIndexForward=False)
@@ -787,7 +806,16 @@ async def get_positions(user_id: str):
                 "platform": item["platform_ts_type"].split("#")[0],
             })
 
-    return {"open": open_positions, "closed": closed}
+    total_pnl = total_current - total_invested
+    return {
+        "open": open_positions, "closed": closed,
+        "summary": {
+            "total_invested": round(total_invested, 2),
+            "total_current": round(total_current, 2),
+            "total_pnl": round(total_pnl, 2),
+            "total_pnl_pct": round(total_pnl / total_invested * 100, 2) if total_invested else 0,
+        },
+    }
 
 
 @app.get("/position-tracker/{user_id}/xirr")

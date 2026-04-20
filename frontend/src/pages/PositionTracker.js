@@ -266,41 +266,61 @@ function CashFlowSection({ userId }) {
 
 // ==================== POSITIONS ====================
 function PositionsSection({ userId }) {
-  const [data, setData] = useState({ open: [], closed: [] });
+  const [data, setData] = useState({ open: [], closed: [], summary: {} });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => { setData(await fetchPositions(userId)); setLoading(false); })();
   }, [userId]);
 
-  if (loading) return <p>Loading...</p>;
+  if (loading) return <p>Loading positions (fetching live prices)...</p>;
+
+  const s = data.summary || {};
 
   return (
     <div>
       <h4>Open Positions ({data.open.length})</h4>
       {data.open.length > 0 ? (
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 20 }}>
-          <thead><tr style={{ background: "#e8f5e9" }}>
-            <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
-            <th style={{ padding: 6, textAlign: "left" }}>Name</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Qty</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Avg Buy</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Invested</th>
-            <th style={{ padding: 6, textAlign: "left" }}>Platform</th>
-          </tr></thead>
-          <tbody>
-            {data.open.map((p) => (
-              <tr key={p.stock_name}>
-                <td style={{ padding: 6, fontWeight: "bold" }}>{p.symbol}</td>
-                <td style={{ padding: 6 }}>{p.stock_name}</td>
-                <td style={{ padding: 6, textAlign: "right" }}>{p.quantity}</td>
-                <td style={{ padding: 6, textAlign: "right" }}>{fmt(p.avg_buy_price)}</td>
-                <td style={{ padding: 6, textAlign: "right" }}>{fmt(p.quantity * p.avg_buy_price)}</td>
-                <td style={{ padding: 6 }}>{p.platform_name}</td>
+        <>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 8 }}>
+            <thead><tr style={{ background: "#e8f5e9" }}>
+              <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
+              <th style={{ padding: 6, textAlign: "left" }}>Name</th>
+              <th style={{ padding: 6, textAlign: "right" }}>Qty</th>
+              <th style={{ padding: 6, textAlign: "right" }}>Avg Buy</th>
+              <th style={{ padding: 6, textAlign: "right" }}>Cur Price</th>
+              <th style={{ padding: 6, textAlign: "right" }}>Invested</th>
+              <th style={{ padding: 6, textAlign: "right" }}>Cur Value</th>
+              <th style={{ padding: 6, textAlign: "right" }}>P/L</th>
+              <th style={{ padding: 6, textAlign: "right" }}>P/L %</th>
+              <th style={{ padding: 6, textAlign: "left" }}>Platform</th>
+            </tr></thead>
+            <tbody>
+              {data.open.map((p) => (
+                <tr key={p.stock_name}>
+                  <td style={{ padding: 6, fontWeight: "bold" }}>{p.symbol}</td>
+                  <td style={{ padding: 6 }}>{p.stock_name}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{p.quantity}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{fmt(p.avg_buy_price)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{fmt(p.cur_price)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{fmt(p.invested)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{fmt(p.cur_value)}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: clr(p.pnl), fontWeight: "bold" }}>{fmt(p.pnl)}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: clr(p.pnl_pct) }}>{p.pnl_pct}%</td>
+                  <td style={{ padding: 6 }}>{p.platform_name}</td>
+                </tr>
+              ))}
+              <tr style={{ background: "#e8f5e9", fontWeight: "bold" }}>
+                <td colSpan={5} style={{ padding: 6 }}>TOTAL</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{fmt(s.total_invested)}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{fmt(s.total_current)}</td>
+                <td style={{ padding: 6, textAlign: "right", color: clr(s.total_pnl) }}>{fmt(s.total_pnl)}</td>
+                <td style={{ padding: 6, textAlign: "right", color: clr(s.total_pnl_pct) }}>{s.total_pnl_pct}%</td>
+                <td></td>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </>
       ) : <p style={{ color: "#999" }}>No open positions.</p>}
 
       <h4>Closed Positions ({data.closed.length})</h4>
