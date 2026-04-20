@@ -3,6 +3,7 @@ import json
 import os
 import logging
 from datetime import datetime, timezone
+from urllib.parse import unquote_plus
 
 from ocr.engine import extract_text_from_s3
 from parsers.parser_router import route_and_parse
@@ -20,7 +21,7 @@ UPLOADS_TABLE = os.environ.get("UPLOADS_TABLE", "")
 def lambda_handler(event: dict, context) -> dict:
     for record in event.get("Records", []):
         bucket = record["s3"]["bucket"]["name"]
-        key = record["s3"]["object"]["key"]
+        key = unquote_plus(record["s3"]["object"]["key"])
         logger.info("Processing s3://%s/%s", bucket, key)
 
         # Key format: uploads/{user_id}/{platform}/{filename}
