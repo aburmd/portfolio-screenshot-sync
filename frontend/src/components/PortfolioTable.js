@@ -187,7 +187,15 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
     }
   };
 
-  const totalDispSymbol = (!displayCurrency || displayCurrency === "default") ? "$" : (displayCurrency === "INR" ? "₹" : "$");
+  // Determine total display symbol based on displayCurrency or majority currency
+  const totalDispSymbol = (() => {
+    if (displayCurrency === "INR") return "₹";
+    if (displayCurrency === "USD") return "$";
+    // Default mode: if all rows are same currency, use that; otherwise $
+    const currencies = [...new Set(rows.map((r) => r.rowCurrency))];
+    if (currencies.length === 1) return currencies[0] === "INR" ? "₹" : "$";
+    return "$";
+  })();
 
   const renderTotalCell = (col) => {
     switch (col.key) {
