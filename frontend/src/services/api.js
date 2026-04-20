@@ -121,3 +121,38 @@ export async function viewerRespond(ownerId, viewerId, action) {
 export async function revokeShare(ownerId, viewerId) {
   const res = await fetch(`${API_BASE}/shares/${ownerId}/${viewerId}`, { method: "DELETE" }); return res.json();
 }
+
+// --- Position Tracker ---
+export async function freezePortfolio(userId) {
+  const res = await fetch(`${API_BASE}/position-tracker/${userId}/freeze`, { method: "POST" });
+  return res.json();
+}
+export async function fetchSnapshots(userId) {
+  const res = await fetch(`${API_BASE}/position-tracker/${userId}/snapshots`); return res.json();
+}
+export async function fetchDiff(userId, platform) {
+  const url = platform ? `${API_BASE}/position-tracker/${userId}/diff?platform=${platform}` : `${API_BASE}/position-tracker/${userId}/diff`;
+  const res = await fetch(url); return res.json();
+}
+export async function confirmSells(userId, data) {
+  const res = await fetch(`${API_BASE}/position-tracker/${userId}/confirm-sells`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  }); return res.json();
+}
+export async function addCashFlow(userId, data) {
+  const res = await fetch(`${API_BASE}/position-tracker/${userId}/cash-flow`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  }); return res.json();
+}
+export async function fetchCashFlows(userId) {
+  const res = await fetch(`${API_BASE}/position-tracker/${userId}/cash-flows`); return res.json();
+}
+export async function deleteCashFlow(userId, sk) {
+  const res = await fetch(`${API_BASE}/position-tracker/${userId}/cash-flow/${encodeURIComponent(sk)}`, { method: "DELETE" }); return res.json();
+}
+export async function fetchPositions(userId) {
+  const res = await fetch(`${API_BASE}/position-tracker/${userId}/positions`); return res.json();
+}
+export async function fetchXirr(userId) {
+  const res = await fetch(`${API_BASE}/position-tracker/${userId}/xirr`); return res.json();
+}

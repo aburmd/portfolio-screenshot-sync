@@ -7,6 +7,7 @@ import awsConfig from "./aws-config";
 import Dashboard from "./pages/Dashboard";
 import AdminPage from "./pages/AdminPage";
 import SharedWithMe from "./pages/SharedWithMe";
+import PositionTracker from "./pages/PositionTracker";
 
 Amplify.configure(awsConfig);
 
@@ -45,11 +46,13 @@ function AppContent({ signOut, user }) {
         <button style={tabStyle(page === "dashboard")} onClick={() => setPage("dashboard")}>Dashboard</button>
         <button style={tabStyle(page === "shared")} onClick={() => setPage("shared")}>Shared With Me</button>
         {isAdmin && <button style={tabStyle(page === "admin")} onClick={() => setPage("admin")}>Admin</button>}
+        {isAdmin && <button style={tabStyle(page === "tracker")} onClick={() => setPage("tracker")}>Position Tracker</button>}
       </nav>
 
       {page === "dashboard" && <Dashboard user={user} />}
       {page === "shared" && <SharedWithMe user={user} />}
       {page === "admin" && isAdmin && <AdminPage />}
+      {page === "tracker" && isAdmin && <PositionTracker user={user} />}
     </div>
   );
 }
