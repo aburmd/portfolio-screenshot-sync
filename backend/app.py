@@ -575,23 +575,32 @@ async def freeze_portfolio(user_id: str, data: dict = None):
                         "prev_qty": pq, "curr_qty": cq, "sold_qty": round(pq - cq, 6),
                         "prev_avg": prev["avg_buy_price"], "currency": curr["currency"], "needs_sold_price": True})
 
-        # Auto-create DEPOSIT on first freeze (total_invested = initial deposit)
+        # Auto-create DEPOSIT on first freeze ONLY if no cash flows exist for this platform
         if prev_date is None and total_inv > 0:
             txn_table = ddb.Table(TRANSACTIONS_TABLE)
-            currency = stocks[0].get("currency", "USD") if stocks else "USD"
-            deposit_date = initial_date or now[:10]
-            deposit_sk = f"{platform}#{now}#DEPOSIT"
-            txn_table.put_item(Item={
-                "user_id": user_id, "platform_ts_type": deposit_sk,
-                "type": "DEPOSIT",
-                "amount": Decimal(str(round(total_inv, 2))),
-                "currency": currency,
-                "date": deposit_date,
-            })
+            # Check if cash flows already exist for this platform
+            existing_cfs = txn_table.query(
+                KeyConditionExpression=Key("user_id").eq(user_id) & Key("platform_ts_type").begins_with(f"{platform}#"),
+                Limit=1,
+            )
+            if not existing_cfs.get("Items"):
+                currency = stocks[0].get("currency", "USD") if stocks else "USD"
+                deposit_date = initial_date or now[:10]
+                deposit_sk = f"{platform}#{now}#DEPOSIT"
+                txn_table.put_item(Item={
+                    "user_id": user_id, "platform_ts_type": deposit_sk,
+                    "type": "DEPOSIT",
+                    "amount": Decimal(str(round(total_inv, 2))),
+                    "currency": currency,
+                    "date": deposit_date,
+                })
+                auto_dep = round(total_inv, 2)
+            else:
+                auto_dep = None
 
         diffs.append({"platform": platform, "snapshot_date": now,
             "previous_snapshot_date": prev_date, "changes": changes,
-            "auto_deposit": round(total_inv, 2) if prev_date is None else None})
+            "auto_deposit": auto_dep if prev_date is None else None})
 
     return {"frozen": len(by_platform), "diffs": diffs}
 
