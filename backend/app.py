@@ -30,6 +30,8 @@ SYMBOL_MAP_TABLE = os.environ.get("SYMBOL_MAP_TABLE", "portfolio-symbol-map-dev"
 COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "us-west-1_DRjc1Cz3h")
 SHARES_TABLE = os.environ.get("SHARES_TABLE", "portfolio-shares-dev")
 UPLOADS_TABLE = os.environ.get("UPLOADS_TABLE", "portfolio-uploads-dev")
+SNAPSHOTS_TABLE = os.environ.get("SNAPSHOTS_TABLE", "portfolio-snapshots-dev")
+TRANSACTIONS_TABLE = os.environ.get("TRANSACTIONS_TABLE", "portfolio-transactions-dev")
 
 s3 = boto3.client("s3", region_name=REGION)
 ddb = boto3.resource("dynamodb", region_name=REGION)
@@ -485,6 +487,433 @@ async def admin_share_respond(owner_id: str = Form(...), viewer_id: str = Form(.
         ExpressionAttributeValues={":s": new_status},
     )
     return {"status": new_status}
+
+
+# --- Position Tracker endpoints (admin only) ---
+
+@app.post("/position-tracker/{user_id}/freeze")
+async def freeze_portfolio(user_id: str):
+    """Freeze current portfolio as snapshot, diff with last snapshot per platform."""
+    from datetime import datetime, timezone as tz
+    from decimal import Decimal
+
+    holdings_table = ddb.Table(PORTFOLIO_TABLE)
+    snap_table = ddb.Table(SNAPSHOTS_TABLE)
+
+    resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    items = _decimal_to_float(resp.get("Items", []))
+
+    # Group by platform
+    by_platform = {}
+    for item in items:
+        p = item.get("platform_name", "unknown")
+        by_platform.setdefault(p, []).append(item)
+
+    now = datetime.now(tz.utc).isoformat()
+    diffs = []
+
+    for platform, stocks in by_platform.items():
+        # Save snapshot
+        stock_list = [{
+            "symbol": s["symbol"], "stock_name": s["stock_name"],
+            "quantity": s["quantity"], "avg_buy_price": s["avg_buy_price"],
+            "currency": s.get("currency", "USD"),
+        } for s in stocks]
+        total_inv = sum(s["quantity"] * s["avg_buy_price"] for s in stocks)
+
+        sk = f"{platform}#{now}"
+        snap_table.put_item(Item={
+            "user_id": user_id, "platform_ts": sk,
+            "stocks": _to_decimal_list(stock_list),
+            "frozen_date": now, "total_invested": Decimal(str(round(total_inv, 2))),
+        })
+
+        # Find previous snapshot for this platform
+        prev_resp = snap_table.query(
+            KeyConditionExpression=Key("user_id").eq(user_id) & Key("platform_ts").begins_with(f"{platform}#"),
+            ScanIndexForward=False, Limit=2,
+        )
+        prev_items = prev_resp.get("Items", [])
+        # First item is the one we just saved, second is previous
+        prev_stocks = {}
+        prev_date = None
+        if len(prev_items) >= 2:
+            prev_snap = prev_items[1]
+            prev_date = prev_snap.get("frozen_date")
+            for s in prev_snap.get("stocks", []):
+                prev_stocks[s["symbol"]] = _decimal_map_to_float(s)
+
+        # Build diff
+        curr_by_sym = {s["symbol"]: s for s in stock_list}
+        changes = []
+        all_syms = set(list(curr_by_sym.keys()) + list(prev_stocks.keys()))
+        for sym in sorted(all_syms):
+            curr = curr_by_sym.get(sym)
+            prev = prev_stocks.get(sym)
+            if curr and not prev:
+                changes.append({"type": "ADDED", "symbol": sym, "stock_name": curr["stock_name"],
+                    "curr_qty": curr["quantity"], "curr_avg": curr["avg_buy_price"], "currency": curr["currency"]})
+            elif prev and not curr:
+                changes.append({"type": "REMOVED", "symbol": sym, "stock_name": prev["stock_name"],
+                    "prev_qty": prev["quantity"], "prev_avg": prev["avg_buy_price"],
+                    "currency": prev["currency"], "needs_sold_price": True})
+            elif curr and prev:
+                cq, pq = curr["quantity"], prev["quantity"]
+                if abs(cq - pq) < 0.0001:
+                    changes.append({"type": "UNCHANGED", "symbol": sym, "stock_name": curr["stock_name"],
+                        "qty": cq, "avg": curr["avg_buy_price"], "currency": curr["currency"]})
+                elif cq > pq:
+                    changes.append({"type": "INCREASED", "symbol": sym, "stock_name": curr["stock_name"],
+                        "prev_qty": pq, "curr_qty": cq, "curr_avg": curr["avg_buy_price"], "currency": curr["currency"]})
+                else:
+                    changes.append({"type": "DECREASED", "symbol": sym, "stock_name": curr["stock_name"],
+                        "prev_qty": pq, "curr_qty": cq, "sold_qty": round(pq - cq, 6),
+                        "prev_avg": prev["avg_buy_price"], "currency": curr["currency"], "needs_sold_price": True})
+
+        diffs.append({"platform": platform, "snapshot_date": now,
+            "previous_snapshot_date": prev_date, "changes": changes})
+
+    return {"frozen": len(by_platform), "diffs": diffs}
+
+
+@app.get("/position-tracker/{user_id}/snapshots")
+async def list_snapshots(user_id: str):
+    """List all snapshots for a user."""
+    table = ddb.Table(SNAPSHOTS_TABLE)
+    resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id), ScanIndexForward=False)
+    items = resp.get("Items", [])
+    result = []
+    for item in items:
+        sk = item["platform_ts"]
+        platform = sk.split("#")[0]
+        stocks = item.get("stocks", [])
+        result.append({
+            "platform_ts": sk, "platform": platform,
+            "frozen_date": item.get("frozen_date"),
+            "stock_count": len(stocks),
+            "total_invested": float(item.get("total_invested", 0)),
+        })
+    return result
+
+
+@app.get("/position-tracker/{user_id}/diff")
+async def get_diff(user_id: str, platform: str = None):
+    """Get diff between current portfolio and last snapshot."""
+    holdings_table = ddb.Table(PORTFOLIO_TABLE)
+    snap_table = ddb.Table(SNAPSHOTS_TABLE)
+
+    resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    items = _decimal_to_float(resp.get("Items", []))
+
+    by_platform = {}
+    for item in items:
+        p = item.get("platform_name", "unknown")
+        by_platform.setdefault(p, []).append(item)
+
+    platforms = [platform] if platform else list(by_platform.keys())
+    diffs = []
+
+    for plat in platforms:
+        curr_stocks = by_platform.get(plat, [])
+        curr_by_sym = {s["symbol"]: s for s in curr_stocks}
+
+        prev_resp = snap_table.query(
+            KeyConditionExpression=Key("user_id").eq(user_id) & Key("platform_ts").begins_with(f"{plat}#"),
+            ScanIndexForward=False, Limit=1,
+        )
+        prev_items = prev_resp.get("Items", [])
+        prev_stocks = {}
+        prev_date = None
+        if prev_items:
+            prev_date = prev_items[0].get("frozen_date")
+            for s in prev_items[0].get("stocks", []):
+                prev_stocks[s["symbol"]] = _decimal_map_to_float(s)
+
+        changes = []
+        all_syms = set(list(curr_by_sym.keys()) + list(prev_stocks.keys()))
+        for sym in sorted(all_syms):
+            curr = curr_by_sym.get(sym)
+            prev = prev_stocks.get(sym)
+            if curr and not prev:
+                changes.append({"type": "ADDED", "symbol": sym, "stock_name": curr["stock_name"],
+                    "curr_qty": curr["quantity"], "curr_avg": curr["avg_buy_price"], "currency": curr.get("currency", "USD")})
+            elif prev and not curr:
+                changes.append({"type": "REMOVED", "symbol": sym, "stock_name": prev["stock_name"],
+                    "prev_qty": prev["quantity"], "prev_avg": prev["avg_buy_price"],
+                    "currency": prev["currency"], "needs_sold_price": True})
+            elif curr and prev:
+                cq, pq = curr["quantity"], prev["quantity"]
+                if abs(cq - pq) < 0.0001:
+                    changes.append({"type": "UNCHANGED", "symbol": sym, "stock_name": curr["stock_name"],
+                        "qty": cq, "avg": curr["avg_buy_price"], "currency": curr.get("currency", "USD")})
+                elif cq > pq:
+                    changes.append({"type": "INCREASED", "symbol": sym, "stock_name": curr["stock_name"],
+                        "prev_qty": pq, "curr_qty": cq, "curr_avg": curr["avg_buy_price"], "currency": curr.get("currency", "USD")})
+                else:
+                    changes.append({"type": "DECREASED", "symbol": sym, "stock_name": curr["stock_name"],
+                        "prev_qty": pq, "curr_qty": cq, "sold_qty": round(pq - cq, 6),
+                        "prev_avg": prev["avg_buy_price"], "currency": curr.get("currency", "USD"), "needs_sold_price": True})
+
+        diffs.append({"platform": plat, "previous_snapshot_date": prev_date, "changes": changes})
+
+    return {"diffs": diffs}
+
+
+@app.post("/position-tracker/{user_id}/confirm-sells")
+async def confirm_sells(user_id: str, data: dict):
+    """Record sell transactions for removed/reduced stocks."""
+    from datetime import datetime, timezone as tz
+    from decimal import Decimal
+
+    txn_table = ddb.Table(TRANSACTIONS_TABLE)
+    platform = data.get("platform", "unknown")
+    sells = data.get("sells", [])
+    now = datetime.now(tz.utc)
+
+    recorded = []
+    for i, sell in enumerate(sells):
+        ts = (now.isoformat() + f"_{i:03d}")  # ensure unique SK
+        sk = f"{platform}#{ts}#SELL"
+        txn_table.put_item(Item={
+            "user_id": user_id, "platform_ts_type": sk,
+            "type": "SELL", "symbol": sell["symbol"],
+            "stock_name": sell.get("stock_name", ""),
+            "quantity": Decimal(str(sell["quantity"])),
+            "avg_buy_price": Decimal(str(sell["avg_buy_price"])),
+            "avg_sold_price": Decimal(str(sell["avg_sold_price"])),
+            "currency": sell.get("currency", "USD"),
+            "date": now.strftime("%Y-%m-%d"),
+        })
+        recorded.append(sell["symbol"])
+
+    return {"recorded": len(recorded), "symbols": recorded}
+
+
+@app.post("/position-tracker/{user_id}/cash-flow")
+async def add_cash_flow(user_id: str, data: dict):
+    """Add a deposit or withdrawal."""
+    from datetime import datetime, timezone as tz
+    from decimal import Decimal
+
+    txn_table = ddb.Table(TRANSACTIONS_TABLE)
+    now = datetime.now(tz.utc).isoformat()
+    cf_type = data.get("type", "DEPOSIT").upper()
+    platform = data.get("platform", "unknown")
+    sk = f"{platform}#{now}#{cf_type}"
+
+    txn_table.put_item(Item={
+        "user_id": user_id, "platform_ts_type": sk,
+        "type": cf_type,
+        "amount": Decimal(str(data["amount"])),
+        "currency": data.get("currency", "USD"),
+        "date": data.get("date", now[:10]),
+    })
+    return {"recorded": cf_type, "platform": platform, "amount": data["amount"]}
+
+
+@app.get("/position-tracker/{user_id}/cash-flows")
+async def list_cash_flows(user_id: str):
+    """List all cash flows (deposits + withdrawals)."""
+    table = ddb.Table(TRANSACTIONS_TABLE)
+    resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id), ScanIndexForward=False)
+    items = resp.get("Items", [])
+    result = []
+    for item in items:
+        t = item.get("type", "")
+        if t in ("DEPOSIT", "WITHDRAW"):
+            result.append({
+                "platform_ts_type": item["platform_ts_type"],
+                "platform": item["platform_ts_type"].split("#")[0],
+                "type": t,
+                "amount": float(item.get("amount", 0)),
+                "currency": item.get("currency", "USD"),
+                "date": item.get("date", ""),
+            })
+    return result
+
+
+@app.delete("/position-tracker/{user_id}/cash-flow/{sk}")
+async def delete_cash_flow(user_id: str, sk: str):
+    """Delete a cash flow entry."""
+    from urllib.parse import unquote
+    table = ddb.Table(TRANSACTIONS_TABLE)
+    table.delete_item(Key={"user_id": user_id, "platform_ts_type": unquote(sk)})
+    return {"deleted": True}
+
+
+@app.get("/position-tracker/{user_id}/positions")
+async def get_positions(user_id: str):
+    """Get open + closed positions."""
+    holdings_table = ddb.Table(PORTFOLIO_TABLE)
+    txn_table = ddb.Table(TRANSACTIONS_TABLE)
+
+    # Open positions = current holdings
+    resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    open_positions = _decimal_to_float(resp.get("Items", []))
+
+    # Closed positions = SELL transactions
+    txn_resp = txn_table.query(KeyConditionExpression=Key("user_id").eq(user_id), ScanIndexForward=False)
+    closed = []
+    for item in txn_resp.get("Items", []):
+        if item.get("type") == "SELL":
+            qty = float(item.get("quantity", 0))
+            buy = float(item.get("avg_buy_price", 0))
+            sell = float(item.get("avg_sold_price", 0))
+            closed.append({
+                "symbol": item.get("symbol"),
+                "stock_name": item.get("stock_name", ""),
+                "quantity": qty, "avg_buy_price": buy, "avg_sold_price": sell,
+                "realized_pnl": round((sell - buy) * qty, 2),
+                "currency": item.get("currency", "USD"),
+                "date": item.get("date", ""),
+                "platform": item["platform_ts_type"].split("#")[0],
+            })
+
+    return {"open": open_positions, "closed": closed}
+
+
+@app.get("/position-tracker/{user_id}/xirr")
+async def calculate_xirr(user_id: str):
+    """Calculate XIRR per platform + overall."""
+    from datetime import date, datetime
+
+    txn_table = ddb.Table(TRANSACTIONS_TABLE)
+    holdings_table = ddb.Table(PORTFOLIO_TABLE)
+
+    # Get all transactions
+    txn_resp = txn_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    txns = txn_resp.get("Items", [])
+
+    # Get current holdings
+    hold_resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    holdings = _decimal_to_float(hold_resp.get("Items", []))
+
+    # Build cash flows per platform
+    platform_cfs = {}  # platform -> [(amount, date)]
+    for txn in txns:
+        t = txn.get("type", "")
+        plat = txn["platform_ts_type"].split("#")[0]
+        d = _parse_date(txn.get("date", ""))
+        if not d:
+            continue
+        if t == "DEPOSIT":
+            platform_cfs.setdefault(plat, []).append((-float(txn["amount"]), d))
+        elif t == "WITHDRAW":
+            platform_cfs.setdefault(plat, []).append((float(txn["amount"]), d))
+        elif t == "SELL":
+            proceeds = float(txn["quantity"]) * float(txn["avg_sold_price"])
+            platform_cfs.setdefault(plat, []).append((proceeds, d))
+
+    # Current value per platform (using holdings — prices need to be fetched by frontend)
+    today = date.today()
+    hold_by_plat = {}
+    for h in holdings:
+        p = h.get("platform_name", "unknown")
+        hold_by_plat.setdefault(p, 0)
+        # Use current_price if set, otherwise qty*avg as fallback
+        if h.get("current_price"):
+            hold_by_plat[p] += h["quantity"] * h["current_price"]
+        else:
+            hold_by_plat[p] += h["quantity"] * h["avg_buy_price"]
+
+    results = []
+    all_cfs = []
+    for plat, cfs in platform_cfs.items():
+        cur_val = hold_by_plat.get(plat, 0)
+        if cur_val > 0:
+            cfs.append((cur_val, today))
+        xirr_val = _compute_xirr(cfs)
+        total_dep = sum(-cf for cf, _ in cfs if cf < 0)
+        total_wd = sum(cf for cf, d in cfs if cf > 0 and d != today)
+        results.append({
+            "platform": plat,
+            "xirr": xirr_val, "xirr_pct": f"{xirr_val * 100:.2f}%" if xirr_val is not None else "N/A",
+            "total_deposited": round(total_dep, 2),
+            "total_withdrawn": round(total_wd, 2),
+            "current_value": round(cur_val, 2),
+        })
+        all_cfs.extend(cfs)
+
+    overall_xirr = _compute_xirr(all_cfs) if all_cfs else None
+    overall_dep = sum(-cf for cf, _ in all_cfs if cf < 0)
+    overall_val = sum(hold_by_plat.values())
+
+    return {
+        "platforms": results,
+        "overall": {
+            "xirr": overall_xirr,
+            "xirr_pct": f"{overall_xirr * 100:.2f}%" if overall_xirr is not None else "N/A",
+            "total_deposited": round(overall_dep, 2),
+            "current_value": round(overall_val, 2),
+        },
+    }
+
+
+# --- Position Tracker helpers ---
+
+def _to_decimal_list(stock_list):
+    """Convert float values in stock list to Decimal for DDB."""
+    from decimal import Decimal
+    result = []
+    for s in stock_list:
+        result.append({
+            k: Decimal(str(v)) if isinstance(v, (int, float)) else v
+            for k, v in s.items()
+        })
+    return result
+
+
+def _decimal_map_to_float(m):
+    """Convert Decimal values in a map to float."""
+    return {k: float(v) if hasattr(v, "is_finite") else v for k, v in m.items()}
+
+
+def _parse_date(s):
+    """Parse date string to date object."""
+    from datetime import date, datetime
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s).date() if "T" in s else date.fromisoformat(s[:10])
+    except Exception:
+        return None
+
+
+def _compute_xirr(cash_flows):
+    """Compute XIRR from list of (amount, date) tuples. Returns float or None."""
+    if len(cash_flows) < 2:
+        return None
+    has_neg = any(cf < 0 for cf, _ in cash_flows)
+    has_pos = any(cf > 0 for cf, _ in cash_flows)
+    if not (has_neg and has_pos):
+        return None
+
+    from datetime import date
+    # Newton's method for XIRR
+    sorted_cfs = sorted(cash_flows, key=lambda x: x[1])
+    d0 = sorted_cfs[0][1]
+    days = [(cf, (d - d0).days / 365.25) for cf, d in sorted_cfs]
+
+    def npv(rate):
+        return sum(cf / (1 + rate) ** t for cf, t in days)
+
+    def dnpv(rate):
+        return sum(-t * cf / (1 + rate) ** (t + 1) for cf, t in days)
+
+    rate = 0.1  # initial guess
+    for _ in range(100):
+        n = npv(rate)
+        d = dnpv(rate)
+        if abs(d) < 1e-12:
+            break
+        new_rate = rate - n / d
+        if abs(new_rate - rate) < 1e-9:
+            return round(new_rate, 6)
+        rate = new_rate
+        if rate < -0.99:
+            rate = -0.99
+
+    return round(rate, 6) if abs(npv(rate)) < 1.0 else None
 
 
 # Lambda handler via Mangum
