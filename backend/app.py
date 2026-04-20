@@ -903,10 +903,15 @@ def _compute_xirr(cash_flows):
         return None
 
     from datetime import date
-    # Newton's method for XIRR
     sorted_cfs = sorted(cash_flows, key=lambda x: x[1])
     d0 = sorted_cfs[0][1]
     days = [(cf, (d - d0).days / 365.25) for cf, d in sorted_cfs]
+
+    # If all cash flows are on the same day, XIRR is undefined — return simple return
+    if all(t == 0 for _, t in days):
+        total_out = sum(cf for cf, _ in days if cf > 0)
+        total_in = sum(-cf for cf, _ in days if cf < 0)
+        return round((total_out / total_in - 1), 6) if total_in > 0 else None
 
     def npv(rate):
         return sum(cf / (1 + rate) ** t for cf, t in days)
@@ -914,7 +919,7 @@ def _compute_xirr(cash_flows):
     def dnpv(rate):
         return sum(-t * cf / (1 + rate) ** (t + 1) for cf, t in days)
 
-    rate = 0.1  # initial guess
+    rate = 0.1
     for _ in range(100):
         n = npv(rate)
         d = dnpv(rate)
