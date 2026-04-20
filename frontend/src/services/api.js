@@ -80,6 +80,13 @@ export async function fetchPrices(symbols) {
   return res.json();
 }
 
+export async function fetchExchangeRate(from_cur, to_cur) {
+  const res = await fetch(`${API_BASE}/exchange-rate/${from_cur}/${to_cur}`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.rate;
+}
+
 export async function downloadCsv(userId) {
   const res = await fetch(`${API_BASE}/portfolio/${userId}/csv`);
   if (!res.ok) throw new Error("CSV download failed");

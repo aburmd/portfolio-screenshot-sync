@@ -36,6 +36,7 @@ def upsert_portfolio_item(table_name: str, user_id: str, stock: dict, platform: 
         "quantity": Decimal(str(stock["quantity"])),
         "avg_buy_price": Decimal(str(stock["avg_buy_price"])),
         "platform_name": platform,
+        "currency": stock.get("currency", "USD"),
         "uploaded_date": datetime.now(timezone.utc).isoformat(),
     }
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import UploadArea from "../components/UploadArea";
 import PortfolioTable from "../components/PortfolioTable";
-import { fetchPortfolio, uploadScreenshots, downloadCsv, deleteStock, bulkDeleteStocks, updateStock, addStock, fetchPrices, fetchUploadStatus, requestShare, getMyShares, revokeShare } from "../services/api";
+import { fetchPortfolio, uploadScreenshots, downloadCsv, deleteStock, bulkDeleteStocks, updateStock, addStock, fetchPrices, fetchExchangeRate, fetchUploadStatus, requestShare, getMyShares, revokeShare } from "../services/api";
 
 const tabStyle = (active) => ({
   padding: "5px 14px", cursor: "pointer", border: "1px solid #ddd",
@@ -51,6 +51,8 @@ function Dashboard({ user }) {
   const [platformFilter, setPlatformFilter] = useState("all");
   const [uploadStatus, setUploadStatus] = useState([]);
   const [showStatus, setShowStatus] = useState(false);
+  const [displayCurrency, setDisplayCurrency] = useState("USD");
+  const [exchangeRate, setExchangeRate] = useState(null); // INR per USD
   const pollRef = useRef(null);
 
   const userId = user?.userId || user?.username;
@@ -63,9 +65,15 @@ function Dashboard({ user }) {
       setPortfolio(data);
       const symbols = [...new Set(data.map((d) => d.symbol).filter((s) => s && s !== "UNKNOWN"))];
       if (symbols.length > 0) setPrices(await fetchPrices(symbols));
+      // Fetch exchange rate if we have mixed currencies
+      const hasMixed = data.some((d) => d.currency === "INR") && data.some((d) => !d.currency || d.currency === "USD");
+      if (hasMixed && !exchangeRate) {
+        const rate = await fetchExchangeRate("USD", "INR");
+        if (rate) setExchangeRate(rate);
+      }
     } catch (e) { setMessage("Failed to load portfolio"); }
     setLoading(false);
-  }, [userId]);
+  }, [userId, exchangeRate]);
 
   const loadShares = useCallback(async () => {
     if (!userId) return;
@@ -173,17 +181,30 @@ function Dashboard({ user }) {
       )}
 
       {platforms.length > 1 && (
-        <div style={{ marginTop: 12 }}>
-          <button style={tabStyle(platformFilter === "all")} onClick={() => setPlatformFilter("all")}>All ({portfolio.length})</button>
-          {platforms.map((p) => (
-            <button key={p} style={tabStyle(platformFilter === p)} onClick={() => setPlatformFilter(p)}>
-              {p} ({portfolio.filter((s) => s.platform_name === p).length})
-            </button>
-          ))}
+        <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8 }}>
+          <div>
+            <button style={tabStyle(platformFilter === "all")} onClick={() => setPlatformFilter("all")}>All ({portfolio.length})</button>
+            {platforms.map((p) => (
+              <button key={p} style={tabStyle(platformFilter === p)} onClick={() => setPlatformFilter(p)}>
+                {p} ({portfolio.filter((s) => s.platform_name === p).length})
+              </button>
+            ))}
+          </div>
+          {platformFilter === "all" && exchangeRate && (
+            <div style={{ marginLeft: "auto", fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+              <span>Show in:</span>
+              <button onClick={() => setDisplayCurrency("USD")} style={{ padding: "2px 8px", border: displayCurrency === "USD" ? "2px solid #1976d2" : "1px solid #ccc", borderRadius: 3, background: displayCurrency === "USD" ? "#e3f2fd" : "#fff", cursor: "pointer" }}>USD</button>
+              <button onClick={() => setDisplayCurrency("INR")} style={{ padding: "2px 8px", border: displayCurrency === "INR" ? "2px solid #1976d2" : "1px solid #ccc", borderRadius: 3, background: displayCurrency === "INR" ? "#e3f2fd" : "#fff", cursor: "pointer" }}>INR</button>
+              <span style={{ color: "#999" }}>1 USD = ₹{exchangeRate?.toFixed(2)}</span>
+            </div>
+          )}
         </div>
       )}
 
-      <PortfolioTable data={filteredPortfolio} prices={prices} loading={loading} onDelete={handleDelete} onBulkDelete={handleBulkDelete} onUpdate={handleUpdate} onAdd={handleAdd} />
+      <PortfolioTable data={filteredPortfolio} prices={prices} loading={loading}
+        onDelete={handleDelete} onBulkDelete={handleBulkDelete} onUpdate={handleUpdate} onAdd={handleAdd}
+        displayCurrency={platformFilter === "all" ? displayCurrency : null}
+        exchangeRate={exchangeRate} />
 
       {myShares.length > 0 && (
         <div style={{ marginTop: 30 }}>

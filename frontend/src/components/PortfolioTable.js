@@ -27,7 +27,7 @@ const DEFAULT_COLUMNS = [
 
 const STORAGE_KEY = "portfolio_column_order";
 
-function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdate, onAdd, readOnly }) {
+function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdate, onAdd, readOnly, displayCurrency, exchangeRate }) {
   const [editingRow, setEditingRow] = useState(null);
   const [editQty, setEditQty] = useState("");
   const [editAvg, setEditAvg] = useState("");
@@ -73,20 +73,30 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
     setDragIdx(null);
   };
 
-  // Calculate derived values
+  // Calculate derived values with currency conversion for "All" tab
   const rows = (data || []).map((row) => {
     const qty = row.quantity || 0;
     const avg = row.avg_buy_price || 0;
+    const rowCurrency = row.currency || "USD";
     const curPrice = row.current_price || prices[row.symbol] || null;
     const invested = qty * avg;
     const currentAmt = curPrice != null ? qty * curPrice : null;
     const pnl = currentAmt != null ? currentAmt - invested : null;
     const pnlPct = invested > 0 && pnl != null ? (pnl / invested) * 100 : null;
-    return { ...row, curPrice, invested, currentAmt, pnl, pnlPct };
+
+    // Currency conversion for display in "All" tab
+    let convRate = 1;
+    if (displayCurrency && exchangeRate && rowCurrency !== displayCurrency) {
+      if (rowCurrency === "INR" && displayCurrency === "USD") convRate = 1 / exchangeRate;
+      else if (rowCurrency === "USD" && displayCurrency === "INR") convRate = exchangeRate;
+    }
+    const dispSymbol = (!displayCurrency || displayCurrency === rowCurrency) ? (rowCurrency === "INR" ? "₹" : "$") : (displayCurrency === "INR" ? "₹" : "$");
+
+    return { ...row, curPrice, invested, currentAmt, pnl, pnlPct, convRate, dispSymbol, rowCurrency };
   });
 
-  const totalInvested = rows.reduce((s, r) => s + r.invested, 0);
-  const totalCurrent = rows.reduce((s, r) => s + (r.currentAmt || 0), 0);
+  const totalInvested = rows.reduce((s, r) => s + r.invested * r.convRate, 0);
+  const totalCurrent = rows.reduce((s, r) => s + (r.currentAmt || 0) * r.convRate, 0);
   const totalPnl = totalCurrent - totalInvested;
   const totalPnlPct = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0;
 
@@ -159,11 +169,11 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
       case "symbol": return <><strong>{row.symbol}</strong>{row.symbol === "UNKNOWN" && <span style={{ color: "red", marginLeft: 2 }}>⚠</span>}</>;
       case "stock_name": return row.stock_name;
       case "quantity": return isEditing ? <input type="number" step="any" value={editQty} onChange={(e) => setEditQty(e.target.value)} style={inputStyle} /> : row.quantity;
-      case "avg_buy_price": return isEditing ? <input type="number" step="any" value={editAvg} onChange={(e) => setEditAvg(e.target.value)} style={inputStyle} /> : `$${fmt(row.avg_buy_price)}`;
-      case "curPrice": return isEditing ? <input type="number" step="any" value={editCurPrice} onChange={(e) => setEditCurPrice(e.target.value)} placeholder="auto" style={inputStyle} /> : <span>{row.curPrice != null ? `$${fmt(row.curPrice)}` : "—"}{row.current_price != null && <span style={{ color: "#f57c00", marginLeft: 2, fontSize: 10 }}>✎</span>}</span>;
-      case "invested": return `$${fmt(row.invested)}`;
-      case "currentAmt": return row.currentAmt != null ? `$${fmt(row.currentAmt)}` : "—";
-      case "pnl": return <span style={{ color: clr(row.pnl), fontWeight: "bold" }}>{row.pnl != null ? `$${fmt(row.pnl)}` : "—"}</span>;
+      case "avg_buy_price": return isEditing ? <input type="number" step="any" value={editAvg} onChange={(e) => setEditAvg(e.target.value)} style={inputStyle} /> : `${row.dispSymbol}${fmt(row.avg_buy_price * row.convRate)}`;
+      case "curPrice": return isEditing ? <input type="number" step="any" value={editCurPrice} onChange={(e) => setEditCurPrice(e.target.value)} placeholder="auto" style={inputStyle} /> : <span>{row.curPrice != null ? `${row.dispSymbol}${fmt(row.curPrice * row.convRate)}` : "—"}{row.current_price != null && <span style={{ color: "#f57c00", marginLeft: 2, fontSize: 10 }}>✎</span>}</span>;
+      case "invested": return `${row.dispSymbol}${fmt(row.invested * row.convRate)}`;
+      case "currentAmt": return row.currentAmt != null ? `${row.dispSymbol}${fmt(row.currentAmt * row.convRate)}` : "—";
+      case "pnl": return <span style={{ color: clr(row.pnl), fontWeight: "bold" }}>{row.pnl != null ? `${row.dispSymbol}${fmt(row.pnl * row.convRate)}` : "—"}</span>;
       case "pnlPct": return <span style={{ color: clr(row.pnlPct) }}>{pctFmt(row.pnlPct)}</span>;
       case "invPct": return pctFmt(invPct);
       case "curPct": return curPct != null ? pctFmt(curPct) : "—";
@@ -172,11 +182,13 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
     }
   };
 
+  const totalDispSymbol = displayCurrency === "INR" ? "₹" : "$";
+
   const renderTotalCell = (col) => {
     switch (col.key) {
-      case "invested": return `$${fmt(totalInvested)}`;
-      case "currentAmt": return `$${fmt(totalCurrent)}`;
-      case "pnl": return <span style={{ color: clr(totalPnl) }}>${fmt(totalPnl)}</span>;
+      case "invested": return `${totalDispSymbol}${fmt(totalInvested)}`;
+      case "currentAmt": return `${totalDispSymbol}${fmt(totalCurrent)}`;
+      case "pnl": return <span style={{ color: clr(totalPnl) }}>{totalDispSymbol}{fmt(totalPnl)}</span>;
       case "pnlPct": return <span style={{ color: clr(totalPnlPct) }}>{pctFmt(totalPnlPct)}</span>;
       case "invPct": return "100%";
       case "curPct": return "100%";

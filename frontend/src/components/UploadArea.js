@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 
-const PLATFORMS = ["INDmoney", "Webull", "Robinhood", "Fidelity"];
+const PLATFORMS = ["INDmoney", "Webull", "Robinhood", "Fidelity", "ProStocks"];
 
 const dropStyle = {
   border: "2px dashed #aaa", borderRadius: 8, padding: 30,

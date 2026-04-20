@@ -106,6 +106,18 @@ async def get_prices(symbols: list[str]):
     except Exception:
         return {}
 
+
+@app.get("/exchange-rate/{from_currency}/{to_currency}")
+async def get_exchange_rate(from_currency: str, to_currency: str):
+    """Get live exchange rate using Yahoo Finance."""
+    try:
+        pair = f"{from_currency}{to_currency}=X"
+        ticker = yf.Ticker(pair)
+        rate = ticker.fast_info.get("lastPrice") or ticker.fast_info.get("previousClose")
+        return {"pair": f"{from_currency}/{to_currency}", "rate": round(rate, 4) if rate else None}
+    except Exception:
+        return {"pair": f"{from_currency}/{to_currency}", "rate": None}
+
 @app.post("/portfolio/{user_id}/add")
 async def add_portfolio_item(
     user_id: str, stock_name: str = Form(...),

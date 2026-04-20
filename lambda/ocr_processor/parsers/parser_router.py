@@ -5,6 +5,7 @@ from typing import Optional
 from parsers.indmoney_parser import parse_indmoney
 from parsers.webull_parser import parse_webull
 from parsers.robinhood_parser import parse_robinhood
+from parsers.prostocks_parser import parse_prostocks
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,7 @@ PARSER_REGISTRY = {
     "indmoney": parse_indmoney,
     "webull": parse_webull,
     "robinhood": parse_robinhood,
+    "prostocks": parse_prostocks,
     # "fidelity": parse_fidelity,
 }
 
