@@ -492,10 +492,13 @@ async def admin_share_respond(owner_id: str = Form(...), viewer_id: str = Form(.
 # --- Position Tracker endpoints (admin only) ---
 
 @app.post("/position-tracker/{user_id}/freeze")
-async def freeze_portfolio(user_id: str):
+async def freeze_portfolio(user_id: str, data: dict = None):
     """Freeze current portfolio as snapshot, diff with last snapshot per platform."""
     from datetime import datetime, timezone as tz
     from decimal import Decimal
+
+    data = data or {}
+    initial_date = data.get("initial_date")  # optional: date for auto-deposit on first freeze
 
     holdings_table = ddb.Table(PORTFOLIO_TABLE)
     snap_table = ddb.Table(SNAPSHOTS_TABLE)
@@ -574,13 +577,14 @@ async def freeze_portfolio(user_id: str):
         if prev_date is None and total_inv > 0:
             txn_table = ddb.Table(TRANSACTIONS_TABLE)
             currency = stocks[0].get("currency", "USD") if stocks else "USD"
+            deposit_date = initial_date or now[:10]
             deposit_sk = f"{platform}#{now}#DEPOSIT"
             txn_table.put_item(Item={
                 "user_id": user_id, "platform_ts_type": deposit_sk,
                 "type": "DEPOSIT",
                 "amount": Decimal(str(round(total_inv, 2))),
                 "currency": currency,
-                "date": now[:10],
+                "date": deposit_date,
             })
 
         diffs.append({"platform": platform, "snapshot_date": now,
@@ -818,17 +822,21 @@ async def calculate_xirr(user_id: str):
             proceeds = float(txn["quantity"]) * float(txn["avg_sold_price"])
             platform_cfs.setdefault(plat, []).append((proceeds, d))
 
-    # Current value per platform (using holdings — prices need to be fetched by frontend)
+    # Current value per platform — fetch live prices for accurate XIRR
     today = date.today()
     hold_by_plat = {}
+
+    # Collect symbols by currency for price fetch
+    usd_syms = [h["symbol"] for h in holdings if h.get("currency", "USD") == "USD" and h["symbol"] != "UNKNOWN"]
+    inr_syms = [h["symbol"] for h in holdings if h.get("currency") == "INR" and h["symbol"] != "UNKNOWN"]
+    live_prices = _fetch_live_prices(usd_syms, inr_syms)
+
     for h in holdings:
         p = h.get("platform_name", "unknown")
         hold_by_plat.setdefault(p, 0)
-        # Use current_price if set, otherwise qty*avg as fallback
-        if h.get("current_price"):
-            hold_by_plat[p] += h["quantity"] * h["current_price"]
-        else:
-            hold_by_plat[p] += h["quantity"] * h["avg_buy_price"]
+        sym = h["symbol"]
+        price = live_prices.get(sym) or h.get("current_price") or h["avg_buy_price"]
+        hold_by_plat[p] += h["quantity"] * price
 
     results = []
     all_cfs = []
@@ -864,6 +872,31 @@ async def calculate_xirr(user_id: str):
 
 
 # --- Position Tracker helpers ---
+
+def _fetch_live_prices(usd_symbols, inr_symbols):
+    """Fetch live prices from Yahoo Finance. Returns {symbol: price}."""
+    all_yf = [s for s in usd_symbols if s] + [f"{s}.NS" for s in inr_symbols if s]
+    if not all_yf:
+        return {}
+    try:
+        tickers = yf.Tickers(" ".join(all_yf))
+        prices = {}
+        for sym in usd_symbols:
+            try:
+                info = tickers.tickers[sym].fast_info
+                prices[sym] = round(info.get("lastPrice", 0) or info.get("previousClose", 0), 2)
+            except Exception:
+                pass
+        for sym in inr_symbols:
+            try:
+                info = tickers.tickers[f"{sym}.NS"].fast_info
+                prices[sym] = round(info.get("lastPrice", 0) or info.get("previousClose", 0), 2)
+            except Exception:
+                pass
+        return prices
+    except Exception:
+        return {}
+
 
 def _to_decimal_list(stock_list):
     """Convert float values in stock list to Decimal for DDB."""

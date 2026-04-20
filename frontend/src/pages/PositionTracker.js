@@ -41,10 +41,13 @@ function FreezeSection({ userId }) {
   const [snapshots, setSnapshots] = useState([]);
   const [soldPrices, setSoldPrices] = useState({});
   const [confirming, setConfirming] = useState(false);
+  const [initialDate, setInitialDate] = useState(new Date().toISOString().slice(0, 10));
+  const [hasSnapshots, setHasSnapshots] = useState(false);
 
   const loadSnapshots = useCallback(async () => {
     const data = await fetchSnapshots(userId);
     setSnapshots(data);
+    setHasSnapshots(data.length > 0);
   }, [userId]);
 
   useEffect(() => { loadSnapshots(); }, [loadSnapshots]);
@@ -52,7 +55,7 @@ function FreezeSection({ userId }) {
   const handleFreeze = async () => {
     setLoading(true);
     try {
-      const result = await freezePortfolio(userId);
+      const result = await freezePortfolio(userId, hasSnapshots ? null : initialDate);
       setDiffs(result.diffs || []);
       setSoldPrices({});
       loadSnapshots();
@@ -91,7 +94,12 @@ function FreezeSection({ userId }) {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "flex-end" }}>
+        {!hasSnapshots && (
+          <label style={{ fontSize: 12 }}>Initial Investment Date<br />
+            <input type="date" value={initialDate} onChange={(e) => setInitialDate(e.target.value)} style={{ padding: 4 }} />
+          </label>
+        )}
         <button style={btnPrimary} onClick={handleFreeze} disabled={loading}>
           {loading ? "Freezing..." : "🔒 Freeze Portfolio"}
         </button>
@@ -105,6 +113,7 @@ function FreezeSection({ userId }) {
             <h4 style={{ margin: "0 0 8px" }}>{diff.platform}</h4>
             <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
               Snapshot: {diff.snapshot_date || "just now"} | Previous: {diff.previous_snapshot_date || "none (first freeze)"}
+              {diff.auto_deposit != null && <span style={{ color: "#1976d2", marginLeft: 8 }}>💰 Auto-deposit: {fmt(diff.auto_deposit)}</span>}
             </p>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
@@ -336,7 +345,7 @@ function XirrSection({ userId }) {
     (async () => { setData(await fetchXirr(userId)); setLoading(false); })();
   }, [userId]);
 
-  if (loading) return <p>Calculating XIRR...</p>;
+  if (loading) return <p>Calculating XIRR (fetching live prices)...</p>;
   if (!data) return <p>Failed to load XIRR.</p>;
 
   return (
