@@ -63,8 +63,9 @@ function Dashboard({ user }) {
     try {
       const data = await fetchPortfolio(userId);
       setPortfolio(data);
-      const symbols = [...new Set(data.map((d) => d.symbol).filter((s) => s && s !== "UNKNOWN"))];
-      if (symbols.length > 0) setPrices(await fetchPrices(symbols));
+      const usdSymbols = [...new Set(data.filter((d) => (!d.currency || d.currency === "USD") && d.symbol && d.symbol !== "UNKNOWN").map((d) => d.symbol))];
+      const inrSymbols = [...new Set(data.filter((d) => d.currency === "INR" && d.symbol && d.symbol !== "UNKNOWN").map((d) => d.symbol))];
+      if (usdSymbols.length > 0 || inrSymbols.length > 0) setPrices(await fetchPrices(usdSymbols, inrSymbols));
       // Fetch exchange rate if we have mixed currencies
       const hasMixed = data.some((d) => d.currency === "INR") && data.some((d) => !d.currency || d.currency === "USD");
       if (hasMixed && !exchangeRate) {

@@ -85,20 +85,27 @@ async def get_portfolio(user_id: str):
 
 
 @app.post("/prices")
-async def get_prices(symbols: list[str]):
-    """Fetch current prices for a list of ticker symbols via Yahoo Finance."""
-    if not symbols:
+async def get_prices(data: dict):
+    """Fetch current prices. USD symbols as-is, INR symbols with .NS suffix."""
+    usd_symbols = [s for s in data.get("symbols", []) if s and s != "UNKNOWN"]
+    inr_symbols = [s for s in data.get("inr_symbols", []) if s and s != "UNKNOWN"]
+
+    all_yf_symbols = usd_symbols + [f"{s}.NS" for s in inr_symbols]
+    if not all_yf_symbols:
         return {}
-    # Filter out UNKNOWN and empty
-    valid = [s for s in symbols if s and s != "UNKNOWN"]
-    if not valid:
-        return {}
+
     try:
-        tickers = yf.Tickers(" ".join(valid))
+        tickers = yf.Tickers(" ".join(all_yf_symbols))
         prices = {}
-        for sym in valid:
+        for sym in usd_symbols:
             try:
                 info = tickers.tickers[sym].fast_info
+                prices[sym] = round(info.get("lastPrice", 0) or info.get("previousClose", 0), 2)
+            except Exception:
+                prices[sym] = None
+        for sym in inr_symbols:
+            try:
+                info = tickers.tickers[f"{sym}.NS"].fast_info
                 prices[sym] = round(info.get("lastPrice", 0) or info.get("previousClose", 0), 2)
             except Exception:
                 prices[sym] = None

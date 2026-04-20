@@ -70,11 +70,11 @@ export async function updateStock(userId, stockName, quantity, avgBuyPrice, curr
   return res.json();
 }
 
-export async function fetchPrices(symbols) {
+export async function fetchPrices(symbols, inrSymbols) {
   const res = await fetch(`${API_BASE}/prices`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(symbols),
+    body: JSON.stringify({ symbols: symbols || [], inr_symbols: inrSymbols || [] }),
   });
   if (!res.ok) return {};
   return res.json();
