@@ -570,8 +570,22 @@ async def freeze_portfolio(user_id: str):
                         "prev_qty": pq, "curr_qty": cq, "sold_qty": round(pq - cq, 6),
                         "prev_avg": prev["avg_buy_price"], "currency": curr["currency"], "needs_sold_price": True})
 
+        # Auto-create DEPOSIT on first freeze (total_invested = initial deposit)
+        if prev_date is None and total_inv > 0:
+            txn_table = ddb.Table(TRANSACTIONS_TABLE)
+            currency = stocks[0].get("currency", "USD") if stocks else "USD"
+            deposit_sk = f"{platform}#{now}#DEPOSIT"
+            txn_table.put_item(Item={
+                "user_id": user_id, "platform_ts_type": deposit_sk,
+                "type": "DEPOSIT",
+                "amount": Decimal(str(round(total_inv, 2))),
+                "currency": currency,
+                "date": now[:10],
+            })
+
         diffs.append({"platform": platform, "snapshot_date": now,
-            "previous_snapshot_date": prev_date, "changes": changes})
+            "previous_snapshot_date": prev_date, "changes": changes,
+            "auto_deposit": round(total_inv, 2) if prev_date is None else None})
 
     return {"frozen": len(by_platform), "diffs": diffs}
 
