@@ -1321,9 +1321,13 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
     start_val = data_points[0]["value"] if data_points else 0
     end_val = data_points[-1]["value"] if data_points else 0
 
-    # Period gain = simply end - start (values already include cash, so
-    # buying stocks moves money from cash to stocks with no net change)
-    period_gain = round(end_val - start_val, 2)
+    # Period gain = market movement only (strip out deposits/withdrawals during period)
+    period_deposits = sum(float(t.get("amount", 0)) for t in all_txn_items
+        if t.get("type") == "DEPOSIT" and sd.isoformat() <= t.get("date", "") <= ed.isoformat())
+    period_withdrawals = sum(float(t.get("amount", 0)) for t in all_txn_items
+        if t.get("type") == "WITHDRAW" and sd.isoformat() <= t.get("date", "") <= ed.isoformat())
+    period_net_cashflow = round(period_deposits - period_withdrawals, 2)
+    period_gain = round(end_val - start_val - period_net_cashflow, 2)
     period_gain_pct = round(period_gain / start_val * 100, 2) if start_val else 0
 
     # All-time P/L from cash flows
