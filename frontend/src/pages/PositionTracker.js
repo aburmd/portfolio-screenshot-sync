@@ -528,7 +528,6 @@ function PerformanceSection({ userId }) {
             <span style={{ fontSize: 18, fontWeight: "bold", color: clr(s.period_gain) }}>
               {s.period_gain >= 0 ? "+" : ""}{cur}{fmt(s.period_gain)} ({s.period_gain_pct >= 0 ? "+" : ""}{s.period_gain_pct}%)
             </span>
-            {s.period_lot_cost > 0 && <div style={{ fontSize: 11, color: "#999" }}>New buys: {cur}{fmt(s.period_lot_cost)}</div>}
           </div>
           <div style={{ borderLeft: "1px solid #ccc", paddingLeft: 16 }}>
             <span style={{ fontSize: 12, color: "#666" }}>All-Time P/L</span><br />

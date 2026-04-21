@@ -1273,18 +1273,12 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
         currencies.add(item.get("currency", "USD"))
     currency = "INR" if "INR" in currencies and len(currencies) == 1 else "USD"
 
-    start_val = data_points[0]["value"] if data_points else 0
-    end_val = data_points[-1]["value"] if data_points else 0
-
     # Build cash balance timeline
-    # Cash = cumulative deposits - cumulative withdrawals - cumulative lot purchases
-    # at each date
     lots_table = ddb.Table(BUY_LOTS_TABLE)
     lots_resp = lots_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
     lots_items = _decimal_to_float(lots_resp.get("Items", []))
 
-    # Build sorted events: deposits, withdrawals, lot buys
-    cash_events = []  # (date, amount_change)
+    cash_events = []
     for t in all_txn_items:
         d = t.get("date", "")
         if not d:
@@ -1294,13 +1288,12 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
         elif t.get("type") == "WITHDRAW":
             cash_events.append((d, -float(t.get("amount", 0))))
 
-    lot_events = []  # (date, cost)
+    lot_events = []
     for l in lots_items:
         d = l.get("buy_date", "")
         if d:
             lot_events.append((d, l["quantity"] * l["buy_price"]))
 
-    # Compute cash balance at each chart date
     cash_events.sort()
     lot_events.sort()
 
@@ -1316,7 +1309,7 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
                 cash -= cost
             else:
                 break
-        return max(cash, 0)  # cash can't go negative in display
+        return max(cash, 0)
 
     # Add cash balance to each data point
     for dp in data_points:
@@ -1324,23 +1317,16 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
         dp["cash"] = round(cash_at_date(dp["date"]), 2)
         dp["value"] = round(dp["stock_value"] + dp["cash"], 2)
 
-    # Period gain using lot costs
-    period_lot_cost = sum(
-        l["quantity"] * l["buy_price"]
-        for l in lots_items
-        if sd.isoformat() <= l.get("buy_date", "") <= ed.isoformat()
-    )
-    period_lot_cost = round(period_lot_cost, 2)
+    # Summary (after cash is added to values)
+    start_val = data_points[0]["value"] if data_points else 0
+    end_val = data_points[-1]["value"] if data_points else 0
 
-    # Period gain = value change minus cost of new stock purchases
-    period_gain = round(end_val - start_val - period_lot_cost, 2)
-    period_base = start_val + period_lot_cost
-    period_gain_pct = round(period_gain / period_base * 100, 2) if period_base else 0
+    # Period gain = simply end - start (values already include cash, so
+    # buying stocks moves money from cash to stocks with no net change)
+    period_gain = round(end_val - start_val, 2)
+    period_gain_pct = round(period_gain / start_val * 100, 2) if start_val else 0
 
     # All-time P/L from cash flows
-    total_deposits = sum(float(t.get("amount", 0)) for t in all_txn_items if t.get("type") == "DEPOSIT")
-    total_withdrawals = sum(float(t.get("amount", 0)) for t in all_txn_items if t.get("type") == "WITHDRAW")
-    net_invested = round(total_deposits - total_withdrawals, 2)
     true_pnl = round(end_val - net_invested, 2)
     true_pnl_pct = round(true_pnl / net_invested * 100, 2) if net_invested else 0
 
@@ -1351,7 +1337,6 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
         "summary": {
             "start_value": start_val, "end_value": end_val,
             "period_gain": period_gain, "period_gain_pct": period_gain_pct,
-            "period_lot_cost": period_lot_cost,
             "net_invested": net_invested, "true_pnl": true_pnl, "true_pnl_pct": true_pnl_pct,
         },
     }
