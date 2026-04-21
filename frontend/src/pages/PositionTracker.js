@@ -521,7 +521,7 @@ function PerformanceSection({ userId }) {
 
       {/* Summary card */}
       {chartData && chartData.data_points.length > 0 && (
-        <div style={{ ...card, display: "flex", gap: 24, flexWrap: "wrap", background: isPositive ? "#e8f5e9" : "#ffebee" }}>
+        <div style={{ ...card, display: "flex", gap: 20, flexWrap: "wrap", background: isPositive ? "#e8f5e9" : "#ffebee" }}>
           <div><span style={{ fontSize: 12, color: "#666" }}>Start Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.start_value)}</span></div>
           <div><span style={{ fontSize: 12, color: "#666" }}>End Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.end_value)}</span></div>
           <div><span style={{ fontSize: 12, color: "#666" }}>Period Gain</span><br />
@@ -532,6 +532,18 @@ function PerformanceSection({ userId }) {
           <div><span style={{ fontSize: 12, color: "#666" }}>Stock Invested</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.end_stock_value)}</span></div>
           <div><span style={{ fontSize: 12, color: "#666" }}>Balance Cash</span><br /><span style={{ fontSize: 18, fontWeight: "bold", color: "#1976d2" }}>{cur}{fmt(s.end_cash)}</span></div>
           <div><span style={{ fontSize: 12, color: "#666" }}>Period</span><br /><span style={{ fontSize: 13 }}>{chartData.start_date} — {chartData.end_date}</span></div>
+        </div>
+      )}
+      {chartData && chartData.data_points.length > 0 && s.net_invested > 0 && (
+        <div style={{ ...card, display: "flex", gap: 20, flexWrap: "wrap", background: "#f5f5f5", padding: 12 }}>
+          <div><span style={{ fontSize: 11, color: "#666" }}>Net Deposited</span><br /><span style={{ fontSize: 15, fontWeight: "bold" }}>{cur}{fmt(s.net_invested)}</span></div>
+          <div><span style={{ fontSize: 11, color: "#666" }}>Unrealized P/L</span><br /><span style={{ fontSize: 15, fontWeight: "bold", color: clr(s.unrealized_pnl) }}>{s.unrealized_pnl >= 0 ? "+" : ""}{cur}{fmt(s.unrealized_pnl)}</span></div>
+          <div><span style={{ fontSize: 11, color: "#666" }}>Realized P/L</span><br /><span style={{ fontSize: 15, fontWeight: "bold", color: clr(s.realized_pnl) }}>{s.realized_pnl >= 0 ? "+" : ""}{cur}{fmt(s.realized_pnl)}</span></div>
+          <div><span style={{ fontSize: 11, color: "#666" }}>Total P/L</span><br />
+            <span style={{ fontSize: 15, fontWeight: "bold", color: clr(s.total_pnl) }}>
+              {s.total_pnl >= 0 ? "+" : ""}{cur}{fmt(s.total_pnl)} ({s.total_pnl_pct >= 0 ? "+" : ""}{s.total_pnl_pct}%)
+            </span>
+          </div>
         </div>
       )}
 

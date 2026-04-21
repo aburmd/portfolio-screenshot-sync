@@ -1329,6 +1329,20 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
     end_stock = data_points[-1].get("stock_value", 0) if data_points else 0
     end_cash = data_points[-1].get("cash", 0) if data_points else 0
 
+    # Account P/L breakdown
+    total_deposits = sum(float(t.get("amount", 0)) for t in all_txns if t.get("type") == "DEPOSIT")
+    total_withdrawals = sum(float(t.get("amount", 0)) for t in all_txns if t.get("type") == "WITHDRAW")
+    net_invested = round(total_deposits - total_withdrawals, 2)
+    realized_pnl = round(sum(
+        (float(t.get("avg_sold_price", 0)) - float(t.get("avg_buy_price", 0))) * float(t.get("quantity", 0))
+        for t in all_txns if t.get("type") == "SELL"
+    ), 2)
+    # Unrealized = current stock value - total lot cost
+    total_lot_cost = round(sum(l["quantity"] * l["buy_price"] for l in all_lots), 2)
+    unrealized_pnl = round(end_stock - total_lot_cost, 2)
+    total_pnl = round(realized_pnl + unrealized_pnl, 2)
+    total_pnl_pct = round(total_pnl / net_invested * 100, 2) if net_invested else 0
+
     return {
         "period": period, "start_date": sd.isoformat(), "end_date": ed.isoformat(),
         "currency": currency,
@@ -1339,6 +1353,8 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
             "start_value": start_val, "end_value": end_val,
             "period_gain": period_gain, "period_gain_pct": period_gain_pct,
             "end_stock_value": end_stock, "end_cash": end_cash,
+            "net_invested": net_invested, "realized_pnl": realized_pnl,
+            "unrealized_pnl": unrealized_pnl, "total_pnl": total_pnl, "total_pnl_pct": total_pnl_pct,
         },
     }
 
