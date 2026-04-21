@@ -161,3 +161,27 @@ export async function fetchPositions(userId) {
 export async function fetchXirr(userId) {
   const res = await fetch(`${API_BASE}/position-tracker/${userId}/xirr`); return res.json();
 }
+
+// --- Performance Chart ---
+export async function fetchChartData(userId, period, startDate, endDate, platform) {
+  let url = `${API_BASE}/performance/${userId}/chart?period=${period}`;
+  if (period === "custom" && startDate && endDate) url += `&start_date=${startDate}&end_date=${endDate}`;
+  if (platform && platform !== "all") url += `&platform=${platform}`;
+  const res = await fetch(url); return res.json();
+}
+export async function addBuyLot(userId, data) {
+  const res = await fetch(`${API_BASE}/performance/${userId}/buy-lot`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  }); return res.json();
+}
+export async function fetchBuyLots(userId, symbol) {
+  const url = symbol ? `${API_BASE}/performance/${userId}/buy-lots?symbol=${symbol}` : `${API_BASE}/performance/${userId}/buy-lots`;
+  const res = await fetch(url); return res.json();
+}
+export async function deleteBuyLot(userId, sk) {
+  const res = await fetch(`${API_BASE}/performance/${userId}/buy-lot/${encodeURIComponent(sk)}`, { method: "DELETE" }); return res.json();
+}
+export async function triggerBackfill(userId, symbol) {
+  const url = symbol ? `${API_BASE}/performance/${userId}/backfill/${symbol}` : `${API_BASE}/performance/${userId}/backfill`;
+  const res = await fetch(url, { method: "POST" }); return res.json();
+}

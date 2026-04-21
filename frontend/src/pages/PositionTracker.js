@@ -2,7 +2,12 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   freezePortfolio, fetchSnapshots, fetchDiff, confirmSells,
   addCashFlow, fetchCashFlows, deleteCashFlow, fetchPositions, fetchXirr,
+  fetchChartData, addBuyLot, fetchBuyLots, deleteBuyLot, triggerBackfill,
 } from "../services/api";
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, ReferenceLine,
+} from "recharts";
 
 const btn = { padding: "6px 14px", cursor: "pointer", borderRadius: 4, border: "1px solid #ccc", background: "#fff", fontSize: 13 };
 const btnPrimary = { ...btn, background: "#1976d2", color: "#fff", border: "none" };
@@ -25,11 +30,13 @@ export default function PositionTracker({ user }) {
         <button style={subTab(tab === "cashflows")} onClick={() => setTab("cashflows")}>Cash Flows</button>
         <button style={subTab(tab === "positions")} onClick={() => setTab("positions")}>Positions</button>
         <button style={subTab(tab === "xirr")} onClick={() => setTab("xirr")}>XIRR</button>
+        <button style={subTab(tab === "performance")} onClick={() => setTab("performance")}>Performance</button>
       </nav>
       {tab === "freeze" && <FreezeSection userId={userId} />}
       {tab === "cashflows" && <CashFlowSection userId={userId} />}
       {tab === "positions" && <PositionsSection userId={userId} />}
       {tab === "xirr" && <XirrSection userId={userId} />}
+      {tab === "performance" && <PerformanceSection userId={userId} />}
     </div>
   );
 }
@@ -394,6 +401,249 @@ function XirrSection({ userId }) {
 
       {data.platforms.length === 0 && (
         <p style={{ color: "#999" }}>No cash flows recorded. Add deposits/withdrawals in the Cash Flows tab to calculate XIRR.</p>
+      )}
+    </div>
+  );
+}
+
+// ==================== PERFORMANCE CHART ====================
+const PERIODS = ["1M", "3M", "YTD", "1Y", "3Y", "5Y", "10Y", "Custom"];
+const periodBtn = (active) => ({
+  padding: "4px 12px", cursor: "pointer", borderRadius: 4, fontSize: 12,
+  border: active ? "none" : "1px solid #ccc",
+  background: active ? "#1976d2" : "#fff",
+  color: active ? "#fff" : "#333",
+});
+
+function PerformanceSection({ userId }) {
+  const [period, setPeriod] = useState("1Y");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+  const [chartData, setChartData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [lotsOpen, setLotsOpen] = useState(false);
+  const [lots, setLots] = useState([]);
+  const [lotForm, setLotForm] = useState({ symbol: "", stock_name: "", quantity: "", buy_price: "", buy_date: new Date().toISOString().slice(0, 10), currency: "USD", platform: "" });
+  const [backfilling, setBackfilling] = useState(false);
+
+  const loadChart = useCallback(async () => {
+    setLoading(true);
+    const data = await fetchChartData(userId, period,
+      period === "custom" ? customStart : null,
+      period === "custom" ? customEnd : null, "all");
+    setChartData(data);
+    setLoading(false);
+  }, [userId, period, customStart, customEnd]);
+
+  const loadLots = useCallback(async () => {
+    setLots(await fetchBuyLots(userId));
+  }, [userId]);
+
+  useEffect(() => { loadChart(); }, [loadChart]);
+  useEffect(() => { if (lotsOpen) loadLots(); }, [lotsOpen, loadLots]);
+
+  const handleAddLot = async () => {
+    if (!lotForm.symbol || !lotForm.quantity || !lotForm.buy_price) return;
+    await addBuyLot(userId, {
+      ...lotForm,
+      quantity: parseFloat(lotForm.quantity),
+      buy_price: parseFloat(lotForm.buy_price),
+    });
+    setLotForm({ ...lotForm, symbol: "", stock_name: "", quantity: "", buy_price: "" });
+    loadLots();
+    loadChart();
+  };
+
+  const handleDeleteLot = async (sk) => {
+    if (window.confirm("Delete this buy lot?")) {
+      await deleteBuyLot(userId, sk);
+      loadLots();
+    }
+  };
+
+  const handleBackfillAll = async () => {
+    setBackfilling(true);
+    const result = await triggerBackfill(userId);
+    alert(`Backfill complete: ${result.stocks} stocks, ${result.records_written} records`);
+    setBackfilling(false);
+    loadChart();
+  };
+
+  const s = chartData?.summary || {};
+  const isPositive = s.change >= 0;
+  const cfDates = new Set((chartData?.cash_flows || []).map(cf => cf.date));
+  const sellDates = new Set((chartData?.sell_events || []).map(se => se.date));
+
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (!active || !payload?.length) return null;
+    const cf = (chartData?.cash_flows || []).filter(c => c.date === label);
+    const se = (chartData?.sell_events || []).filter(c => c.date === label);
+    return (
+      <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, padding: 10, fontSize: 12 }}>
+        <div style={{ fontWeight: "bold", marginBottom: 4 }}>{label}</div>
+        <div>Value: ${fmt(payload[0].value)}</div>
+        {cf.map((c, i) => (
+          <div key={i} style={{ color: c.type === "DEPOSIT" ? "#2e7d32" : "#c62828", marginTop: 2 }}>
+            {c.type === "DEPOSIT" ? "⬇" : "⬆"} {c.type}: ${fmt(c.amount)}
+          </div>
+        ))}
+        {se.map((e, i) => (
+          <div key={i} style={{ color: "#6a1b9a", marginTop: 2 }}>
+            💎 Sold {e.symbol} ({e.qty}) — P/L: ${fmt(e.realized_pnl)}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      {/* Timeframe selector */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
+        {PERIODS.map(p => (
+          <button key={p} style={periodBtn(period === p.toLowerCase() || period === p)}
+            onClick={() => setPeriod(p === "Custom" ? "custom" : p)}>
+            {p}
+          </button>
+        ))}
+        {period === "custom" && (
+          <>
+            <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} style={{ padding: 3, fontSize: 12 }} />
+            <span style={{ fontSize: 12 }}>to</span>
+            <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} style={{ padding: 3, fontSize: 12 }} />
+            <button style={btnPrimary} onClick={loadChart}>Go</button>
+          </>
+        )}
+      </div>
+
+      {/* Summary card */}
+      {chartData && chartData.data_points.length > 0 && (
+        <div style={{ ...card, display: "flex", gap: 24, flexWrap: "wrap", background: isPositive ? "#e8f5e9" : "#ffebee" }}>
+          <div><span style={{ fontSize: 12, color: "#666" }}>Start Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>${fmt(s.start_value)}</span></div>
+          <div><span style={{ fontSize: 12, color: "#666" }}>End Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>${fmt(s.end_value)}</span></div>
+          <div><span style={{ fontSize: 12, color: "#666" }}>Change</span><br />
+            <span style={{ fontSize: 18, fontWeight: "bold", color: clr(s.change) }}>
+              {s.change >= 0 ? "+" : ""}${fmt(s.change)} ({s.change_pct >= 0 ? "+" : ""}{s.change_pct}%)
+            </span>
+          </div>
+          <div><span style={{ fontSize: 12, color: "#666" }}>Period</span><br /><span style={{ fontSize: 13 }}>{chartData.start_date} — {chartData.end_date}</span></div>
+        </div>
+      )}
+
+      {/* Chart */}
+      {loading ? <p>Loading chart data...</p> : chartData && chartData.data_points.length > 0 ? (
+        <div style={{ width: "100%", height: 350, marginBottom: 16 }}>
+          <ResponsiveContainer>
+            <AreaChart data={chartData.data_points} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <defs>
+                <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={isPositive ? "#2e7d32" : "#c62828"} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={isPositive ? "#2e7d32" : "#c62828"} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+              <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={d => {
+                const parts = d.split("-");
+                const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                return chartData.data_points.length > 200
+                  ? `${months[parseInt(parts[1])-1]} '${parts[0].slice(2)}`
+                  : `${months[parseInt(parts[1])-1]} ${parseInt(parts[2])}`;
+              }} interval="preserveStartEnd" />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+              <Tooltip content={<CustomTooltip />} />
+              <Area type="monotone" dataKey="value" stroke={isPositive ? "#2e7d32" : "#c62828"}
+                fill="url(#colorVal)" strokeWidth={2} dot={false} />
+              {/* Cash flow reference lines */}
+              {(chartData.cash_flows || []).map((cf, i) => (
+                <ReferenceLine key={`cf-${i}`} x={cf.date} stroke={cf.type === "DEPOSIT" ? "#2e7d32" : "#c62828"}
+                  strokeDasharray="4 4" strokeWidth={1.5} />
+              ))}
+              {/* Sell event reference lines */}
+              {(chartData.sell_events || []).map((se, i) => (
+                <ReferenceLine key={`se-${i}`} x={se.date} stroke="#6a1b9a"
+                  strokeDasharray="2 2" strokeWidth={1.5} />
+              ))}
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      ) : <p style={{ color: "#999" }}>No chart data. Add buy lots and run backfill to populate.</p>}
+
+      {/* Buy Lots Management */}
+      <div style={{ marginTop: 8 }}>
+        <button style={btn} onClick={() => setLotsOpen(!lotsOpen)}>
+          {lotsOpen ? "▼" : "▶"} Manage Buy Lots ({lots.length})
+        </button>
+        <button style={{ ...btn, marginLeft: 8 }} onClick={handleBackfillAll} disabled={backfilling}>
+          {backfilling ? "Backfilling..." : "🔄 Backfill All"}
+        </button>
+      </div>
+
+      {lotsOpen && (
+        <div style={{ marginTop: 12 }}>
+          {/* Add lot form */}
+          <div style={{ ...card, display: "flex", gap: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <label style={{ fontSize: 11 }}>Symbol<br />
+              <input value={lotForm.symbol} onChange={e => setLotForm({ ...lotForm, symbol: e.target.value })}
+                placeholder="AAPL" style={{ padding: 3, width: 80 }} />
+            </label>
+            <label style={{ fontSize: 11 }}>Name<br />
+              <input value={lotForm.stock_name} onChange={e => setLotForm({ ...lotForm, stock_name: e.target.value })}
+                placeholder="Apple Inc" style={{ padding: 3, width: 120 }} />
+            </label>
+            <label style={{ fontSize: 11 }}>Qty<br />
+              <input type="number" value={lotForm.quantity} onChange={e => setLotForm({ ...lotForm, quantity: e.target.value })}
+                style={{ padding: 3, width: 70 }} />
+            </label>
+            <label style={{ fontSize: 11 }}>Buy Price<br />
+              <input type="number" value={lotForm.buy_price} onChange={e => setLotForm({ ...lotForm, buy_price: e.target.value })}
+                style={{ padding: 3, width: 80 }} />
+            </label>
+            <label style={{ fontSize: 11 }}>Buy Date<br />
+              <input type="date" value={lotForm.buy_date} onChange={e => setLotForm({ ...lotForm, buy_date: e.target.value })}
+                style={{ padding: 3 }} />
+            </label>
+            <label style={{ fontSize: 11 }}>Currency<br />
+              <select value={lotForm.currency} onChange={e => setLotForm({ ...lotForm, currency: e.target.value })} style={{ padding: 3 }}>
+                <option value="USD">USD</option><option value="INR">INR</option>
+              </select>
+            </label>
+            <label style={{ fontSize: 11 }}>Platform<br />
+              <input value={lotForm.platform} onChange={e => setLotForm({ ...lotForm, platform: e.target.value })}
+                placeholder="webull" style={{ padding: 3, width: 90 }} />
+            </label>
+            <button style={btnPrimary} onClick={handleAddLot}>+ Add Lot</button>
+          </div>
+
+          {/* Lots table */}
+          {lots.length > 0 ? (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginTop: 8 }}>
+              <thead><tr style={{ background: "#f5f5f5" }}>
+                <th style={{ padding: 5, textAlign: "left" }}>Symbol</th>
+                <th style={{ padding: 5, textAlign: "left" }}>Name</th>
+                <th style={{ padding: 5, textAlign: "right" }}>Qty</th>
+                <th style={{ padding: 5, textAlign: "right" }}>Buy Price</th>
+                <th style={{ padding: 5, textAlign: "left" }}>Buy Date</th>
+                <th style={{ padding: 5, textAlign: "left" }}>Currency</th>
+                <th style={{ padding: 5, textAlign: "left" }}>Platform</th>
+                <th style={{ padding: 5 }}></th>
+              </tr></thead>
+              <tbody>
+                {lots.map(l => (
+                  <tr key={l.symbol_ts}>
+                    <td style={{ padding: 5, fontWeight: "bold" }}>{l.symbol}</td>
+                    <td style={{ padding: 5 }}>{l.stock_name}</td>
+                    <td style={{ padding: 5, textAlign: "right" }}>{l.quantity}</td>
+                    <td style={{ padding: 5, textAlign: "right" }}>{fmt(l.buy_price)}</td>
+                    <td style={{ padding: 5 }}>{l.buy_date}</td>
+                    <td style={{ padding: 5 }}>{l.currency}</td>
+                    <td style={{ padding: 5 }}>{l.platform}</td>
+                    <td style={{ padding: 5 }}><button style={btnDanger} onClick={() => handleDeleteLot(l.symbol_ts)}>Del</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <p style={{ color: "#999", fontSize: 12, marginTop: 8 }}>No buy lots. Add lots to enable historical backfill.</p>}
+        </div>
       )}
     </div>
   );
