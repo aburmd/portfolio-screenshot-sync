@@ -470,7 +470,7 @@ function PerformanceSection({ userId }) {
   };
 
   const s = chartData?.summary || {};
-  const isPositive = s.true_pnl >= 0;
+  const isPositive = s.period_change >= 0;
   const cur = chartData?.currency === "INR" ? "₹" : "$";
   const cfDates = new Set((chartData?.cash_flows || []).map(cf => cf.date));
   const sellDates = new Set((chartData?.sell_events || []).map(se => se.date));
@@ -520,12 +520,19 @@ function PerformanceSection({ userId }) {
       {/* Summary card */}
       {chartData && chartData.data_points.length > 0 && (
         <div style={{ ...card, display: "flex", gap: 24, flexWrap: "wrap", background: isPositive ? "#e8f5e9" : "#ffebee" }}>
-          <div><span style={{ fontSize: 12, color: "#666" }}>Net Invested</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.net_invested)}</span></div>
-          <div><span style={{ fontSize: 12, color: "#666" }}>Current Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.end_value)}</span></div>
-          <div><span style={{ fontSize: 12, color: "#666" }}>P/L</span><br />
-            <span style={{ fontSize: 18, fontWeight: "bold", color: clr(s.true_pnl) }}>
+          <div><span style={{ fontSize: 12, color: "#666" }}>Start Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.start_value)}</span></div>
+          <div><span style={{ fontSize: 12, color: "#666" }}>End Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.end_value)}</span></div>
+          <div><span style={{ fontSize: 12, color: "#666" }}>Period Change</span><br />
+            <span style={{ fontSize: 18, fontWeight: "bold", color: clr(s.period_change) }}>
+              {s.period_change >= 0 ? "+" : ""}{cur}{fmt(s.period_change)} ({s.period_change_pct >= 0 ? "+" : ""}{s.period_change_pct}%)
+            </span>
+          </div>
+          <div style={{ borderLeft: "1px solid #ccc", paddingLeft: 16 }}>
+            <span style={{ fontSize: 12, color: "#666" }}>All-Time P/L</span><br />
+            <span style={{ fontSize: 15, fontWeight: "bold", color: clr(s.true_pnl) }}>
               {s.true_pnl >= 0 ? "+" : ""}{cur}{fmt(s.true_pnl)} ({s.true_pnl_pct >= 0 ? "+" : ""}{s.true_pnl_pct}%)
             </span>
+            <div style={{ fontSize: 11, color: "#999" }}>Invested: {cur}{fmt(s.net_invested)}</div>
           </div>
           <div><span style={{ fontSize: 12, color: "#666" }}>Period</span><br /><span style={{ fontSize: 13 }}>{chartData.start_date} — {chartData.end_date}</span></div>
         </div>

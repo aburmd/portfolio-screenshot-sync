@@ -1275,8 +1275,13 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
 
     start_val = data_points[0]["value"] if data_points else 0
     end_val = data_points[-1]["value"] if data_points else 0
-    chart_change = round(end_val - start_val, 2)
-    chart_change_pct = round(chart_change / start_val * 100, 2) if start_val else 0
+    period_change = round(end_val - start_val, 2)
+    period_change_pct = round(period_change / start_val * 100, 2) if start_val else 0
+
+    # All-time P/L from cash flows
+    total_deposits = sum(float(t.get("amount", 0)) for t in all_txn_items if t.get("type") == "DEPOSIT")
+    total_withdrawals = sum(float(t.get("amount", 0)) for t in all_txn_items if t.get("type") == "WITHDRAW")
+    net_invested = round(total_deposits - total_withdrawals, 2)
     true_pnl = round(end_val - net_invested, 2)
     true_pnl_pct = round(true_pnl / net_invested * 100, 2) if net_invested else 0
 
@@ -1286,7 +1291,7 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
         "data_points": data_points, "cash_flows": cash_flows, "sell_events": sell_events,
         "summary": {
             "start_value": start_val, "end_value": end_val,
-            "chart_change": chart_change, "chart_change_pct": chart_change_pct,
+            "period_change": period_change, "period_change_pct": period_change_pct,
             "net_invested": net_invested, "true_pnl": true_pnl, "true_pnl_pct": true_pnl_pct,
         },
     }
