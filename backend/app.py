@@ -1058,27 +1058,58 @@ async def list_buy_lots(user_id: str, symbol: str = None):
     holdings = _decimal_to_float(h_resp.get("Items", []))
 
     # Find symbols that have explicit lots
-    symbols_with_lots = set(l["symbol"] for l in lots)
+    symbols_with_lots = {}
+    for l in lots:
+        sym = l["symbol"]
+        symbols_with_lots.setdefault(sym, []).append(l)
 
-    # Add default lots for holdings without explicit lots
+    # Add default/remainder lots for holdings
     from datetime import date
     for h in holdings:
         sym = h.get("symbol", "UNKNOWN")
         if sym == "UNKNOWN" or (symbol and sym != symbol.upper()):
             continue
-        if sym not in symbols_with_lots:
+        portfolio_qty = h["quantity"]
+        avg_price = h["avg_buy_price"]
+        sym_lots = symbols_with_lots.get(sym, [])
+
+        if not sym_lots:
+            # No lots at all — show full position as default
             lots.append({
                 "user_id": user_id,
                 "symbol_ts": f"{sym}#default",
                 "symbol": sym,
                 "stock_name": h.get("stock_name", ""),
-                "quantity": h["quantity"],
-                "buy_price": h["avg_buy_price"],
+                "quantity": portfolio_qty,
+                "buy_price": avg_price,
                 "buy_date": date.today().isoformat(),
                 "currency": h.get("currency", "USD"),
                 "platform": h.get("platform_name", "unknown"),
                 "is_default": True,
             })
+        else:
+            # Has lots — check if remainder needed
+            lot_qty_sum = sum(l["quantity"] for l in sym_lots)
+            remainder_qty = round(portfolio_qty - lot_qty_sum, 6)
+            if remainder_qty > 0.0001:
+                # Back-calculate remainder price to preserve weighted avg
+                lot_cost_sum = sum(l["quantity"] * l["buy_price"] for l in sym_lots)
+                total_cost = avg_price * portfolio_qty
+                remainder_price = round((total_cost - lot_cost_sum) / remainder_qty, 2)
+                if remainder_price < 0:
+                    remainder_price = avg_price
+                lots.append({
+                    "user_id": user_id,
+                    "symbol_ts": f"{sym}#remainder",
+                    "symbol": sym,
+                    "stock_name": h.get("stock_name", ""),
+                    "quantity": round(remainder_qty, 6),
+                    "buy_price": remainder_price,
+                    "buy_date": date.today().isoformat(),
+                    "currency": h.get("currency", "USD"),
+                    "platform": h.get("platform_name", "unknown"),
+                    "is_remainder": True,
+                })
 
     lots.sort(key=lambda x: (x["symbol"], x.get("buy_date", "")))
     return lots

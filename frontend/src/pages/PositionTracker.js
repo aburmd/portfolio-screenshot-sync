@@ -630,7 +630,7 @@ function PerformanceSection({ userId }) {
               </tr></thead>
               <tbody>
                 {lots.map(l => (
-                  <tr key={l.symbol_ts} style={{ background: l.is_default ? "#fff8e1" : "#fff" }}>
+                  <tr key={l.symbol_ts} style={{ background: l.is_default ? "#fff8e1" : l.is_remainder ? "#e3f2fd" : "#fff" }}>
                     <td style={{ padding: 5, fontWeight: "bold" }}>{l.symbol}</td>
                     <td style={{ padding: 5 }}>{l.stock_name}</td>
                     <td style={{ padding: 5, textAlign: "right" }}>{l.quantity}</td>
@@ -638,11 +638,11 @@ function PerformanceSection({ userId }) {
                     <td style={{ padding: 5 }}>{l.buy_date}</td>
                     <td style={{ padding: 5 }}>{l.currency}</td>
                     <td style={{ padding: 5 }}>{l.platform}</td>
-                    <td style={{ padding: 5, fontSize: 11, color: l.is_default ? "#f57c00" : "#388e3c" }}>
-                      {l.is_default ? "⚠ Auto (edit date)" : "✅ Manual"}
+                    <td style={{ padding: 5, fontSize: 11, color: l.is_default ? "#f57c00" : l.is_remainder ? "#1565c0" : "#388e3c" }}>
+                      {l.is_default ? "⚠ Auto (edit date)" : l.is_remainder ? "📊 Remainder" : "✅ Manual"}
                     </td>
                     <td style={{ padding: 5 }}>
-                      {!l.is_default && <button style={btnDanger} onClick={() => handleDeleteLot(l.symbol_ts)}>Del</button>}
+                      {!l.is_default && !l.is_remainder && <button style={btnDanger} onClick={() => handleDeleteLot(l.symbol_ts)}>Del</button>}
                     </td>
                   </tr>
                 ))}
