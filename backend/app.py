@@ -1410,6 +1410,23 @@ def _backfill_symbol(user_id: str, symbol: str, from_date: str, currency: str, p
         for rec in records:
             batch.put_item(Item=rec)
 
+    # Clean up records before earliest lot date (from old/deleted lots)
+    if lots:
+        earliest_lot_date = min(l["buy_date"] for l in lots)
+    else:
+        earliest_lot_date = from_date
+    # Query all records for this symbol and delete ones before earliest lot
+    cleanup_resp = dp_table.query(
+        KeyConditionExpression=Key("user_id").eq(user_id) & Key("symbol_date").begins_with(f"{symbol}#"),
+    )
+    deleted = 0
+    with dp_table.batch_writer() as batch:
+        for item in cleanup_resp.get("Items", []):
+            rec_date = item["symbol_date"].split("#")[1]
+            if rec_date < earliest_lot_date:
+                batch.delete_item(Key={"user_id": user_id, "symbol_date": item["symbol_date"]})
+                deleted += 1
+
     return len(records)
 
 
