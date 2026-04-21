@@ -3,3 +3,4 @@ mangum>=0.17.0
 boto3>=1.34.0
 python-multipart>=0.0.9
 yfinance>=0.2.40
+python-dateutil>=2.9.0

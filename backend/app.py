@@ -32,6 +32,8 @@ SHARES_TABLE = os.environ.get("SHARES_TABLE", "portfolio-shares-dev")
 UPLOADS_TABLE = os.environ.get("UPLOADS_TABLE", "portfolio-uploads-dev")
 SNAPSHOTS_TABLE = os.environ.get("SNAPSHOTS_TABLE", "portfolio-snapshots-dev")
 TRANSACTIONS_TABLE = os.environ.get("TRANSACTIONS_TABLE", "portfolio-transactions-dev")
+DAILY_PRICES_TABLE = os.environ.get("DAILY_PRICES_TABLE", "portfolio-daily-prices-dev")
+BUY_LOTS_TABLE = os.environ.get("BUY_LOTS_TABLE", "portfolio-buy-lots-dev")
 
 s3 = boto3.client("s3", region_name=REGION)
 ddb = boto3.resource("dynamodb", region_name=REGION)
@@ -1005,6 +1007,278 @@ def _compute_xirr(cash_flows):
             rate = -0.99
 
     return round(rate, 6) if abs(npv(rate)) < 1.0 else None
+
+
+# --- Performance Chart endpoints (admin only) ---
+
+@app.post("/performance/{user_id}/buy-lot")
+async def add_buy_lot(user_id: str, data: dict):
+    """Add a buy lot and trigger backfill from buy_date to today."""
+    from datetime import datetime, timezone as tz, date
+    from decimal import Decimal
+
+    lots_table = ddb.Table(BUY_LOTS_TABLE)
+    now = datetime.now(tz.utc).isoformat()
+    symbol = data["symbol"].upper()
+    buy_date = data.get("buy_date", date.today().isoformat())
+    sk = f"{symbol}#{now}"
+
+    lots_table.put_item(Item={
+        "user_id": user_id, "symbol_ts": sk,
+        "symbol": symbol,
+        "stock_name": data.get("stock_name", ""),
+        "quantity": Decimal(str(data["quantity"])),
+        "buy_price": Decimal(str(data["buy_price"])),
+        "buy_date": buy_date,
+        "currency": data.get("currency", "USD"),
+        "platform": data.get("platform", "unknown"),
+    })
+
+    # Trigger backfill for this symbol
+    backfill_count = _backfill_symbol(user_id, symbol, buy_date,
+        data.get("currency", "USD"), data.get("platform", "unknown"))
+
+    return {"lot": sk, "symbol": symbol, "buy_date": buy_date, "backfilled": backfill_count}
+
+
+@app.get("/performance/{user_id}/buy-lots")
+async def list_buy_lots(user_id: str, symbol: str = None):
+    """List buy lots, optionally filtered by symbol."""
+    table = ddb.Table(BUY_LOTS_TABLE)
+    if symbol:
+        resp = table.query(
+            KeyConditionExpression=Key("user_id").eq(user_id) & Key("symbol_ts").begins_with(f"{symbol.upper()}#"))
+    else:
+        resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    return _decimal_to_float(resp.get("Items", []))
+
+
+@app.delete("/performance/{user_id}/buy-lot/{sk}")
+async def delete_buy_lot(user_id: str, sk: str):
+    """Delete a buy lot."""
+    from urllib.parse import unquote
+    table = ddb.Table(BUY_LOTS_TABLE)
+    table.delete_item(Key={"user_id": user_id, "symbol_ts": unquote(sk)})
+    return {"deleted": True}
+
+
+@app.post("/performance/{user_id}/backfill")
+async def backfill_all(user_id: str):
+    """Backfill daily prices for all stocks from their earliest lot date."""
+    holdings_table = ddb.Table(PORTFOLIO_TABLE)
+    lots_table = ddb.Table(BUY_LOTS_TABLE)
+
+    resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    holdings = _decimal_to_float(resp.get("Items", []))
+
+    lots_resp = lots_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    lots = _decimal_to_float(lots_resp.get("Items", []))
+
+    # Group lots by symbol to find earliest buy_date
+    lots_by_sym = {}
+    for lot in lots:
+        sym = lot["symbol"]
+        lots_by_sym.setdefault(sym, []).append(lot)
+
+    from datetime import date
+    total = 0
+    for h in holdings:
+        sym = h["symbol"]
+        if sym == "UNKNOWN":
+            continue
+        currency = h.get("currency", "USD")
+        platform = h.get("platform_name", "unknown")
+        sym_lots = lots_by_sym.get(sym, [])
+        if sym_lots:
+            earliest = min(l["buy_date"] for l in sym_lots)
+        else:
+            earliest = date.today().isoformat()
+        total += _backfill_symbol(user_id, sym, earliest, currency, platform)
+
+    return {"stocks": len(holdings), "records_written": total}
+
+
+@app.post("/performance/{user_id}/backfill/{symbol}")
+async def backfill_one(user_id: str, symbol: str):
+    """Backfill daily prices for a single stock."""
+    symbol = symbol.upper()
+    lots_table = ddb.Table(BUY_LOTS_TABLE)
+    holdings_table = ddb.Table(PORTFOLIO_TABLE)
+
+    # Find earliest lot date
+    lots_resp = lots_table.query(
+        KeyConditionExpression=Key("user_id").eq(user_id) & Key("symbol_ts").begins_with(f"{symbol}#"))
+    lots = _decimal_to_float(lots_resp.get("Items", []))
+
+    from datetime import date
+    earliest = min((l["buy_date"] for l in lots), default=date.today().isoformat())
+
+    # Get currency/platform from holdings
+    resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    holding = next((h for h in _decimal_to_float(resp.get("Items", [])) if h.get("symbol") == symbol), {})
+    currency = holding.get("currency", "USD")
+    platform = holding.get("platform_name", "unknown")
+
+    count = _backfill_symbol(user_id, symbol, earliest, currency, platform)
+    return {"symbol": symbol, "from_date": earliest, "records_written": count}
+
+
+@app.get("/performance/{user_id}/chart")
+async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = None,
+                         end_date: str = None, platform: str = "all"):
+    """Get portfolio value time series for chart."""
+    from datetime import date, timedelta
+    from dateutil.relativedelta import relativedelta
+
+    today = date.today()
+    if period == "custom" and start_date and end_date:
+        sd = date.fromisoformat(start_date)
+        ed = date.fromisoformat(end_date)
+    else:
+        ed = today
+        period_map = {
+            "1M": relativedelta(months=1), "3M": relativedelta(months=3),
+            "1Y": relativedelta(years=1), "3Y": relativedelta(years=3),
+            "5Y": relativedelta(years=5), "10Y": relativedelta(years=10),
+        }
+        if period == "YTD":
+            sd = date(today.year, 1, 1)
+        else:
+            sd = today - period_map.get(period, relativedelta(years=1))
+
+    # Query daily prices using date-index GSI
+    dp_table = ddb.Table(DAILY_PRICES_TABLE)
+    resp = dp_table.query(
+        IndexName="date-index",
+        KeyConditionExpression=Key("user_id").eq(user_id) & Key("date").between(sd.isoformat(), ed.isoformat()),
+    )
+    items = resp.get("Items", [])
+    while resp.get("LastEvaluatedKey"):
+        resp = dp_table.query(
+            IndexName="date-index",
+            KeyConditionExpression=Key("user_id").eq(user_id) & Key("date").between(sd.isoformat(), ed.isoformat()),
+            ExclusiveStartKey=resp["LastEvaluatedKey"],
+        )
+        items.extend(resp.get("Items", []))
+
+    # Aggregate by date
+    by_date = {}
+    for item in items:
+        if platform != "all" and item.get("platform", "") != platform:
+            continue
+        d = item["date"]
+        val = float(item.get("value", 0))
+        by_date.setdefault(d, {"value": 0, "count": 0})
+        by_date[d]["value"] += val
+        by_date[d]["count"] += 1
+
+    data_points = sorted(
+        [{"date": d, "value": round(v["value"], 2), "stocks_count": v["count"]} for d, v in by_date.items()],
+        key=lambda x: x["date"]
+    )
+
+    # Cash flows in range
+    txn_table = ddb.Table(TRANSACTIONS_TABLE)
+    txn_resp = txn_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    cash_flows = []
+    sell_events = []
+    for txn in txn_resp.get("Items", []):
+        txn_date = txn.get("date", "")
+        if not txn_date or txn_date < sd.isoformat() or txn_date > ed.isoformat():
+            continue
+        t = txn.get("type", "")
+        if t in ("DEPOSIT", "WITHDRAW"):
+            cash_flows.append({"date": txn_date, "type": t,
+                "amount": float(txn.get("amount", 0)), "currency": txn.get("currency", "USD")})
+        elif t == "SELL":
+            qty = float(txn.get("quantity", 0))
+            buy_p = float(txn.get("avg_buy_price", 0))
+            sell_p = float(txn.get("avg_sold_price", 0))
+            sell_events.append({"date": txn_date, "symbol": txn.get("symbol", ""),
+                "qty": qty, "realized_pnl": round((sell_p - buy_p) * qty, 2)})
+
+    # Summary
+    start_val = data_points[0]["value"] if data_points else 0
+    end_val = data_points[-1]["value"] if data_points else 0
+    change = round(end_val - start_val, 2)
+    change_pct = round(change / start_val * 100, 2) if start_val else 0
+
+    return {
+        "period": period, "start_date": sd.isoformat(), "end_date": ed.isoformat(),
+        "data_points": data_points, "cash_flows": cash_flows, "sell_events": sell_events,
+        "summary": {"start_value": start_val, "end_value": end_val, "change": change, "change_pct": change_pct},
+    }
+
+
+# --- Performance Chart helpers ---
+
+def _backfill_symbol(user_id: str, symbol: str, from_date: str, currency: str, platform: str) -> int:
+    """Fetch historical prices from Yahoo Finance and write daily records to DDB."""
+    from datetime import date, datetime
+    from decimal import Decimal
+    import yfinance as yf
+
+    # Get all lots for this symbol to compute qty held on each date
+    lots_table = ddb.Table(BUY_LOTS_TABLE)
+    lots_resp = lots_table.query(
+        KeyConditionExpression=Key("user_id").eq(user_id) & Key("symbol_ts").begins_with(f"{symbol}#"))
+    lots = _decimal_to_float(lots_resp.get("Items", []))
+
+    # Get current portfolio qty for remainder calculation
+    holdings_table = ddb.Table(PORTFOLIO_TABLE)
+    h_resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    holding = next((h for h in _decimal_to_float(h_resp.get("Items", [])) if h.get("symbol") == symbol), None)
+    portfolio_qty = holding["quantity"] if holding else 0
+    avg_buy = holding.get("avg_buy_price", 0) if holding else 0
+
+    # Lot qty sum
+    lot_qty_sum = sum(l["quantity"] for l in lots)
+    remainder = portfolio_qty - lot_qty_sum
+
+    # Fetch historical prices
+    yf_symbol = f"{symbol}.NS" if currency == "INR" else symbol
+    today = date.today()
+    try:
+        hist = yf.download(yf_symbol, start=from_date, end=(today.isoformat()), progress=False, auto_adjust=True)
+    except Exception:
+        return 0
+
+    if hist is None or hist.empty:
+        return 0
+
+    # Handle multi-level columns from yf.download
+    if hasattr(hist.columns, 'levels') and len(hist.columns.levels) > 1:
+        hist.columns = hist.columns.droplevel(1)
+
+    dp_table = ddb.Table(DAILY_PRICES_TABLE)
+    records = []
+    for idx, row in hist.iterrows():
+        d = idx.strftime("%Y-%m-%d")
+        close = float(row["Close"])
+        # Qty held on this date = sum of lots with buy_date <= d
+        qty_from_lots = sum(l["quantity"] for l in lots if l["buy_date"] <= d)
+        # Add remainder (portfolio qty not covered by lots) — assume held from today
+        qty = qty_from_lots + (remainder if remainder > 0 and d >= today.isoformat() else 0)
+        # If no lots at all, use portfolio qty for all dates from from_date
+        if not lots:
+            qty = portfolio_qty
+        if qty <= 0:
+            continue
+        records.append({
+            "user_id": user_id, "symbol_date": f"{symbol}#{d}",
+            "symbol": symbol, "date": d,
+            "close_price": Decimal(str(round(close, 2))),
+            "quantity": Decimal(str(round(qty, 6))),
+            "currency": currency, "platform": platform,
+            "value": Decimal(str(round(qty * close, 2))),
+        })
+
+    # Batch write
+    with dp_table.batch_writer() as batch:
+        for rec in records:
+            batch.put_item(Item=rec)
+
+    return len(records)
 
 
 # Lambda handler via Mangum

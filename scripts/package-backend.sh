@@ -24,6 +24,7 @@ pip install -r "$BACKEND_DIR/requirements.txt" \
 
 echo "Copying backend code..."
 cp "$BACKEND_DIR/app.py" "$BUILD_DIR/backend-package/"
+cp "$BACKEND_DIR/daily_price.py" "$BUILD_DIR/backend-package/"
 
 echo "Creating zip..."
 cd "$BUILD_DIR/backend-package"
