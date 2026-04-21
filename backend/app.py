@@ -1259,16 +1259,43 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
             sell_events.append({"date": txn_date, "symbol": txn.get("symbol", ""),
                 "qty": qty, "realized_pnl": round((sell_p - buy_p) * qty, 2)})
 
-    # Summary
+    # Calculate true P/L from cost basis
+    lots_table = ddb.Table(BUY_LOTS_TABLE)
+    lots_resp = lots_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    lots_items = _decimal_to_float(lots_resp.get("Items", []))
+    total_cost = sum(l["quantity"] * l["buy_price"] for l in lots_items)
+
+    # If no explicit lots, fall back to holdings avg_buy_price
+    if not lots_items:
+        holdings_table = ddb.Table(PORTFOLIO_TABLE)
+        h_resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+        holdings = _decimal_to_float(h_resp.get("Items", []))
+        total_cost = sum(h["quantity"] * h["avg_buy_price"] for h in holdings
+                        if h.get("symbol", "UNKNOWN") != "UNKNOWN")
+
+    # Determine dominant currency
+    currencies = set()
+    for item in items:
+        currencies.add(item.get("currency", "USD"))
+    currency = "INR" if "INR" in currencies and len(currencies) == 1 else "USD"
+
     start_val = data_points[0]["value"] if data_points else 0
     end_val = data_points[-1]["value"] if data_points else 0
-    change = round(end_val - start_val, 2)
-    change_pct = round(change / start_val * 100, 2) if start_val else 0
+    chart_change = round(end_val - start_val, 2)
+    chart_change_pct = round(chart_change / start_val * 100, 2) if start_val else 0
+    total_cost = round(total_cost, 2)
+    true_pnl = round(end_val - total_cost, 2)
+    true_pnl_pct = round(true_pnl / total_cost * 100, 2) if total_cost else 0
 
     return {
         "period": period, "start_date": sd.isoformat(), "end_date": ed.isoformat(),
+        "currency": currency,
         "data_points": data_points, "cash_flows": cash_flows, "sell_events": sell_events,
-        "summary": {"start_value": start_val, "end_value": end_val, "change": change, "change_pct": change_pct},
+        "summary": {
+            "start_value": start_val, "end_value": end_val,
+            "chart_change": chart_change, "chart_change_pct": chart_change_pct,
+            "total_cost": total_cost, "true_pnl": true_pnl, "true_pnl_pct": true_pnl_pct,
+        },
     }
 
 

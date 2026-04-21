@@ -470,7 +470,8 @@ function PerformanceSection({ userId }) {
   };
 
   const s = chartData?.summary || {};
-  const isPositive = s.change >= 0;
+  const isPositive = s.true_pnl >= 0;
+  const cur = chartData?.currency === "INR" ? "₹" : "$";
   const cfDates = new Set((chartData?.cash_flows || []).map(cf => cf.date));
   const sellDates = new Set((chartData?.sell_events || []).map(se => se.date));
 
@@ -481,15 +482,15 @@ function PerformanceSection({ userId }) {
     return (
       <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, padding: 10, fontSize: 12 }}>
         <div style={{ fontWeight: "bold", marginBottom: 4 }}>{label}</div>
-        <div>Value: ${fmt(payload[0].value)}</div>
+        <div>Value: {cur}{fmt(payload[0].value)}</div>
         {cf.map((c, i) => (
           <div key={i} style={{ color: c.type === "DEPOSIT" ? "#2e7d32" : "#c62828", marginTop: 2 }}>
-            {c.type === "DEPOSIT" ? "⬇" : "⬆"} {c.type}: ${fmt(c.amount)}
+            {c.type === "DEPOSIT" ? "⬇" : "⬆"} {c.type}: {cur}{fmt(c.amount)}
           </div>
         ))}
         {se.map((e, i) => (
           <div key={i} style={{ color: "#6a1b9a", marginTop: 2 }}>
-            💎 Sold {e.symbol} ({e.qty}) — P/L: ${fmt(e.realized_pnl)}
+            💎 Sold {e.symbol} ({e.qty}) — P/L: {cur}{fmt(e.realized_pnl)}
           </div>
         ))}
       </div>
@@ -519,11 +520,11 @@ function PerformanceSection({ userId }) {
       {/* Summary card */}
       {chartData && chartData.data_points.length > 0 && (
         <div style={{ ...card, display: "flex", gap: 24, flexWrap: "wrap", background: isPositive ? "#e8f5e9" : "#ffebee" }}>
-          <div><span style={{ fontSize: 12, color: "#666" }}>Start Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>${fmt(s.start_value)}</span></div>
-          <div><span style={{ fontSize: 12, color: "#666" }}>End Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>${fmt(s.end_value)}</span></div>
-          <div><span style={{ fontSize: 12, color: "#666" }}>Change</span><br />
-            <span style={{ fontSize: 18, fontWeight: "bold", color: clr(s.change) }}>
-              {s.change >= 0 ? "+" : ""}${fmt(s.change)} ({s.change_pct >= 0 ? "+" : ""}{s.change_pct}%)
+          <div><span style={{ fontSize: 12, color: "#666" }}>Total Invested</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.total_cost)}</span></div>
+          <div><span style={{ fontSize: 12, color: "#666" }}>Current Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.end_value)}</span></div>
+          <div><span style={{ fontSize: 12, color: "#666" }}>P/L</span><br />
+            <span style={{ fontSize: 18, fontWeight: "bold", color: clr(s.true_pnl) }}>
+              {s.true_pnl >= 0 ? "+" : ""}{cur}{fmt(s.true_pnl)} ({s.true_pnl_pct >= 0 ? "+" : ""}{s.true_pnl_pct}%)
             </span>
           </div>
           <div><span style={{ fontSize: 12, color: "#666" }}>Period</span><br /><span style={{ fontSize: 13 }}>{chartData.start_date} — {chartData.end_date}</span></div>
@@ -549,7 +550,7 @@ function PerformanceSection({ userId }) {
                   ? `${months[parseInt(parts[1])-1]} '${parts[0].slice(2)}`
                   : `${months[parseInt(parts[1])-1]} ${parseInt(parts[2])}`;
               }} interval="preserveStartEnd" />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${cur}${(v/1000).toFixed(0)}k`} />
               <Tooltip content={<CustomTooltip />} />
               <Area type="monotone" dataKey="value" stroke={isPositive ? "#2e7d32" : "#c62828"}
                 fill="url(#colorVal)" strokeWidth={2} dot={false} />
