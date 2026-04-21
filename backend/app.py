@@ -1330,6 +1330,10 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
     period_gain = round(end_val - start_val - period_net_cashflow, 2)
     period_gain_pct = round(period_gain / start_val * 100, 2) if start_val else 0
 
+    # End point stock/cash breakdown
+    end_stock = data_points[-1].get("stock_value", 0) if data_points else 0
+    end_cash = data_points[-1].get("cash", 0) if data_points else 0
+
     # All-time P/L from cash flows
     true_pnl = round(end_val - net_invested, 2)
     true_pnl_pct = round(true_pnl / net_invested * 100, 2) if net_invested else 0
@@ -1341,6 +1345,7 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
         "summary": {
             "start_value": start_val, "end_value": end_val,
             "period_gain": period_gain, "period_gain_pct": period_gain_pct,
+            "end_stock_value": end_stock, "end_cash": end_cash,
             "net_invested": net_invested, "true_pnl": true_pnl, "true_pnl_pct": true_pnl_pct,
         },
     }

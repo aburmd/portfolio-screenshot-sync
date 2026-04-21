@@ -529,13 +529,8 @@ function PerformanceSection({ userId }) {
               {s.period_gain >= 0 ? "+" : ""}{cur}{fmt(s.period_gain)} ({s.period_gain_pct >= 0 ? "+" : ""}{s.period_gain_pct}%)
             </span>
           </div>
-          <div style={{ borderLeft: "1px solid #ccc", paddingLeft: 16 }}>
-            <span style={{ fontSize: 12, color: "#666" }}>All-Time P/L</span><br />
-            <span style={{ fontSize: 15, fontWeight: "bold", color: clr(s.true_pnl) }}>
-              {s.true_pnl >= 0 ? "+" : ""}{cur}{fmt(s.true_pnl)} ({s.true_pnl_pct >= 0 ? "+" : ""}{s.true_pnl_pct}%)
-            </span>
-            <div style={{ fontSize: 11, color: "#999" }}>Invested: {cur}{fmt(s.net_invested)}</div>
-          </div>
+          <div><span style={{ fontSize: 12, color: "#666" }}>Stock Invested</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.end_stock_value)}</span></div>
+          <div><span style={{ fontSize: 12, color: "#666" }}>Balance Cash</span><br /><span style={{ fontSize: 18, fontWeight: "bold", color: "#1976d2" }}>{cur}{fmt(s.end_cash)}</span></div>
           <div><span style={{ fontSize: 12, color: "#666" }}>Period</span><br /><span style={{ fontSize: 13 }}>{chartData.start_date} — {chartData.end_date}</span></div>
         </div>
       )}
