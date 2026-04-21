@@ -1043,14 +1043,45 @@ async def add_buy_lot(user_id: str, data: dict):
 
 @app.get("/performance/{user_id}/buy-lots")
 async def list_buy_lots(user_id: str, symbol: str = None):
-    """List buy lots, optionally filtered by symbol."""
+    """List buy lots merged with portfolio holdings. Stocks without explicit lots show as default lots."""
     table = ddb.Table(BUY_LOTS_TABLE)
     if symbol:
         resp = table.query(
             KeyConditionExpression=Key("user_id").eq(user_id) & Key("symbol_ts").begins_with(f"{symbol.upper()}#"))
     else:
         resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
-    return _decimal_to_float(resp.get("Items", []))
+    lots = _decimal_to_float(resp.get("Items", []))
+
+    # Get portfolio holdings to auto-populate defaults
+    holdings_table = ddb.Table(PORTFOLIO_TABLE)
+    h_resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    holdings = _decimal_to_float(h_resp.get("Items", []))
+
+    # Find symbols that have explicit lots
+    symbols_with_lots = set(l["symbol"] for l in lots)
+
+    # Add default lots for holdings without explicit lots
+    from datetime import date
+    for h in holdings:
+        sym = h.get("symbol", "UNKNOWN")
+        if sym == "UNKNOWN" or (symbol and sym != symbol.upper()):
+            continue
+        if sym not in symbols_with_lots:
+            lots.append({
+                "user_id": user_id,
+                "symbol_ts": f"{sym}#default",
+                "symbol": sym,
+                "stock_name": h.get("stock_name", ""),
+                "quantity": h["quantity"],
+                "buy_price": h["avg_buy_price"],
+                "buy_date": date.today().isoformat(),
+                "currency": h.get("currency", "USD"),
+                "platform": h.get("platform_name", "unknown"),
+                "is_default": True,
+            })
+
+    lots.sort(key=lambda x: (x["symbol"], x.get("buy_date", "")))
+    return lots
 
 
 @app.delete("/performance/{user_id}/buy-lot/{sk}")

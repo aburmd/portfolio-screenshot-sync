@@ -421,7 +421,7 @@ function PerformanceSection({ userId }) {
   const [customEnd, setCustomEnd] = useState("");
   const [chartData, setChartData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [lotsOpen, setLotsOpen] = useState(false);
+  const [lotsOpen, setLotsOpen] = useState(true);
   const [lots, setLots] = useState([]);
   const [lotForm, setLotForm] = useState({ symbol: "", stock_name: "", quantity: "", buy_price: "", buy_date: new Date().toISOString().slice(0, 10), currency: "USD", platform: "" });
   const [backfilling, setBackfilling] = useState(false);
@@ -440,7 +440,7 @@ function PerformanceSection({ userId }) {
   }, [userId]);
 
   useEffect(() => { loadChart(); }, [loadChart]);
-  useEffect(() => { if (lotsOpen) loadLots(); }, [lotsOpen, loadLots]);
+  useEffect(() => { loadLots(); }, [loadLots]);
 
   const handleAddLot = async () => {
     if (!lotForm.symbol || !lotForm.quantity || !lotForm.buy_price) return;
@@ -625,11 +625,12 @@ function PerformanceSection({ userId }) {
                 <th style={{ padding: 5, textAlign: "left" }}>Buy Date</th>
                 <th style={{ padding: 5, textAlign: "left" }}>Currency</th>
                 <th style={{ padding: 5, textAlign: "left" }}>Platform</th>
+                <th style={{ padding: 5, textAlign: "left" }}>Source</th>
                 <th style={{ padding: 5 }}></th>
               </tr></thead>
               <tbody>
                 {lots.map(l => (
-                  <tr key={l.symbol_ts}>
+                  <tr key={l.symbol_ts} style={{ background: l.is_default ? "#fff8e1" : "#fff" }}>
                     <td style={{ padding: 5, fontWeight: "bold" }}>{l.symbol}</td>
                     <td style={{ padding: 5 }}>{l.stock_name}</td>
                     <td style={{ padding: 5, textAlign: "right" }}>{l.quantity}</td>
@@ -637,12 +638,17 @@ function PerformanceSection({ userId }) {
                     <td style={{ padding: 5 }}>{l.buy_date}</td>
                     <td style={{ padding: 5 }}>{l.currency}</td>
                     <td style={{ padding: 5 }}>{l.platform}</td>
-                    <td style={{ padding: 5 }}><button style={btnDanger} onClick={() => handleDeleteLot(l.symbol_ts)}>Del</button></td>
+                    <td style={{ padding: 5, fontSize: 11, color: l.is_default ? "#f57c00" : "#388e3c" }}>
+                      {l.is_default ? "⚠ Auto (edit date)" : "✅ Manual"}
+                    </td>
+                    <td style={{ padding: 5 }}>
+                      {!l.is_default && <button style={btnDanger} onClick={() => handleDeleteLot(l.symbol_ts)}>Del</button>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          ) : <p style={{ color: "#999", fontSize: 12, marginTop: 8 }}>No buy lots. Add lots to enable historical backfill.</p>}
+          ) : <p style={{ color: "#999", fontSize: 12, marginTop: 8 }}>No stocks in portfolio.</p>}
         </div>
       )}
     </div>
