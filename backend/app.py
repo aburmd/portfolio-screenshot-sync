@@ -1188,11 +1188,18 @@ async def backfill_one(user_id: str, symbol: str):
 @app.get("/performance/{user_id}/chart")
 async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = None,
                          end_date: str = None, platform: str = "all"):
-    """Get portfolio value time series for chart."""
+    """Get portfolio value time series for chart.
+
+    Chart value = stock_value (from daily-prices DDB) + cash_balance (from transactions + lots).
+    Period Gain = end_value - start_value - net_cashflows_during_period (pure market movement).
+    Period Gain % = XIRR (annualized, consistent with XIRR tab).
+    """
     from datetime import date, timedelta
     from dateutil.relativedelta import relativedelta
 
     today = date.today()
+
+    # 1. Resolve period to start/end dates
     if period == "custom" and start_date and end_date:
         sd = date.fromisoformat(start_date)
         ed = date.fromisoformat(end_date)
@@ -1203,12 +1210,9 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
             "1Y": relativedelta(years=1), "3Y": relativedelta(years=3),
             "5Y": relativedelta(years=5), "10Y": relativedelta(years=10),
         }
-        if period == "YTD":
-            sd = date(today.year, 1, 1)
-        else:
-            sd = today - period_map.get(period, relativedelta(years=1))
+        sd = date(today.year, 1, 1) if period == "YTD" else today - period_map.get(period, relativedelta(years=1))
 
-    # Query daily prices using date-index GSI
+    # 2. Query daily stock prices (one query)
     dp_table = ddb.Table(DAILY_PRICES_TABLE)
     resp = dp_table.query(
         IndexName="date-index",
@@ -1223,15 +1227,28 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
         )
         items.extend(resp.get("Items", []))
 
-    # Aggregate by date
+    # 3. Query all transactions (one query, reused for cash flows, XIRR, and period gain)
+    txn_table = ddb.Table(TRANSACTIONS_TABLE)
+    txn_resp = txn_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    all_txns = txn_resp.get("Items", [])
+
+    # 4. Query all buy lots (one query, reused for cash balance)
+    lots_table = ddb.Table(BUY_LOTS_TABLE)
+    lots_resp = lots_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    all_lots = _decimal_to_float(lots_resp.get("Items", []))
+
+    # 5. Determine currency
+    currencies = set(item.get("currency", "USD") for item in items)
+    currency = "INR" if currencies == {"INR"} else "USD"
+
+    # 6. Aggregate stock values by date
     by_date = {}
     for item in items:
         if platform != "all" and item.get("platform", "") != platform:
             continue
         d = item["date"]
-        val = float(item.get("value", 0))
         by_date.setdefault(d, {"value": 0, "count": 0})
-        by_date[d]["value"] += val
+        by_date[d]["value"] += float(item.get("value", 0))
         by_date[d]["count"] += 1
 
     data_points = sorted(
@@ -1239,103 +1256,62 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
         key=lambda x: x["date"]
     )
 
-    # Cash flows in range
-    txn_table = ddb.Table(TRANSACTIONS_TABLE)
-    txn_resp = txn_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
-    cash_flows = []
-    sell_events = []
-    for txn in txn_resp.get("Items", []):
-        txn_date = txn.get("date", "")
-        if not txn_date or txn_date < sd.isoformat() or txn_date > ed.isoformat():
-            continue
-        t = txn.get("type", "")
-        if t in ("DEPOSIT", "WITHDRAW"):
-            cash_flows.append({"date": txn_date, "type": t,
-                "amount": float(txn.get("amount", 0)), "currency": txn.get("currency", "USD")})
-        elif t == "SELL":
-            qty = float(txn.get("quantity", 0))
-            buy_p = float(txn.get("avg_buy_price", 0))
-            sell_p = float(txn.get("avg_sold_price", 0))
-            sell_events.append({"date": txn_date, "symbol": txn.get("symbol", ""),
-                "qty": qty, "realized_pnl": round((sell_p - buy_p) * qty, 2)})
+    # 7. Build cash balance timeline: cash = cumulative(deposits - withdrawals) - cumulative(lot costs)
+    cash_events = sorted(
+        [(t.get("date", ""), float(t.get("amount", 0)) * (1 if t.get("type") == "DEPOSIT" else -1))
+         for t in all_txns if t.get("type") in ("DEPOSIT", "WITHDRAW") and t.get("date")]
+    )
+    lot_costs = sorted(
+        [(l.get("buy_date", ""), l["quantity"] * l["buy_price"])
+         for l in all_lots if l.get("buy_date")]
+    )
 
-    # Calculate true P/L from cash flows (deposits - withdrawals = net invested)
-    txn_table_for_pnl = ddb.Table(TRANSACTIONS_TABLE)
-    all_txns = txn_table_for_pnl.query(KeyConditionExpression=Key("user_id").eq(user_id))
-    all_txn_items = all_txns.get("Items", [])
-    total_deposits = sum(float(t.get("amount", 0)) for t in all_txn_items if t.get("type") == "DEPOSIT")
-    total_withdrawals = sum(float(t.get("amount", 0)) for t in all_txn_items if t.get("type") == "WITHDRAW")
-    net_invested = round(total_deposits - total_withdrawals, 2)
-
-    # Determine dominant currency
-    currencies = set()
-    for item in items:
-        currencies.add(item.get("currency", "USD"))
-    currency = "INR" if "INR" in currencies and len(currencies) == 1 else "USD"
-
-    # Build cash balance timeline
-    lots_table = ddb.Table(BUY_LOTS_TABLE)
-    lots_resp = lots_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
-    lots_items = _decimal_to_float(lots_resp.get("Items", []))
-
-    cash_events = []
-    for t in all_txn_items:
-        d = t.get("date", "")
-        if not d:
-            continue
-        if t.get("type") == "DEPOSIT":
-            cash_events.append((d, float(t.get("amount", 0))))
-        elif t.get("type") == "WITHDRAW":
-            cash_events.append((d, -float(t.get("amount", 0))))
-
-    lot_events = []
-    for l in lots_items:
-        d = l.get("buy_date", "")
-        if d:
-            lot_events.append((d, l["quantity"] * l["buy_price"]))
-
-    cash_events.sort()
-    lot_events.sort()
-
-    def cash_at_date(target_date):
-        cash = 0
-        for d, amt in cash_events:
-            if d <= target_date:
-                cash += amt
-            else:
-                break
-        for d, cost in lot_events:
-            if d <= target_date:
-                cash -= cost
-            else:
-                break
+    def cash_at_date(target):
+        cash = sum(amt for d, amt in cash_events if d <= target)
+        cash -= sum(cost for d, cost in lot_costs if d <= target)
         return max(cash, 0)
 
-    # Add cash balance to each data point
+    # 8. Add cash to each data point → total value = stocks + cash
     for dp in data_points:
         dp["stock_value"] = dp["value"]
         dp["cash"] = round(cash_at_date(dp["date"]), 2)
         dp["value"] = round(dp["stock_value"] + dp["cash"], 2)
 
-    # Summary (after cash is added to values)
+    # 9. Extract cash flows and sell events in the visible range (for chart annotations)
+    visible_cfs = []
+    visible_sells = []
+    for txn in all_txns:
+        txn_date = txn.get("date", "")
+        if not txn_date or txn_date < sd.isoformat() or txn_date > ed.isoformat():
+            continue
+        t = txn.get("type", "")
+        if t in ("DEPOSIT", "WITHDRAW"):
+            visible_cfs.append({"date": txn_date, "type": t,
+                "amount": float(txn.get("amount", 0)), "currency": txn.get("currency", "USD")})
+        elif t == "SELL":
+            qty = float(txn.get("quantity", 0))
+            buy_p = float(txn.get("avg_buy_price", 0))
+            sell_p = float(txn.get("avg_sold_price", 0))
+            visible_sells.append({"date": txn_date, "symbol": txn.get("symbol", ""),
+                "qty": qty, "realized_pnl": round((sell_p - buy_p) * qty, 2)})
+
+    # 10. Compute summary
     start_val = data_points[0]["value"] if data_points else 0
     end_val = data_points[-1]["value"] if data_points else 0
-    actual_start_date = data_points[0]["date"] if data_points else sd.isoformat()
-    actual_end_date = data_points[-1]["date"] if data_points else ed.isoformat()
+    actual_start = data_points[0]["date"] if data_points else sd.isoformat()
+    actual_end = data_points[-1]["date"] if data_points else ed.isoformat()
 
-    # Period gain = market movement only (strip out deposits/withdrawals between actual data points)
-    period_deposits = sum(float(t.get("amount", 0)) for t in all_txn_items
-        if t.get("type") == "DEPOSIT" and actual_start_date < t.get("date", "") <= actual_end_date)
-    period_withdrawals = sum(float(t.get("amount", 0)) for t in all_txn_items
-        if t.get("type") == "WITHDRAW" and actual_start_date < t.get("date", "") <= actual_end_date)
-    period_net_cashflow = round(period_deposits - period_withdrawals, 2)
-    period_gain = round(end_val - start_val - period_net_cashflow, 2)
+    # Period gain (amount) = value change minus deposits/withdrawals during period
+    period_net_cf = sum(
+        float(t.get("amount", 0)) * (1 if t.get("type") == "DEPOSIT" else -1)
+        for t in all_txns
+        if t.get("type") in ("DEPOSIT", "WITHDRAW") and actual_start < t.get("date", "") <= actual_end
+    )
+    period_gain = round(end_val - start_val - period_net_cf, 2)
 
-    # Use XIRR for the gain % (consistent across all views)
-    from datetime import date as date_cls
-    today = date_cls.today()
+    # Period gain % = XIRR (annualized return from all cash flows + current value)
     xirr_cfs = []
-    for t in all_txn_items:
+    for t in all_txns:
         d = _parse_date(t.get("date", ""))
         if not d:
             continue
@@ -1350,23 +1326,19 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
     xirr_val = _compute_xirr(xirr_cfs)
     period_gain_pct = round(xirr_val * 100, 2) if xirr_val is not None else 0
 
-    # End point stock/cash breakdown
     end_stock = data_points[-1].get("stock_value", 0) if data_points else 0
     end_cash = data_points[-1].get("cash", 0) if data_points else 0
-
-    # All-time P/L from cash flows
-    true_pnl = round(end_val - net_invested, 2)
-    true_pnl_pct = round(true_pnl / net_invested * 100, 2) if net_invested else 0
 
     return {
         "period": period, "start_date": sd.isoformat(), "end_date": ed.isoformat(),
         "currency": currency,
-        "data_points": data_points, "cash_flows": cash_flows, "sell_events": sell_events,
+        "data_points": data_points,
+        "cash_flows": visible_cfs,
+        "sell_events": visible_sells,
         "summary": {
             "start_value": start_val, "end_value": end_val,
             "period_gain": period_gain, "period_gain_pct": period_gain_pct,
             "end_stock_value": end_stock, "end_cash": end_cash,
-            "net_invested": net_invested, "true_pnl": true_pnl, "true_pnl_pct": true_pnl_pct,
         },
     }
 
