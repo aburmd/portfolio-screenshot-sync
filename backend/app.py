@@ -1275,8 +1275,26 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
 
     start_val = data_points[0]["value"] if data_points else 0
     end_val = data_points[-1]["value"] if data_points else 0
-    period_change = round(end_val - start_val, 2)
-    period_change_pct = round(period_change / start_val * 100, 2) if start_val else 0
+
+    # Cost of new lots bought during the selected period
+    lots_table = ddb.Table(BUY_LOTS_TABLE)
+    lots_resp = lots_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    lots_items = _decimal_to_float(lots_resp.get("Items", []))
+    period_lot_cost = sum(
+        l["quantity"] * l["buy_price"]
+        for l in lots_items
+        if sd.isoformat() <= l.get("buy_date", "") <= ed.isoformat()
+    )
+    # Also include remainder/default lots not in buy-lots table
+    # by checking holdings bought after period start (lots with buy_date in period)
+    # The lots_items already covers explicit lots; for stocks with no lots,
+    # they show as auto lots with today's date — skip those (is_default)
+    period_lot_cost = round(period_lot_cost, 2)
+
+    # Period gain = value change minus cost of new stock purchases
+    period_gain = round(end_val - start_val - period_lot_cost, 2)
+    period_base = start_val + period_lot_cost
+    period_gain_pct = round(period_gain / period_base * 100, 2) if period_base else 0
 
     # All-time P/L from cash flows
     total_deposits = sum(float(t.get("amount", 0)) for t in all_txn_items if t.get("type") == "DEPOSIT")
@@ -1291,7 +1309,8 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
         "data_points": data_points, "cash_flows": cash_flows, "sell_events": sell_events,
         "summary": {
             "start_value": start_val, "end_value": end_val,
-            "period_change": period_change, "period_change_pct": period_change_pct,
+            "period_gain": period_gain, "period_gain_pct": period_gain_pct,
+            "period_lot_cost": period_lot_cost,
             "net_invested": net_invested, "true_pnl": true_pnl, "true_pnl_pct": true_pnl_pct,
         },
     }

@@ -470,7 +470,7 @@ function PerformanceSection({ userId }) {
   };
 
   const s = chartData?.summary || {};
-  const isPositive = s.period_change >= 0;
+  const isPositive = s.period_gain >= 0;
   const cur = chartData?.currency === "INR" ? "₹" : "$";
   const cfDates = new Set((chartData?.cash_flows || []).map(cf => cf.date));
   const sellDates = new Set((chartData?.sell_events || []).map(se => se.date));
@@ -522,10 +522,11 @@ function PerformanceSection({ userId }) {
         <div style={{ ...card, display: "flex", gap: 24, flexWrap: "wrap", background: isPositive ? "#e8f5e9" : "#ffebee" }}>
           <div><span style={{ fontSize: 12, color: "#666" }}>Start Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.start_value)}</span></div>
           <div><span style={{ fontSize: 12, color: "#666" }}>End Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.end_value)}</span></div>
-          <div><span style={{ fontSize: 12, color: "#666" }}>Period Change</span><br />
-            <span style={{ fontSize: 18, fontWeight: "bold", color: clr(s.period_change) }}>
-              {s.period_change >= 0 ? "+" : ""}{cur}{fmt(s.period_change)} ({s.period_change_pct >= 0 ? "+" : ""}{s.period_change_pct}%)
+          <div><span style={{ fontSize: 12, color: "#666" }}>Period Gain</span><br />
+            <span style={{ fontSize: 18, fontWeight: "bold", color: clr(s.period_gain) }}>
+              {s.period_gain >= 0 ? "+" : ""}{cur}{fmt(s.period_gain)} ({s.period_gain_pct >= 0 ? "+" : ""}{s.period_gain_pct}%)
             </span>
+            {s.period_lot_cost > 0 && <div style={{ fontSize: 11, color: "#999" }}>New buys: {cur}{fmt(s.period_lot_cost)}</div>}
           </div>
           <div style={{ borderLeft: "1px solid #ccc", paddingLeft: 16 }}>
             <span style={{ fontSize: 12, color: "#666" }}>All-Time P/L</span><br />
