@@ -520,7 +520,7 @@ function PerformanceSection({ userId }) {
       {/* Summary card */}
       {chartData && chartData.data_points.length > 0 && (
         <div style={{ ...card, display: "flex", gap: 24, flexWrap: "wrap", background: isPositive ? "#e8f5e9" : "#ffebee" }}>
-          <div><span style={{ fontSize: 12, color: "#666" }}>Total Invested</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.total_cost)}</span></div>
+          <div><span style={{ fontSize: 12, color: "#666" }}>Net Invested</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.net_invested)}</span></div>
           <div><span style={{ fontSize: 12, color: "#666" }}>Current Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.end_value)}</span></div>
           <div><span style={{ fontSize: 12, color: "#666" }}>P/L</span><br />
             <span style={{ fontSize: 18, fontWeight: "bold", color: clr(s.true_pnl) }}>
