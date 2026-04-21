@@ -1276,19 +1276,60 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
     start_val = data_points[0]["value"] if data_points else 0
     end_val = data_points[-1]["value"] if data_points else 0
 
-    # Cost of new lots bought during the selected period
+    # Build cash balance timeline
+    # Cash = cumulative deposits - cumulative withdrawals - cumulative lot purchases
+    # at each date
     lots_table = ddb.Table(BUY_LOTS_TABLE)
     lots_resp = lots_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
     lots_items = _decimal_to_float(lots_resp.get("Items", []))
+
+    # Build sorted events: deposits, withdrawals, lot buys
+    cash_events = []  # (date, amount_change)
+    for t in all_txn_items:
+        d = t.get("date", "")
+        if not d:
+            continue
+        if t.get("type") == "DEPOSIT":
+            cash_events.append((d, float(t.get("amount", 0))))
+        elif t.get("type") == "WITHDRAW":
+            cash_events.append((d, -float(t.get("amount", 0))))
+
+    lot_events = []  # (date, cost)
+    for l in lots_items:
+        d = l.get("buy_date", "")
+        if d:
+            lot_events.append((d, l["quantity"] * l["buy_price"]))
+
+    # Compute cash balance at each chart date
+    cash_events.sort()
+    lot_events.sort()
+
+    def cash_at_date(target_date):
+        cash = 0
+        for d, amt in cash_events:
+            if d <= target_date:
+                cash += amt
+            else:
+                break
+        for d, cost in lot_events:
+            if d <= target_date:
+                cash -= cost
+            else:
+                break
+        return max(cash, 0)  # cash can't go negative in display
+
+    # Add cash balance to each data point
+    for dp in data_points:
+        dp["stock_value"] = dp["value"]
+        dp["cash"] = round(cash_at_date(dp["date"]), 2)
+        dp["value"] = round(dp["stock_value"] + dp["cash"], 2)
+
+    # Period gain using lot costs
     period_lot_cost = sum(
         l["quantity"] * l["buy_price"]
         for l in lots_items
         if sd.isoformat() <= l.get("buy_date", "") <= ed.isoformat()
     )
-    # Also include remainder/default lots not in buy-lots table
-    # by checking holdings bought after period start (lots with buy_date in period)
-    # The lots_items already covers explicit lots; for stocks with no lots,
-    # they show as auto lots with today's date — skip those (is_default)
     period_lot_cost = round(period_lot_cost, 2)
 
     # Period gain = value change minus cost of new stock purchases

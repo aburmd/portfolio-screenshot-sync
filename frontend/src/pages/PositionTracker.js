@@ -482,7 +482,9 @@ function PerformanceSection({ userId }) {
     return (
       <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, padding: 10, fontSize: 12 }}>
         <div style={{ fontWeight: "bold", marginBottom: 4 }}>{label}</div>
-        <div>Value: {cur}{fmt(payload[0].value)}</div>
+        <div>Total: {cur}{fmt(payload[0].value)}</div>
+        {payload[0].payload.stock_value != null && <div style={{ color: "#666" }}>Stocks: {cur}{fmt(payload[0].payload.stock_value)}</div>}
+        {payload[0].payload.cash > 0 && <div style={{ color: "#1976d2" }}>Cash: {cur}{fmt(payload[0].payload.cash)}</div>}
         {cf.map((c, i) => (
           <div key={i} style={{ color: c.type === "DEPOSIT" ? "#2e7d32" : "#c62828", marginTop: 2 }}>
             {c.type === "DEPOSIT" ? "⬇" : "⬆"} {c.type}: {cur}{fmt(c.amount)}
