@@ -1320,15 +1320,35 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
     # Summary (after cash is added to values)
     start_val = data_points[0]["value"] if data_points else 0
     end_val = data_points[-1]["value"] if data_points else 0
+    actual_start_date = data_points[0]["date"] if data_points else sd.isoformat()
+    actual_end_date = data_points[-1]["date"] if data_points else ed.isoformat()
 
-    # Period gain = market movement only (strip out deposits/withdrawals during period)
+    # Period gain = market movement only (strip out deposits/withdrawals between actual data points)
     period_deposits = sum(float(t.get("amount", 0)) for t in all_txn_items
-        if t.get("type") == "DEPOSIT" and sd.isoformat() <= t.get("date", "") <= ed.isoformat())
+        if t.get("type") == "DEPOSIT" and actual_start_date < t.get("date", "") <= actual_end_date)
     period_withdrawals = sum(float(t.get("amount", 0)) for t in all_txn_items
-        if t.get("type") == "WITHDRAW" and sd.isoformat() <= t.get("date", "") <= ed.isoformat())
+        if t.get("type") == "WITHDRAW" and actual_start_date < t.get("date", "") <= actual_end_date)
     period_net_cashflow = round(period_deposits - period_withdrawals, 2)
     period_gain = round(end_val - start_val - period_net_cashflow, 2)
-    period_gain_pct = round(period_gain / start_val * 100, 2) if start_val else 0
+
+    # Use XIRR for the gain % (consistent across all views)
+    from datetime import date as date_cls
+    today = date_cls.today()
+    xirr_cfs = []
+    for t in all_txn_items:
+        d = _parse_date(t.get("date", ""))
+        if not d:
+            continue
+        if t.get("type") == "DEPOSIT":
+            xirr_cfs.append((-float(t.get("amount", 0)), d))
+        elif t.get("type") == "WITHDRAW":
+            xirr_cfs.append((float(t.get("amount", 0)), d))
+        elif t.get("type") == "SELL":
+            xirr_cfs.append((float(t.get("quantity", 0)) * float(t.get("avg_sold_price", 0)), d))
+    if end_val > 0:
+        xirr_cfs.append((end_val, today))
+    xirr_val = _compute_xirr(xirr_cfs)
+    period_gain_pct = round(xirr_val * 100, 2) if xirr_val is not None else 0
 
     # End point stock/cash breakdown
     end_stock = data_points[-1].get("stock_value", 0) if data_points else 0
