@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import UploadArea from "../components/UploadArea";
 import PortfolioTable from "../components/PortfolioTable";
-import { fetchPortfolio, uploadScreenshots, downloadCsv, deleteStock, bulkDeleteStocks, updateStock, addStock, fetchPrices, fetchExchangeRate, fetchUploadStatus, requestShare, getMyShares, revokeShare } from "../services/api";
+import { fetchPortfolio, uploadScreenshots, uploadCsv, downloadCsv, deleteStock, bulkDeleteStocks, updateStock, addStock, fetchPrices, fetchExchangeRate, fetchUploadStatus, requestShare, getMyShares, revokeShare } from "../services/api";
 
 const tabStyle = (active) => ({
   padding: "5px 14px", cursor: "pointer", border: "1px solid #ddd",
@@ -136,6 +136,19 @@ function Dashboard({ user }) {
   const handleAdd = async (sn, q, a, platform, currency) => { try { const r = await addStock(userId, sn, q, a, platform, currency); setMessage(`Added "${sn}" (${r.symbol}) [${r.platform}/${r.currency}]`); loadPortfolio(); } catch (e) { setMessage("Add failed"); } };
   const handleDownloadCsv = async () => { try { await downloadCsv(userId); } catch (e) { setMessage("CSV download failed"); } };
 
+  const handleCsvUpload = async (file) => {
+    if (!userId) return;
+    setUploading(true); setMessage("");
+    try {
+      const result = await uploadCsv(userId, file);
+      const accts = result.accounts || [];
+      const acctNames = accts.map(a => `${a.platform} (${a.stocks} stocks)`).join(", ");
+      setMessage(`✅ CSV imported: ${result.total_stocks} stocks from ${accts.length} account(s): ${acctNames}`);
+      loadPortfolio();
+    } catch (e) { setMessage("CSV upload failed: " + e.message); }
+    setUploading(false);
+  };
+
   const handleShare = async () => {
     if (!shareEmail.trim()) return;
     const result = await requestShare(userId, shareEmail.trim());
@@ -158,7 +171,7 @@ function Dashboard({ user }) {
 
   return (
     <div>
-      <UploadArea onUpload={handleUpload} uploading={uploading} />
+      <UploadArea onUpload={handleUpload} onCsvUpload={handleCsvUpload} uploading={uploading} />
       {message && <p style={{ color: "#666", marginTop: 10 }}>{message}</p>}
       {showStatus && uploadStatus.length > 0 && <ProcessingStatus items={uploadStatus} />}
 

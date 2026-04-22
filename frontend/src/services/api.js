@@ -24,6 +24,15 @@ export async function uploadScreenshots(userId, files, platform) {
   return res.json();
 }
 
+export async function uploadCsv(userId, file) {
+  const formData = new FormData();
+  formData.append("user_id", userId);
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE}/upload/csv`, { method: "POST", body: formData });
+  if (!res.ok) throw new Error("CSV upload failed");
+  return res.json();
+}
+
 export async function addStock(userId, stockName, quantity, avgBuyPrice, platform, currency) {
   const formData = new FormData();
   formData.append("stock_name", stockName);

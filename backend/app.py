@@ -1009,6 +1009,112 @@ def _compute_xirr(cash_flows):
     return round(rate, 6) if abs(npv(rate)) < 1.0 else None
 
 
+# --- Fidelity CSV upload ---
+
+@app.post("/upload/csv")
+async def upload_csv(file: UploadFile = File(...), user_id: str = Form(...)):
+    """Parse Fidelity CSV and upsert stocks to portfolio. Each account = separate platform."""
+    import csv as csv_mod
+    from decimal import Decimal
+    from datetime import datetime, timezone as tz
+    from collections import defaultdict
+
+    content = (await file.read()).decode("utf-8-sig")  # handles BOM
+    reader = csv_mod.DictReader(content.splitlines())
+
+    # Account type abbreviations
+    type_map = {
+        "INDIVIDUAL": "IND", "ROTH IRA": "RothIRA", "401K": "401K", "401(K)": "401K",
+        "HSA": "HSA", "ROLLOVER IRA": "RollIRA",
+    }
+
+    def make_platform(acct_name, acct_num):
+        base = acct_name.split("-")[0].strip().upper()
+        abbr = type_map.get(base, base[:10])
+        return f"Fid-{abbr}-{acct_num}"
+
+    def clean_num(val):
+        if not val:
+            return 0
+        return float(val.replace("$", "").replace("+", "").replace(",", "").strip())
+
+    # Parse and group by (platform, symbol)
+    stocks = defaultdict(lambda: {"qty": 0, "cost": 0, "name": ""})
+    accounts = {}
+    cash_positions = {}
+
+    for row in reader:
+        acct_num = (row.get("Account Number") or "").strip()
+        acct_name = (row.get("Account Name") or "").strip()
+        symbol = (row.get("Symbol") or "").strip()
+        if not acct_num or not symbol:
+            continue
+
+        platform = make_platform(acct_name, acct_num)
+        accounts[platform] = acct_name
+
+        # Skip cash/money market positions
+        if "**" in symbol:
+            cur_val = clean_num(row.get("Current Value"))
+            cash_positions[platform] = cash_positions.get(platform, 0) + cur_val
+            continue
+
+        qty = clean_num(row.get("Quantity"))
+        cost_basis = clean_num(row.get("Cost Basis Total"))
+        desc = (row.get("Description") or "").strip()
+        if qty <= 0:
+            continue
+
+        key = (platform, symbol)
+        stocks[key]["qty"] += qty
+        stocks[key]["cost"] += cost_basis
+        stocks[key]["name"] = desc
+
+    # Upsert to DDB
+    table = ddb.Table(PORTFOLIO_TABLE)
+    now = datetime.now(tz.utc).isoformat()
+    added = 0
+    merged = 0
+
+    for (platform, symbol), data in stocks.items():
+        avg_price = round(data["cost"] / data["qty"], 2) if data["qty"] > 0 else 0
+        stock_name = data["name"] or symbol
+
+        # Check if exists (for merge count)
+        existing = table.get_item(Key={"user_id": user_id, "stock_name": stock_name}).get("Item")
+        if existing:
+            merged += 1
+        else:
+            added += 1
+
+        table.put_item(Item={
+            "user_id": user_id,
+            "stock_name": stock_name,
+            "symbol": symbol,
+            "quantity": Decimal(str(round(data["qty"], 6))),
+            "avg_buy_price": Decimal(str(avg_price)),
+            "platform_name": platform,
+            "currency": "USD",
+            "uploaded_date": now,
+        })
+
+    result_accounts = []
+    for platform, acct_name in accounts.items():
+        count = sum(1 for (p, _) in stocks if p == platform)
+        result_accounts.append({
+            "platform": platform, "account_name": acct_name,
+            "stocks": count, "cash_balance": round(cash_positions.get(platform, 0), 2),
+        })
+
+    return {
+        "accounts": result_accounts,
+        "total_stocks": added + merged,
+        "stocks_added": added,
+        "stocks_updated": merged,
+        "duplicates_merged": sum(1 for (_, _), d in stocks.items() if d["qty"] != d["cost"] / (d["qty"] or 1)),
+    }
+
+
 # --- Performance Chart endpoints (admin only) ---
 
 @app.post("/performance/{user_id}/buy-lot")
@@ -1346,7 +1452,6 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
 
 
 # --- Performance Chart helpers ---
-
 def _backfill_symbol(user_id: str, symbol: str, from_date: str, currency: str, platform: str) -> int:
     """Fetch historical prices from Yahoo Finance and write daily records to DDB."""
     from datetime import date, datetime
