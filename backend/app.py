@@ -1029,9 +1029,9 @@ async def upload_csv(file: UploadFile = File(...), user_id: str = Form(...)):
     }
 
     def make_platform(acct_name, acct_num):
-        base = acct_name.split("-")[0].strip().upper()
-        abbr = type_map.get(base, base[:10])
-        return f"Fid-{abbr}-{acct_num}"
+        # Use account number as unique identifier, clean any non-alphanumeric chars
+        clean_num = ''.join(c for c in acct_num if c.isalnum())
+        return f"Fid-{clean_num}"
 
     def clean_num(val):
         if not val:
