@@ -1080,7 +1080,6 @@ async def upload_csv(file: UploadFile = File(...), user_id: str = Form(...)):
         avg_price = round(data["cost"] / data["qty"], 2) if data["qty"] > 0 else 0
         stock_name = data["name"] or symbol
 
-        # Check if exists (for merge count)
         existing = table.get_item(Key={"user_id": user_id, "stock_name": stock_name}).get("Item")
         if existing:
             merged += 1
@@ -1097,6 +1096,21 @@ async def upload_csv(file: UploadFile = File(...), user_id: str = Form(...)):
             "currency": "USD",
             "uploaded_date": now,
         })
+
+    # Store cash positions as WALLETBALANCE per account
+    for platform, cash_amt in cash_positions.items():
+        if cash_amt > 0:
+            wn = f"WALLETBALANCE-{platform}"
+            table.put_item(Item={
+                "user_id": user_id,
+                "stock_name": wn,
+                "symbol": "WALLETBALANCE",
+                "quantity": Decimal(str(round(cash_amt, 2))),
+                "avg_buy_price": Decimal("1"),
+                "platform_name": platform,
+                "currency": "USD",
+                "uploaded_date": now,
+            })
 
     result_accounts = []
     for platform, acct_name in accounts.items():
