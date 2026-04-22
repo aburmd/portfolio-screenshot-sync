@@ -1309,22 +1309,8 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
     )
     period_gain = round(end_val - start_val - period_net_cf, 2)
 
-    # Period gain % = XIRR (annualized return from all cash flows + current value)
-    xirr_cfs = []
-    for t in all_txns:
-        d = _parse_date(t.get("date", ""))
-        if not d:
-            continue
-        if t.get("type") == "DEPOSIT":
-            xirr_cfs.append((-float(t.get("amount", 0)), d))
-        elif t.get("type") == "WITHDRAW":
-            xirr_cfs.append((float(t.get("amount", 0)), d))
-        elif t.get("type") == "SELL":
-            xirr_cfs.append((float(t.get("quantity", 0)) * float(t.get("avg_sold_price", 0)), d))
-    if end_val > 0:
-        xirr_cfs.append((end_val, today))
-    xirr_val = _compute_xirr(xirr_cfs)
-    period_gain_pct = round(xirr_val * 100, 2) if xirr_val is not None else 0
+    # Period gain % = simple return relative to start value (changes per timeframe)
+    period_gain_pct = round(period_gain / start_val * 100, 2) if start_val else 0
 
     end_stock = data_points[-1].get("stock_value", 0) if data_points else 0
     end_cash = data_points[-1].get("cash", 0) if data_points else 0
