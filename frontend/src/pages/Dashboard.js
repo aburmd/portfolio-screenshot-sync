@@ -136,14 +136,19 @@ function Dashboard({ user }) {
   const handleAdd = async (sn, q, a, platform, currency) => { try { const r = await addStock(userId, sn, q, a, platform, currency); setMessage(`Added "${sn}" (${r.symbol}) [${r.platform}/${r.currency}]`); loadPortfolio(); } catch (e) { setMessage("Add failed"); } };
   const handleDownloadCsv = async () => { try { await downloadCsv(userId); } catch (e) { setMessage("CSV download failed"); } };
 
-  const handleCsvUpload = async (file) => {
+  const handleCsvUpload = async (files) => {
     if (!userId) return;
     setUploading(true); setMessage("");
     try {
-      const result = await uploadCsv(userId, file);
-      const accts = result.accounts || [];
-      const acctNames = accts.map(a => `${a.platform} (${a.stocks} stocks)`).join(", ");
-      setMessage(`✅ CSV imported: ${result.total_stocks} stocks from ${accts.length} account(s): ${acctNames}`);
+      let totalStocks = 0;
+      let allAccounts = [];
+      for (const file of files) {
+        const result = await uploadCsv(userId, file);
+        totalStocks += result.total_stocks || 0;
+        allAccounts.push(...(result.accounts || []));
+      }
+      const acctNames = allAccounts.map(a => `${a.platform} (${a.stocks})`).join(", ");
+      setMessage(`✅ CSV imported: ${totalStocks} stocks from ${allAccounts.length} account(s): ${acctNames}`);
       loadPortfolio();
     } catch (e) { setMessage("CSV upload failed: " + e.message); }
     setUploading(false);

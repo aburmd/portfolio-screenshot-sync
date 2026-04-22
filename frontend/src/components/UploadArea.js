@@ -21,9 +21,9 @@ function UploadArea({ onUpload, onCsvUpload, uploading }) {
   const handleFiles = (files) => {
     if (!selectedPlatform) return alert("Please select a platform first");
     if (isCsvPlatform) {
-      const csvFile = files.find(f => f.name.endsWith(".csv"));
-      if (!csvFile) return alert("Please select a CSV file for Fidelity");
-      if (onCsvUpload) onCsvUpload(csvFile);
+      const csvFiles = files.filter(f => f.name.endsWith(".csv"));
+      if (!csvFiles.length) return alert("Please select CSV file(s) for Fidelity");
+      if (onCsvUpload) onCsvUpload(csvFiles);
     } else {
       if (files.length) onUpload(files, selectedPlatform.toLowerCase());
     }
@@ -68,16 +68,16 @@ function UploadArea({ onUpload, onCsvUpload, uploading }) {
         onDrop={handleDrop}
         onClick={() => inputRef.current?.click()}
       >
-        <input ref={inputRef} type="file" accept={isCsvPlatform ? ".csv" : "image/*"} multiple={!isCsvPlatform} hidden onChange={handleSelect} />
+        <input ref={inputRef} type="file" accept={isCsvPlatform ? ".csv" : "image/*"} multiple hidden onChange={handleSelect} />
         {uploading ? (
           <p>Uploading to <strong>{selectedPlatform}</strong>...</p>
         ) : (
           <div>
             {isCsvPlatform ? (
               <div>
-                <p>Drag & drop <strong>{selectedPlatform}</strong> CSV file here, or click to select</p>
+                <p>Drag & drop <strong>{selectedPlatform}</strong> CSV file(s) here, or click to select</p>
                 <p style={{ fontSize: 11, color: "#888", margin: "4px 0 0" }}>
-                  Export from Fidelity: Positions → Download → CSV. Multiple accounts in one file are supported.
+                  Export from Fidelity: Positions → Download → CSV. Select all account CSV files at once.
                 </p>
               </div>
             ) : (
