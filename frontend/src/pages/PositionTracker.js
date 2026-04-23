@@ -514,11 +514,11 @@ function PerformanceSection({ userId, platform: selectedPlatform }) {
   const [lotForm, setLotForm] = useState({ symbol: "", stock_name: "", quantity: "", buy_price: "", buy_date: new Date().toISOString().slice(0, 10), currency: "USD", platform: "" });
   const [backfilling, setBackfilling] = useState(false);
 
+  const chartPlatform = selectedPlatform || "all";
+
   useEffect(() => {
     if (chartPlatform !== "all") setLotForm(f => ({ ...f, platform: chartPlatform }));
   }, [chartPlatform]);
-
-  const chartPlatform = selectedPlatform || "all";
 
   const loadChart = useCallback(async () => {
     setLoading(true);
