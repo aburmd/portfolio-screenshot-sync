@@ -1140,13 +1140,14 @@ async def upload_csv(file: UploadFile = File(...), user_id: str = Form(...)):
     # Store cash positions as WALLETBALANCE per account
     for platform, cash_amt in cash_positions.items():
         if cash_amt > 0:
-            wn = f"WALLETBALANCE-{platform}"
+            wn = f"{platform}_WALLETBALANCE"
             table.put_item(Item={
                 "user_id": user_id,
                 "stock_name": wn,
                 "symbol": "WALLETBALANCE",
                 "quantity": Decimal(str(round(cash_amt, 2))),
                 "avg_buy_price": Decimal("1"),
+                "current_price": Decimal("1"),
                 "platform_name": platform,
                 "currency": "USD",
                 "uploaded_date": now,
