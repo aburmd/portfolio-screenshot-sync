@@ -84,9 +84,12 @@ function UploadArea({ onUpload, onCsvUpload, uploading }) {
               <div>
                 <p>Drag & drop <strong>{selectedPlatform}</strong> screenshots here, or click to select</p>
                 {platform === "Robinhood" && (
-                  <p style={{ fontSize: 11, color: "#888", margin: "4px 0 0" }}>
-                    Robinhood needs 2 screenshots of the same stocks: one showing $ values, one showing % returns
-                  </p>
+                  <div style={{ fontSize: 11, color: "#c62828", margin: "4px 0 0", background: "#fff8e1", padding: 8, borderRadius: 4 }}>
+                    <strong>⚠️ Important — Upload in 2 steps:</strong><br />
+                    <strong>Step 1:</strong> Upload ONLY the screenshots showing <strong>dollar amounts ($)</strong>. Wait for processing to complete.<br />
+                    <strong>Step 2:</strong> Then upload ONLY the screenshots showing <strong>percentage returns (%)</strong>.<br />
+                    <em>Both views of the same stocks are needed to calculate your average buy price.</em>
+                  </div>
                 )}
               </div>
             )}

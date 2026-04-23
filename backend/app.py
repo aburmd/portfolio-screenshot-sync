@@ -1020,6 +1020,29 @@ def _compute_xirr(cash_flows):
 
 # --- Fidelity CSV upload ---
 
+@app.post("/fix-robinhood/{user_id}")
+async def fix_robinhood_merge(user_id: str):
+    """Re-merge Robinhood views: combine current_price + return_pct to calculate avg_buy_price."""
+    from decimal import Decimal
+    table = ddb.Table(PORTFOLIO_TABLE)
+    resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    items = _decimal_to_float(resp.get("Items", []))
+    rh = [i for i in items if i.get("platform_name") == "robinhood"]
+    fixed = 0
+    for stock in rh:
+        cur = stock.get("current_price")
+        ret = stock.get("return_pct")
+        avg = stock.get("avg_buy_price", 0)
+        if cur and ret is not None and (avg == 0 or avg is None):
+            avg_calc = round(cur / (1 + ret / 100), 2)
+            table.update_item(
+                Key={"user_id": user_id, "stock_name": stock["stock_name"]},
+                UpdateExpression="SET avg_buy_price = :a",
+                ExpressionAttributeValues={":a": Decimal(str(avg_calc))},
+            )
+            fixed += 1
+    return {"fixed": fixed, "total_robinhood": len(rh)}
+
 @app.post("/upload/csv")
 async def upload_csv(file: UploadFile = File(...), user_id: str = Form(...)):
     """Parse Fidelity CSV and upsert stocks to portfolio. Each account = separate platform."""
