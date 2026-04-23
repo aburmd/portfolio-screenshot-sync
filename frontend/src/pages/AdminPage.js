@@ -152,9 +152,9 @@ function SymbolsTab() {
                 <td style={td}>
                   {edits[`map_${m.stock_name}`] !== undefined ? (
                     <>
-                      <button onClick={() => { handleSave(m.stock_name, edits[`map_${m.stock_name}`]); setEdits({ ...edits, [`map_${m.stock_name}`]: undefined }); }}
+                      <button onClick={async () => { await handleSave(m.stock_name, edits[`map_${m.stock_name}`]); setEdits(prev => ({ ...prev, [`map_${m.stock_name}`]: undefined })); }}
                         style={{ fontSize: 12, marginRight: 4 }}>Save</button>
-                      <button onClick={() => setEdits({ ...edits, [`map_${m.stock_name}`]: undefined })}
+                      <button onClick={() => setEdits(prev => ({ ...prev, [`map_${m.stock_name}`]: undefined }))}
                         style={{ fontSize: 12 }}>Cancel</button>
                     </>
                   ) : (
