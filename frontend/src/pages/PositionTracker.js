@@ -354,13 +354,17 @@ function PositionsSection({ userId, platform: selectedPlatform }) {
   const openFiltered = selectedPlatform === "all" ? data.open : data.open.filter(p => p.platform_name === selectedPlatform);
   const closedFiltered = selectedPlatform === "all" ? data.closed : data.closed.filter(p => p.platform === selectedPlatform);
 
-  const s = selectedPlatform === "all" ? (data.summary || {}) : {
-    total_invested: openFiltered.reduce((a, p) => a + p.invested, 0),
-    total_current: openFiltered.reduce((a, p) => a + p.cur_value, 0),
-    total_pnl: openFiltered.reduce((a, p) => a + p.pnl, 0),
-    total_pnl_pct: openFiltered.reduce((a, p) => a + p.invested, 0) > 0
-      ? (openFiltered.reduce((a, p) => a + p.pnl, 0) / openFiltered.reduce((a, p) => a + p.invested, 0) * 100) : 0,
-  };
+  const s = selectedPlatform === "all" ? (data.summary || {}) : (() => {
+    const inv = openFiltered.reduce((a, p) => a + (p.invested || 0), 0);
+    const cur = openFiltered.reduce((a, p) => a + (p.cur_value || 0), 0);
+    const pnl = cur - inv;
+    return {
+      total_invested: inv,
+      total_current: cur,
+      total_pnl: pnl,
+      total_pnl_pct: inv > 0 ? (pnl / inv * 100) : 0,
+    };
+  })();
 
   return (
     <div>
@@ -422,7 +426,7 @@ function PositionsSection({ userId, platform: selectedPlatform }) {
             <th style={{ padding: 6, textAlign: "left" }}>Platform</th>
           </tr></thead>
           <tbody>
-            {data.closed.map((p, i) => (
+            {closedFiltered.map((p, i) => (
               <tr key={i}>
                 <td style={{ padding: 6, fontWeight: "bold" }}>{p.symbol}</td>
                 <td style={{ padding: 6 }}>{p.stock_name}</td>
