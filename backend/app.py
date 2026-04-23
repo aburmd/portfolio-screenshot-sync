@@ -1399,12 +1399,18 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
     # 3. Query all transactions (one query, reused for cash flows, XIRR, and period gain)
     txn_table = ddb.Table(TRANSACTIONS_TABLE)
     txn_resp = txn_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
-    all_txns = txn_resp.get("Items", [])
+    all_txns_raw = txn_resp.get("Items", [])
+    all_txns = all_txns_raw if platform == "all" else [
+        t for t in all_txns_raw if t.get("platform_ts_type", "").split("#")[0] == platform
+    ]
 
     # 4. Query all buy lots (one query, reused for cash balance)
     lots_table = ddb.Table(BUY_LOTS_TABLE)
     lots_resp = lots_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
-    all_lots = _decimal_to_float(lots_resp.get("Items", []))
+    all_lots_raw = _decimal_to_float(lots_resp.get("Items", []))
+    all_lots = all_lots_raw if platform == "all" else [
+        l for l in all_lots_raw if l.get("platform", "") == platform
+    ]
 
     # 5. Determine currency
     currencies = set(item.get("currency", "USD") for item in items)
