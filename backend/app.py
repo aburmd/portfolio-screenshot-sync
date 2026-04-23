@@ -318,6 +318,15 @@ async def get_symbol_map():
     return items
 
 
+@app.delete("/admin/symbol-map/{stock_name}")
+async def delete_symbol_mapping(stock_name: str):
+    """Delete a symbol mapping."""
+    from urllib.parse import unquote
+    table = ddb.Table(SYMBOL_MAP_TABLE)
+    table.delete_item(Key={"stock_name": unquote(stock_name)})
+    return {"deleted": unquote(stock_name)}
+
+
 # --- Admin: User management ---
 
 @app.get("/admin/users")

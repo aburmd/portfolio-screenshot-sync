@@ -54,8 +54,8 @@ function SymbolsTab() {
 
   useEffect(() => { loadData(); }, []);
 
-  const handleSave = async (stockName) => {
-    const symbol = edits[stockName];
+  const handleSave = async (stockName, symbolOverride) => {
+    const symbol = symbolOverride || edits[stockName];
     if (!symbol?.trim()) return;
     try {
       const formData = new FormData();
@@ -68,6 +68,17 @@ function SymbolsTab() {
       loadData();
     } catch (e) {
       setMessage("Update failed: " + e.message);
+    }
+  };
+
+  const handleDeleteMapping = async (stockName) => {
+    if (!window.confirm(`Delete mapping for "${stockName}"?`)) return;
+    try {
+      await fetch(`${API_BASE}/admin/symbol-map/${encodeURIComponent(stockName)}`, { method: "DELETE" });
+      setMessage(`Deleted mapping for "${stockName}"`);
+      loadData();
+    } catch (e) {
+      setMessage("Delete failed: " + e.message);
     }
   };
 
@@ -102,10 +113,38 @@ function SymbolsTab() {
       <h4 style={{ marginTop: 24 }}>Symbol Map ({symbolMap.length})</h4>
       {symbolMap.length === 0 ? <p style={{ color: "#999" }}>No mappings yet.</p> : (
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr><th style={th}>Stock Name</th><th style={th}>Symbol</th></tr></thead>
+          <thead><tr><th style={th}>Stock Name</th><th style={th}>Symbol</th><th style={th}>Edit</th><th style={th}></th></tr></thead>
           <tbody>
             {symbolMap.map((m) => (
-              <tr key={m.stock_name}><td style={td}>{m.stock_name}</td><td style={td}><strong>{m.symbol}</strong></td></tr>
+              <tr key={m.stock_name}>
+                <td style={td}>{m.stock_name}</td>
+                <td style={td}>
+                  {edits[`map_${m.stock_name}`] !== undefined ? (
+                    <input type="text" value={edits[`map_${m.stock_name}`]}
+                      onChange={(e) => setEdits({ ...edits, [`map_${m.stock_name}`]: e.target.value.toUpperCase() })}
+                      style={{ padding: 4, width: 80, textTransform: "uppercase" }} />
+                  ) : (
+                    <strong>{m.symbol}</strong>
+                  )}
+                </td>
+                <td style={td}>
+                  {edits[`map_${m.stock_name}`] !== undefined ? (
+                    <>
+                      <button onClick={() => { handleSave(m.stock_name, edits[`map_${m.stock_name}`]); setEdits({ ...edits, [`map_${m.stock_name}`]: undefined }); }}
+                        style={{ fontSize: 12, marginRight: 4 }}>Save</button>
+                      <button onClick={() => setEdits({ ...edits, [`map_${m.stock_name}`]: undefined })}
+                        style={{ fontSize: 12 }}>Cancel</button>
+                    </>
+                  ) : (
+                    <button onClick={() => setEdits({ ...edits, [`map_${m.stock_name}`]: m.symbol })}
+                      style={{ fontSize: 12 }}>✏️ Edit</button>
+                  )}
+                </td>
+                <td style={td}>
+                  <button onClick={() => handleDeleteMapping(m.stock_name)}
+                    style={{ fontSize: 12, color: "#d32f2f", border: "1px solid #d32f2f", background: "#fff", cursor: "pointer", padding: "2px 8px" }}>✖ Del</button>
+                </td>
+              </tr>
             ))}
           </tbody>
         </table>
