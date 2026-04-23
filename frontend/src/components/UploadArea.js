@@ -86,9 +86,10 @@ function UploadArea({ onUpload, onCsvUpload, uploading }) {
                 {platform === "Robinhood" && (
                   <div style={{ fontSize: 11, color: "#c62828", margin: "4px 0 0", background: "#fff8e1", padding: 8, borderRadius: 4 }}>
                     <strong>⚠️ Important — Upload in 2 steps:</strong><br />
-                    <strong>Step 1:</strong> Upload ONLY the screenshots showing <strong>dollar amounts ($)</strong>. Wait for processing to complete.<br />
-                    <strong>Step 2:</strong> Then upload ONLY the screenshots showing <strong>percentage returns (%)</strong>.<br />
-                    <em>Both views of the same stocks are needed to calculate your average buy price.</em>
+                    In Robinhood, go to Investing → Stocks & ETFs → tap "Display data" to change the view.<br /><br />
+                    <strong>Step 1:</strong> Select "<strong>Your equity</strong>" in Display data → take screenshots of all stocks → upload here → wait for ✅<br />
+                    <strong>Step 2:</strong> Select "<strong>Total percent change</strong>" in Display data → take screenshots of all stocks → upload here<br /><br />
+                    <em>Both views are needed to calculate your average buy price.</em>
                   </div>
                 )}
               </div>
