@@ -787,18 +787,18 @@ async def delete_cash_flow(user_id: str, sk: str):
 
 
 @app.get("/position-tracker/{user_id}/positions")
-async def get_positions(user_id: str):
-    """Get open + closed positions with live prices."""
+async def get_positions(user_id: str, platform: str = None):
+    """Get open + closed positions with live prices. Optional platform filter."""
     holdings_table = ddb.Table(PORTFOLIO_TABLE)
     txn_table = ddb.Table(TRANSACTIONS_TABLE)
 
-    # Open positions = current holdings
     resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
-    open_items = _decimal_to_float(resp.get("Items", []))
+    all_items = _decimal_to_float(resp.get("Items", []))
+    open_items = all_items if not platform else [i for i in all_items if i.get("platform_name") == platform]
 
-    # Fetch live prices
-    usd_syms = [h["symbol"] for h in open_items if h.get("currency", "USD") == "USD" and h["symbol"] != "UNKNOWN"]
-    inr_syms = [h["symbol"] for h in open_items if h.get("currency") == "INR" and h["symbol"] != "UNKNOWN"]
+    # Fetch live prices only for filtered stocks
+    usd_syms = list(set(h["symbol"] for h in open_items if h.get("currency", "USD") == "USD" and h["symbol"] != "UNKNOWN" and h["symbol"] != "WALLETBALANCE"))
+    inr_syms = list(set(h["symbol"] for h in open_items if h.get("currency") == "INR" and h["symbol"] != "UNKNOWN" and h["symbol"] != "WALLETBALANCE"))
     live_prices = _fetch_live_prices(usd_syms, inr_syms)
 
     total_invested = 0
@@ -820,6 +820,9 @@ async def get_positions(user_id: str):
     closed = []
     for item in txn_resp.get("Items", []):
         if item.get("type") == "SELL":
+            plat = item["platform_ts_type"].split("#")[0]
+            if platform and plat != platform:
+                continue
             qty = float(item.get("quantity", 0))
             buy = float(item.get("avg_buy_price", 0))
             sell = float(item.get("avg_sold_price", 0))

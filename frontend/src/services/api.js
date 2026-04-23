@@ -167,8 +167,9 @@ export async function fetchCashFlows(userId) {
 export async function deleteCashFlow(userId, sk) {
   const res = await fetch(`${API_BASE}/position-tracker/${userId}/cash-flow/${encodeURIComponent(sk)}`, { method: "DELETE" }); return res.json();
 }
-export async function fetchPositions(userId) {
-  const res = await fetch(`${API_BASE}/position-tracker/${userId}/positions`); return res.json();
+export async function fetchPositions(userId, platform) {
+  const url = platform ? `${API_BASE}/position-tracker/${userId}/positions?platform=${platform}` : `${API_BASE}/position-tracker/${userId}/positions`;
+  const res = await fetch(url); return res.json();
 }
 export async function fetchXirr(userId) {
   const res = await fetch(`${API_BASE}/position-tracker/${userId}/xirr`); return res.json();

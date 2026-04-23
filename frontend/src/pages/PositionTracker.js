@@ -346,8 +346,12 @@ function PositionsSection({ userId, platform: selectedPlatform }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    (async () => { setData(await fetchPositions(userId)); setLoading(false); })();
-  }, [userId]);
+    (async () => {
+      const p = selectedPlatform !== "all" ? selectedPlatform : null;
+      setData(await fetchPositions(userId, p));
+      setLoading(false);
+    })();
+  }, [userId, selectedPlatform]);
 
   if (loading) return <p>Loading positions (fetching live prices)...</p>;
 
