@@ -1118,7 +1118,7 @@ async def upload_csv(file: UploadFile = File(...), user_id: str = Form(...)):
 
     for (platform, symbol), data in stocks.items():
         avg_price = round(data["cost"] / data["qty"], 2) if data["qty"] > 0 else 0
-        stock_name = data["name"] or symbol
+        stock_name = f"{platform}_{symbol}"
 
         existing = table.get_item(Key={"user_id": user_id, "stock_name": stock_name}).get("Item")
         if existing:
