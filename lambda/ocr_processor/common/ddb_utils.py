@@ -73,6 +73,37 @@ def upsert_portfolio_item(table_name: str, user_id: str, stock: dict, platform: 
     if stock.get("return_pct") is not None:
         item["return_pct"] = Decimal(str(stock["return_pct"]))
 
+    # For Robinhood: use update_item to avoid overwriting fields from the other view
+    if stock.get("robinhood_view"):
+        update_expr = "SET symbol=:sym, quantity=:qty, platform_name=:plat, currency=:cur, uploaded_date=:dt"
+        expr_vals = {
+            ":sym": item["symbol"],
+            ":qty": item["quantity"],
+            ":plat": item["platform_name"],
+            ":cur": item.get("currency", "USD"),
+            ":dt": item["uploaded_date"],
+        }
+        if stock.get("robinhood_view") == "market_value" and stock.get("current_price"):
+            update_expr += ", current_price=:cp"
+            expr_vals[":cp"] = Decimal(str(stock["current_price"]))
+            if stock.get("market_value"):
+                update_expr += ", market_value=:mv"
+                expr_vals[":mv"] = Decimal(str(stock["market_value"]))
+        if stock.get("return_pct") is not None:
+            update_expr += ", return_pct=:rp"
+            expr_vals[":rp"] = Decimal(str(stock["return_pct"]))
+        if item.get("avg_buy_price") and float(item["avg_buy_price"]) > 0:
+            update_expr += ", avg_buy_price=:avg"
+            expr_vals[":avg"] = item["avg_buy_price"]
+
+        table.update_item(
+            Key={"user_id": user_id, "stock_name": stock_name},
+            UpdateExpression=update_expr,
+            ExpressionAttributeValues=expr_vals,
+        )
+        logger.info("Updated (Robinhood %s) %s (%s) for user %s", stock.get("robinhood_view"), stock_name, symbol, user_id)
+        return
+
     table.put_item(Item=item)
     logger.info("Upserted %s (%s) for user %s", stock_name, symbol, user_id)
 

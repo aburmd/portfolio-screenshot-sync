@@ -1022,25 +1022,33 @@ def _compute_xirr(cash_flows):
 
 @app.post("/fix-robinhood/{user_id}")
 async def fix_robinhood_merge(user_id: str):
-    """Re-merge Robinhood views: combine current_price + return_pct to calculate avg_buy_price."""
+    """Re-merge Robinhood views: fetch live prices + use return_pct to calculate avg_buy_price."""
     from decimal import Decimal
     table = ddb.Table(PORTFOLIO_TABLE)
     resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
     items = _decimal_to_float(resp.get("Items", []))
     rh = [i for i in items if i.get("platform_name") == "robinhood"]
+
+    # Fetch live prices for stocks missing current_price
+    syms_need_price = [s["symbol"] for s in rh if not s.get("current_price") and s["symbol"] != "UNKNOWN"]
+    live_prices = _fetch_live_prices(syms_need_price, []) if syms_need_price else {}
+
     fixed = 0
     for stock in rh:
-        cur = stock.get("current_price")
         ret = stock.get("return_pct")
         avg = stock.get("avg_buy_price", 0)
-        if cur and ret is not None and (avg == 0 or avg is None):
-            avg_calc = round(cur / (1 + ret / 100), 2)
-            table.update_item(
-                Key={"user_id": user_id, "stock_name": stock["stock_name"]},
-                UpdateExpression="SET avg_buy_price = :a",
-                ExpressionAttributeValues={":a": Decimal(str(avg_calc))},
-            )
-            fixed += 1
+        if ret is None or (avg and avg > 0):
+            continue
+        cur = stock.get("current_price") or live_prices.get(stock["symbol"])
+        if not cur:
+            continue
+        avg_calc = round(cur / (1 + ret / 100), 2)
+        table.update_item(
+            Key={"user_id": user_id, "stock_name": stock["stock_name"]},
+            UpdateExpression="SET avg_buy_price = :a, current_price = :c",
+            ExpressionAttributeValues={":a": Decimal(str(avg_calc)), ":c": Decimal(str(round(cur, 2)))},
+        )
+        fixed += 1
     return {"fixed": fixed, "total_robinhood": len(rh)}
 
 @app.post("/upload/csv")
