@@ -514,6 +514,10 @@ function PerformanceSection({ userId, platform: selectedPlatform }) {
   const [lotForm, setLotForm] = useState({ symbol: "", stock_name: "", quantity: "", buy_price: "", buy_date: new Date().toISOString().slice(0, 10), currency: "USD", platform: "" });
   const [backfilling, setBackfilling] = useState(false);
 
+  useEffect(() => {
+    if (chartPlatform !== "all") setLotForm(f => ({ ...f, platform: chartPlatform }));
+  }, [chartPlatform]);
+
   const chartPlatform = selectedPlatform || "all";
 
   const loadChart = useCallback(async () => {
@@ -526,8 +530,9 @@ function PerformanceSection({ userId, platform: selectedPlatform }) {
   }, [userId, period, customStart, customEnd, chartPlatform]);
 
   const loadLots = useCallback(async () => {
-    setLots(await fetchBuyLots(userId));
-  }, [userId]);
+    const allLots = await fetchBuyLots(userId);
+    setLots(chartPlatform === "all" ? allLots : allLots.filter(l => l.platform === chartPlatform));
+  }, [userId, chartPlatform]);
 
   useEffect(() => { loadChart(); }, [loadChart]);
   useEffect(() => { loadLots(); }, [loadLots]);
