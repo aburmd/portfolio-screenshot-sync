@@ -511,7 +511,8 @@ async def freeze_portfolio(user_id: str, data: dict = None):
     from decimal import Decimal
 
     data = data or {}
-    initial_date = data.get("initial_date")  # optional: date for auto-deposit on first freeze
+    initial_date = data.get("initial_date")
+    platform_filter = data.get("platform")
 
     holdings_table = ddb.Table(PORTFOLIO_TABLE)
     snap_table = ddb.Table(SNAPSHOTS_TABLE)
@@ -524,6 +525,10 @@ async def freeze_portfolio(user_id: str, data: dict = None):
     for item in items:
         p = item.get("platform_name", "unknown")
         by_platform.setdefault(p, []).append(item)
+
+    # Filter to selected platform if specified
+    if platform_filter:
+        by_platform = {k: v for k, v in by_platform.items() if k == platform_filter}
 
     now = datetime.now(tz.utc).isoformat()
     diffs = []

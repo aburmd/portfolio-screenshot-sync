@@ -18,13 +18,76 @@ const subTab = (active) => ({ padding: "6px 16px", cursor: "pointer", border: "n
 const clr = (v) => (v > 0 ? "#2e7d32" : v < 0 ? "#c62828" : "#333");
 const fmt = (v) => v != null ? v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
 
+// Platform display name helpers (localStorage)
+const PLATFORM_NAMES_KEY = "portfolio_platform_names";
+function getPlatformNames() {
+  try { return JSON.parse(localStorage.getItem(PLATFORM_NAMES_KEY) || "{}"); } catch { return {}; }
+}
+function setPlatformDisplayName(platform, name) {
+  const names = getPlatformNames();
+  names[platform] = name;
+  localStorage.setItem(PLATFORM_NAMES_KEY, JSON.stringify(names));
+}
+function getDisplayName(platform) {
+  const names = getPlatformNames();
+  return names[platform] || platform;
+}
+
 export default function PositionTracker({ user }) {
   const userId = user?.username || user?.userId;
   const [tab, setTab] = useState("freeze");
+  const [platforms, setPlatforms] = useState([]);
+  const [selectedPlatform, setSelectedPlatform] = useState("all");
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [, forceUpdate] = useState(0);
+
+  useEffect(() => {
+    (async () => {
+      const res = await fetch(`${process.env.REACT_APP_API_URL || "http://localhost:8000"}/portfolio/${userId}`);
+      const data = await res.json();
+      const plats = [...new Set(data.map(d => d.platform_name).filter(Boolean))].sort();
+      setPlatforms(plats);
+    })();
+  }, [userId]);
+
+  const handleSaveName = () => {
+    if (selectedPlatform !== "all" && nameInput.trim()) {
+      setPlatformDisplayName(selectedPlatform, nameInput.trim());
+      setEditingName(false);
+      forceUpdate(n => n + 1);
+    }
+  };
 
   return (
     <div>
       <h3 style={{ marginBottom: 8 }}>📈 Position Tracker</h3>
+
+      {/* Platform selector */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+        <label style={{ fontSize: 12, fontWeight: "bold" }}>Platform:</label>
+        <select value={selectedPlatform} onChange={e => { setSelectedPlatform(e.target.value); setEditingName(false); }}
+          style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #ccc", fontSize: 13 }}>
+          <option value="all">All Platforms</option>
+          {platforms.map(p => <option key={p} value={p}>{getDisplayName(p)}</option>)}
+        </select>
+        {selectedPlatform !== "all" && !editingName && (
+          <>
+            <span style={{ fontSize: 12, color: "#666" }}>({selectedPlatform})</span>
+            <button onClick={() => { setNameInput(getDisplayName(selectedPlatform)); setEditingName(true); }}
+              style={{ fontSize: 11, padding: "2px 8px", cursor: "pointer" }}>✏️ Rename</button>
+          </>
+        )}
+        {editingName && (
+          <>
+            <input value={nameInput} onChange={e => setNameInput(e.target.value)}
+              placeholder="Display name" style={{ padding: 3, width: 150, fontSize: 12 }} />
+            <button onClick={handleSaveName} style={{ fontSize: 11, padding: "2px 8px" }}>Save</button>
+            <button onClick={() => setEditingName(false)} style={{ fontSize: 11, padding: "2px 8px" }}>Cancel</button>
+          </>
+        )}
+      </div>
+
       <nav style={{ borderBottom: "1px solid #eee", marginBottom: 16 }}>
         <button style={subTab(tab === "freeze")} onClick={() => setTab("freeze")}>Freeze & Diff</button>
         <button style={subTab(tab === "cashflows")} onClick={() => setTab("cashflows")}>Cash Flows</button>
@@ -32,17 +95,17 @@ export default function PositionTracker({ user }) {
         <button style={subTab(tab === "xirr")} onClick={() => setTab("xirr")}>XIRR</button>
         <button style={subTab(tab === "performance")} onClick={() => setTab("performance")}>Performance</button>
       </nav>
-      {tab === "freeze" && <FreezeSection userId={userId} />}
-      {tab === "cashflows" && <CashFlowSection userId={userId} />}
-      {tab === "positions" && <PositionsSection userId={userId} />}
-      {tab === "xirr" && <XirrSection userId={userId} />}
-      {tab === "performance" && <PerformanceSection userId={userId} />}
+      {tab === "freeze" && <FreezeSection userId={userId} platform={selectedPlatform} getDisplayName={getDisplayName} />}
+      {tab === "cashflows" && <CashFlowSection userId={userId} platform={selectedPlatform} getDisplayName={getDisplayName} />}
+      {tab === "positions" && <PositionsSection userId={userId} platform={selectedPlatform} />}
+      {tab === "xirr" && <XirrSection userId={userId} platform={selectedPlatform} getDisplayName={getDisplayName} />}
+      {tab === "performance" && <PerformanceSection userId={userId} platform={selectedPlatform} />}
     </div>
   );
 }
 
 // ==================== FREEZE & DIFF ====================
-function FreezeSection({ userId }) {
+function FreezeSection({ userId, platform, getDisplayName }) {
   const [loading, setLoading] = useState(false);
   const [diffs, setDiffs] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
@@ -53,17 +116,19 @@ function FreezeSection({ userId }) {
 
   const loadSnapshots = useCallback(async () => {
     const data = await fetchSnapshots(userId);
-    setSnapshots(data);
-    setHasSnapshots(data.length > 0);
-  }, [userId]);
+    const filtered = platform === "all" ? data : data.filter(s => s.platform === platform);
+    setSnapshots(filtered);
+    setHasSnapshots(filtered.length > 0);
+  }, [userId, platform]);
 
   useEffect(() => { loadSnapshots(); }, [loadSnapshots]);
 
   const handleFreeze = async () => {
     setLoading(true);
     try {
-      const result = await freezePortfolio(userId, hasSnapshots ? null : initialDate);
-      setDiffs(result.diffs || []);
+      const result = await freezePortfolio(userId, hasSnapshots ? null : initialDate, platform !== "all" ? platform : null);
+      const filtered = platform === "all" ? (result.diffs || []) : (result.diffs || []).filter(d => d.platform === platform);
+      setDiffs(filtered);
       setSoldPrices({});
       loadSnapshots();
     } catch (e) { alert("Freeze failed: " + e.message); }
@@ -71,8 +136,9 @@ function FreezeSection({ userId }) {
   };
 
   const handleViewDiff = async () => {
-    const result = await fetchDiff(userId);
-    setDiffs(result.diffs || []);
+    const result = await fetchDiff(userId, platform !== "all" ? platform : null);
+    const filtered = platform === "all" ? (result.diffs || []) : (result.diffs || []).filter(d => d.platform === platform);
+    setDiffs(filtered);
     setSoldPrices({});
   };
 
@@ -195,7 +261,7 @@ function FreezeSection({ userId }) {
 }
 
 // ==================== CASH FLOWS ====================
-function CashFlowSection({ userId }) {
+function CashFlowSection({ userId, platform: selectedPlatform, getDisplayName }) {
   const [flows, setFlows] = useState([]);
   const [platform, setPlatform] = useState("");
   const [cfType, setCfType] = useState("DEPOSIT");
@@ -205,6 +271,9 @@ function CashFlowSection({ userId }) {
 
   const load = useCallback(async () => { setFlows(await fetchCashFlows(userId)); }, [userId]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (selectedPlatform !== "all") setPlatform(selectedPlatform); }, [selectedPlatform]);
+
+  const filtered = selectedPlatform === "all" ? flows : flows.filter(f => f.platform === selectedPlatform);
 
   const handleAdd = async () => {
     if (!platform || !amount) return;
@@ -242,7 +311,7 @@ function CashFlowSection({ userId }) {
         <button style={btnPrimary} onClick={handleAdd}>+ Add</button>
       </div>
 
-      {flows.length > 0 && (
+      {filtered.length > 0 && (
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead><tr style={{ background: "#f5f5f5" }}>
             <th style={{ padding: 6, textAlign: "left" }}>Platform</th>
@@ -253,9 +322,9 @@ function CashFlowSection({ userId }) {
             <th style={{ padding: 6 }}></th>
           </tr></thead>
           <tbody>
-            {flows.map((f) => (
+            {filtered.map((f) => (
               <tr key={f.platform_ts_type}>
-                <td style={{ padding: 6 }}>{f.platform}</td>
+                <td style={{ padding: 6 }}>{getDisplayName(f.platform)}</td>
                 <td style={{ padding: 6, color: f.type === "DEPOSIT" ? "#2e7d32" : "#c62828" }}>{f.type === "DEPOSIT" ? "⬇ Deposit" : "⬆ Withdraw"}</td>
                 <td style={{ padding: 6, textAlign: "right" }}>{fmt(f.amount)}</td>
                 <td style={{ padding: 6 }}>{f.currency}</td>
@@ -266,13 +335,13 @@ function CashFlowSection({ userId }) {
           </tbody>
         </table>
       )}
-      {flows.length === 0 && <p style={{ color: "#999" }}>No cash flows recorded yet.</p>}
+      {filtered.length === 0 && <p style={{ color: "#999" }}>No cash flows recorded{selectedPlatform !== "all" ? " for this platform" : ""}.</p>}
     </div>
   );
 }
 
 // ==================== POSITIONS ====================
-function PositionsSection({ userId }) {
+function PositionsSection({ userId, platform: selectedPlatform }) {
   const [data, setData] = useState({ open: [], closed: [], summary: {} });
   const [loading, setLoading] = useState(true);
 
@@ -282,12 +351,21 @@ function PositionsSection({ userId }) {
 
   if (loading) return <p>Loading positions (fetching live prices)...</p>;
 
-  const s = data.summary || {};
+  const openFiltered = selectedPlatform === "all" ? data.open : data.open.filter(p => p.platform_name === selectedPlatform);
+  const closedFiltered = selectedPlatform === "all" ? data.closed : data.closed.filter(p => p.platform === selectedPlatform);
+
+  const s = selectedPlatform === "all" ? (data.summary || {}) : {
+    total_invested: openFiltered.reduce((a, p) => a + p.invested, 0),
+    total_current: openFiltered.reduce((a, p) => a + p.cur_value, 0),
+    total_pnl: openFiltered.reduce((a, p) => a + p.pnl, 0),
+    total_pnl_pct: openFiltered.reduce((a, p) => a + p.invested, 0) > 0
+      ? (openFiltered.reduce((a, p) => a + p.pnl, 0) / openFiltered.reduce((a, p) => a + p.invested, 0) * 100) : 0,
+  };
 
   return (
     <div>
-      <h4>Open Positions ({data.open.length})</h4>
-      {data.open.length > 0 ? (
+      <h4>Open Positions ({openFiltered.length})</h4>
+      {openFiltered.length > 0 ? (
         <>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 8 }}>
             <thead><tr style={{ background: "#e8f5e9" }}>
@@ -300,10 +378,10 @@ function PositionsSection({ userId }) {
               <th style={{ padding: 6, textAlign: "right" }}>Cur Value</th>
               <th style={{ padding: 6, textAlign: "right" }}>P/L</th>
               <th style={{ padding: 6, textAlign: "right" }}>P/L %</th>
-              <th style={{ padding: 6, textAlign: "left" }}>Platform</th>
+              {selectedPlatform === "all" && <th style={{ padding: 6, textAlign: "left" }}>Platform</th>}
             </tr></thead>
             <tbody>
-              {data.open.map((p) => (
+              {openFiltered.map((p) => (
                 <tr key={p.stock_name}>
                   <td style={{ padding: 6, fontWeight: "bold" }}>{p.symbol}</td>
                   <td style={{ padding: 6 }}>{p.stock_name}</td>
@@ -314,24 +392,24 @@ function PositionsSection({ userId }) {
                   <td style={{ padding: 6, textAlign: "right" }}>{fmt(p.cur_value)}</td>
                   <td style={{ padding: 6, textAlign: "right", color: clr(p.pnl), fontWeight: "bold" }}>{fmt(p.pnl)}</td>
                   <td style={{ padding: 6, textAlign: "right", color: clr(p.pnl_pct) }}>{p.pnl_pct}%</td>
-                  <td style={{ padding: 6 }}>{p.platform_name}</td>
+                  {selectedPlatform === "all" && <td style={{ padding: 6 }}>{p.platform_name}</td>}
                 </tr>
               ))}
               <tr style={{ background: "#e8f5e9", fontWeight: "bold" }}>
-                <td colSpan={5} style={{ padding: 6 }}>TOTAL</td>
+                <td colSpan={selectedPlatform === "all" ? 5 : 5} style={{ padding: 6 }}>TOTAL</td>
                 <td style={{ padding: 6, textAlign: "right" }}>{fmt(s.total_invested)}</td>
                 <td style={{ padding: 6, textAlign: "right" }}>{fmt(s.total_current)}</td>
                 <td style={{ padding: 6, textAlign: "right", color: clr(s.total_pnl) }}>{fmt(s.total_pnl)}</td>
-                <td style={{ padding: 6, textAlign: "right", color: clr(s.total_pnl_pct) }}>{s.total_pnl_pct}%</td>
-                <td></td>
+                <td style={{ padding: 6, textAlign: "right", color: clr(s.total_pnl_pct) }}>{(s.total_pnl_pct || 0).toFixed(2)}%</td>
+                {selectedPlatform === "all" && <td></td>}
               </tr>
             </tbody>
           </table>
         </>
       ) : <p style={{ color: "#999" }}>No open positions.</p>}
 
-      <h4>Closed Positions ({data.closed.length})</h4>
-      {data.closed.length > 0 ? (
+      <h4>Closed Positions ({closedFiltered.length})</h4>
+      {closedFiltered.length > 0 ? (
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead><tr style={{ background: "#ffebee" }}>
             <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
@@ -364,7 +442,7 @@ function PositionsSection({ userId }) {
 }
 
 // ==================== XIRR ====================
-function XirrSection({ userId }) {
+function XirrSection({ userId, platform: selectedPlatform, getDisplayName }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -375,12 +453,14 @@ function XirrSection({ userId }) {
   if (loading) return <p>Calculating XIRR (fetching live prices)...</p>;
   if (!data) return <p>Failed to load XIRR.</p>;
 
+  const filteredPlatforms = selectedPlatform === "all" ? data.platforms : data.platforms.filter(p => p.platform === selectedPlatform);
+
   return (
     <div>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
-        {data.platforms.map((p) => (
+        {filteredPlatforms.map((p) => (
           <div key={p.platform} style={{ ...card, minWidth: 200, flex: 1 }}>
-            <h4 style={{ margin: "0 0 8px", textTransform: "capitalize" }}>{p.platform}</h4>
+            <h4 style={{ margin: "0 0 8px" }}>{getDisplayName(p.platform)}</h4>
             <div style={{ fontSize: 28, fontWeight: "bold", color: clr(p.xirr) }}>{p.xirr_pct}</div>
             <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
               Deposited: {fmt(p.total_deposited)}<br />
@@ -415,7 +495,7 @@ const periodBtn = (active) => ({
   color: active ? "#fff" : "#333",
 });
 
-function PerformanceSection({ userId }) {
+function PerformanceSection({ userId, platform: selectedPlatform }) {
   const [period, setPeriod] = useState("1Y");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -426,14 +506,16 @@ function PerformanceSection({ userId }) {
   const [lotForm, setLotForm] = useState({ symbol: "", stock_name: "", quantity: "", buy_price: "", buy_date: new Date().toISOString().slice(0, 10), currency: "USD", platform: "" });
   const [backfilling, setBackfilling] = useState(false);
 
+  const chartPlatform = selectedPlatform || "all";
+
   const loadChart = useCallback(async () => {
     setLoading(true);
     const data = await fetchChartData(userId, period,
       period === "custom" ? customStart : null,
-      period === "custom" ? customEnd : null, "all");
+      period === "custom" ? customEnd : null, chartPlatform);
     setChartData(data);
     setLoading(false);
-  }, [userId, period, customStart, customEnd]);
+  }, [userId, period, customStart, customEnd, chartPlatform]);
 
   const loadLots = useCallback(async () => {
     setLots(await fetchBuyLots(userId));

@@ -134,10 +134,13 @@ export async function revokeShare(ownerId, viewerId) {
 }
 
 // --- Position Tracker ---
-export async function freezePortfolio(userId, initialDate) {
+export async function freezePortfolio(userId, initialDate, platform) {
+  const body = {};
+  if (initialDate) body.initial_date = initialDate;
+  if (platform) body.platform = platform;
   const res = await fetch(`${API_BASE}/position-tracker/${userId}/freeze`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(initialDate ? { initial_date: initialDate } : {}),
+    body: JSON.stringify(body),
   });
   return res.json();
 }
