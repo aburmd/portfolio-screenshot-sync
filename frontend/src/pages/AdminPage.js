@@ -36,6 +36,15 @@ function SymbolsTab() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [edits, setEdits] = useState({});
+  const [symbolSort, setSymbolSort] = useState("name_asc");
+
+  const sortedSymbolMap = [...symbolMap].sort((a, b) => {
+    if (symbolSort === "name_asc") return (a.stock_name || "").localeCompare(b.stock_name || "");
+    if (symbolSort === "name_desc") return (b.stock_name || "").localeCompare(a.stock_name || "");
+    if (symbolSort === "sym_asc") return (a.symbol || "").localeCompare(b.symbol || "");
+    if (symbolSort === "sym_desc") return (b.symbol || "").localeCompare(a.symbol || "");
+    return 0;
+  });
 
   const loadData = async () => {
     setLoading(true);
@@ -111,11 +120,24 @@ function SymbolsTab() {
       )}
 
       <h4 style={{ marginTop: 24 }}>Symbol Map ({symbolMap.length})</h4>
+      {symbolMap.length > 0 && (
+        <div style={{ marginBottom: 8, fontSize: 12 }}>
+          Sort by:
+          <button onClick={() => setSymbolSort(s => s === "name_asc" ? "name_desc" : "name_asc")}
+            style={{ marginLeft: 6, padding: "2px 8px", cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: symbolSort.startsWith("name") ? "#e3f2fd" : "#fff" }}>
+            Name {symbolSort === "name_asc" ? "↑" : symbolSort === "name_desc" ? "↓" : "↕"}
+          </button>
+          <button onClick={() => setSymbolSort(s => s === "sym_asc" ? "sym_desc" : "sym_asc")}
+            style={{ marginLeft: 4, padding: "2px 8px", cursor: "pointer", border: "1px solid #ccc", borderRadius: 3, background: symbolSort.startsWith("sym") ? "#e3f2fd" : "#fff" }}>
+            Symbol {symbolSort === "sym_asc" ? "↑" : symbolSort === "sym_desc" ? "↓" : "↕"}
+          </button>
+        </div>
+      )}
       {symbolMap.length === 0 ? <p style={{ color: "#999" }}>No mappings yet.</p> : (
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead><tr><th style={th}>Stock Name</th><th style={th}>Symbol</th><th style={th}>Edit</th><th style={th}></th></tr></thead>
           <tbody>
-            {symbolMap.map((m) => (
+            {sortedSymbolMap.map((m) => (
               <tr key={m.stock_name}>
                 <td style={td}>{m.stock_name}</td>
                 <td style={td}>
