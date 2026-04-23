@@ -455,8 +455,12 @@ function XirrSection({ userId, platform: selectedPlatform, getDisplayName }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    (async () => { setData(await fetchXirr(userId)); setLoading(false); })();
-  }, [userId]);
+    (async () => {
+      const p = selectedPlatform !== "all" ? selectedPlatform : null;
+      setData(await fetchXirr(userId, p));
+      setLoading(false);
+    })();
+  }, [userId, selectedPlatform]);
 
   if (loading) return <p>Calculating XIRR (fetching live prices)...</p>;
   if (!data) return <p>Failed to load XIRR.</p>;

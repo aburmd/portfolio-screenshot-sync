@@ -171,8 +171,9 @@ export async function fetchPositions(userId, platform) {
   const url = platform ? `${API_BASE}/position-tracker/${userId}/positions?platform=${platform}` : `${API_BASE}/position-tracker/${userId}/positions`;
   const res = await fetch(url); return res.json();
 }
-export async function fetchXirr(userId) {
-  const res = await fetch(`${API_BASE}/position-tracker/${userId}/xirr`); return res.json();
+export async function fetchXirr(userId, platform) {
+  const url = platform ? `${API_BASE}/position-tracker/${userId}/xirr?platform=${platform}` : `${API_BASE}/position-tracker/${userId}/xirr`;
+  const res = await fetch(url); return res.json();
 }
 
 // --- Performance Chart ---

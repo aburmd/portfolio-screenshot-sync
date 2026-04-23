@@ -849,20 +849,20 @@ async def get_positions(user_id: str, platform: str = None):
 
 
 @app.get("/position-tracker/{user_id}/xirr")
-async def calculate_xirr(user_id: str):
-    """Calculate XIRR per platform + overall."""
+async def calculate_xirr(user_id: str, platform: str = None):
+    """Calculate XIRR per platform + overall. Optional platform filter."""
     from datetime import date, datetime
 
     txn_table = ddb.Table(TRANSACTIONS_TABLE)
     holdings_table = ddb.Table(PORTFOLIO_TABLE)
 
-    # Get all transactions
     txn_resp = txn_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
     txns = txn_resp.get("Items", [])
 
-    # Get current holdings
     hold_resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
     holdings = _decimal_to_float(hold_resp.get("Items", []))
+    if platform:
+        holdings = [h for h in holdings if h.get("platform_name") == platform]
 
     # Build cash flows per platform
     platform_cfs = {}  # platform -> [(amount, date)]
@@ -885,8 +885,8 @@ async def calculate_xirr(user_id: str):
     hold_by_plat = {}
 
     # Collect symbols by currency for price fetch
-    usd_syms = [h["symbol"] for h in holdings if h.get("currency", "USD") == "USD" and h["symbol"] != "UNKNOWN"]
-    inr_syms = [h["symbol"] for h in holdings if h.get("currency") == "INR" and h["symbol"] != "UNKNOWN"]
+    usd_syms = list(set(h["symbol"] for h in holdings if h.get("currency", "USD") == "USD" and h["symbol"] != "UNKNOWN" and h["symbol"] != "WALLETBALANCE"))
+    inr_syms = list(set(h["symbol"] for h in holdings if h.get("currency") == "INR" and h["symbol"] != "UNKNOWN" and h["symbol"] != "WALLETBALANCE"))
     live_prices = _fetch_live_prices(usd_syms, inr_syms)
 
     for h in holdings:
@@ -899,6 +899,8 @@ async def calculate_xirr(user_id: str):
     results = []
     all_cfs = []
     for plat, cfs in platform_cfs.items():
+        if platform and plat != platform:
+            continue
         cur_val = hold_by_plat.get(plat, 0)
         if cur_val > 0:
             cfs.append((cur_val, today))
