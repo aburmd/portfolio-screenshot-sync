@@ -584,7 +584,11 @@ function PerformanceSection({ userId, platform: selectedPlatform, displayCurrenc
 
   const loadLots = useCallback(async () => {
     const allLots = await fetchBuyLots(userId);
-    setLots(chartPlatform === "all" ? allLots : allLots.filter(l => l.platform === chartPlatform));
+    if (chartPlatform === "all") {
+      setLots(allLots);
+    } else {
+      setLots(allLots.filter(l => (l.platform || "") === chartPlatform));
+    }
   }, [userId, chartPlatform]);
 
   useEffect(() => { loadChart(); }, [loadChart]);
@@ -625,8 +629,7 @@ function PerformanceSection({ userId, platform: selectedPlatform, displayCurrenc
   const cv = (v) => {
     if (v == null) return v;
     return convertValue(v, nativeCur, targetCur, exchangeRate);
-  };
-  const cfDates = new Set((chartData?.cash_flows || []).map(cf => cf.date));
+  };  const cfDates = new Set((chartData?.cash_flows || []).map(cf => cf.date));
   const sellDates = new Set((chartData?.sell_events || []).map(se => se.date));
 
   const CustomTooltip = ({ active, payload, label }) => {

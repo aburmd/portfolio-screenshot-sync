@@ -1414,8 +1414,9 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
         l for l in all_lots_raw if l.get("platform", "") == platform
     ]
 
-    # 5. Determine currency
-    currencies = set(item.get("currency", "USD") for item in items)
+    # 5. Determine currency from filtered items only
+    filtered_items = items if platform == "all" else [i for i in items if i.get("platform", "") == platform]
+    currencies = set(item.get("currency", "USD") for item in filtered_items)
     currency = "INR" if currencies == {"INR"} else "USD"
 
     # 6. Aggregate stock values by date
