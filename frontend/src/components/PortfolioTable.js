@@ -116,8 +116,8 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
     if (!sortCol) return rows;
     const sorted = [...rows];
     sorted.forEach((r) => {
-      r.invPct = totalInvested > 0 ? (r.invested / totalInvested) * 100 : 0;
-      r.curPct = totalCurrent > 0 && r.currentAmt != null ? (r.currentAmt / totalCurrent) * 100 : null;
+      r.invPct = totalInvested > 0 ? ((r.invested * r.convRate) / totalInvested) * 100 : 0;
+      r.curPct = totalCurrent > 0 && r.currentAmt != null ? ((r.currentAmt * r.convRate) / totalCurrent) * 100 : null;
     });
     sorted.sort((a, b) => {
       let va = a[sortCol], vb = b[sortCol];
@@ -168,8 +168,8 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
 
   const renderCell = (col, row, idx) => {
     const isEditing = editingRow === row.stock_name;
-    const invPct = totalInvested > 0 ? (row.invested / totalInvested) * 100 : 0;
-    const curPct = totalCurrent > 0 && row.currentAmt != null ? (row.currentAmt / totalCurrent) * 100 : null;
+    const invPct = totalInvested > 0 ? ((row.invested * row.convRate) / totalInvested) * 100 : 0;
+    const curPct = totalCurrent > 0 && row.currentAmt != null ? ((row.currentAmt * row.convRate) / totalCurrent) * 100 : null;
 
     switch (col.key) {
       case "serial": return idx + 1;
