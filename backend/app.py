@@ -1434,6 +1434,10 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
         key=lambda x: x["date"]
     )
 
+    # Remove partial last day (fewer stocks than previous day = incomplete data)
+    if len(data_points) >= 2 and data_points[-1]["stocks_count"] < data_points[-2]["stocks_count"]:
+        data_points.pop()
+
     # 7. Build cash balance timeline: cash = cumulative(deposits - withdrawals) - cumulative(lot costs)
     cash_events = sorted(
         [(t.get("date", ""), float(t.get("amount", 0)) * (1 if t.get("type") == "DEPOSIT" else -1))
