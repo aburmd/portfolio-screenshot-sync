@@ -3,6 +3,7 @@ import {
   freezePortfolio, fetchSnapshots, fetchDiff, confirmSells,
   addCashFlow, fetchCashFlows, deleteCashFlow, fetchPositions, fetchXirr,
   fetchChartData, addBuyLot, fetchBuyLots, deleteBuyLot, triggerBackfill,
+  fetchExchangeRate,
 } from "../services/api";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -17,6 +18,18 @@ const subTab = (active) => ({ padding: "6px 16px", cursor: "pointer", border: "n
 
 const clr = (v) => (v > 0 ? "#2e7d32" : v < 0 ? "#c62828" : "#333");
 const fmt = (v) => v != null ? v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
+
+// Currency conversion helper
+function convertValue(value, fromCurrency, toCurrency, exchangeRate) {
+  if (!value || !exchangeRate || toCurrency === "default" || fromCurrency === toCurrency) return value;
+  if (fromCurrency === "INR" && toCurrency === "USD") return value / exchangeRate;
+  if (fromCurrency === "USD" && toCurrency === "INR") return value * exchangeRate;
+  return value;
+}
+function getCurSymbol(displayCurrency, nativeCurrency) {
+  if (displayCurrency === "INR" || (displayCurrency === "default" && nativeCurrency === "INR")) return "₹";
+  return "$";
+}
 
 // Platform display name helpers (localStorage)
 const PLATFORM_NAMES_KEY = "portfolio_platform_names";
@@ -41,6 +54,8 @@ export default function PositionTracker({ user }) {
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [, forceUpdate] = useState(0);
+  const [displayCurrency, setDisplayCurrency] = useState("default");
+  const [exchangeRate, setExchangeRate] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -48,8 +63,16 @@ export default function PositionTracker({ user }) {
       const data = await res.json();
       const plats = [...new Set(data.map(d => d.platform_name).filter(Boolean))].sort();
       setPlatforms(plats);
+      const rate = await fetchExchangeRate("USD", "INR");
+      if (rate) setExchangeRate(rate);
     })();
   }, [userId]);
+
+  // Force USD when All Platforms selected
+  useEffect(() => {
+    if (selectedPlatform === "all") setDisplayCurrency("USD");
+    else setDisplayCurrency("default");
+  }, [selectedPlatform]);
 
   const handleSaveName = () => {
     if (selectedPlatform !== "all" && nameInput.trim()) {
@@ -88,6 +111,24 @@ export default function PositionTracker({ user }) {
         )}
       </div>
 
+      {/* Currency toggle */}
+      {exchangeRate && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 12, fontSize: 12 }}>
+          <span style={{ fontWeight: "bold" }}>Currency:</span>
+          {["default", "USD", "INR"].map(c => (
+            <button key={c} onClick={() => { if (selectedPlatform !== "all" || c !== "default") setDisplayCurrency(c); }}
+              style={{
+                padding: "3px 10px", border: displayCurrency === c ? "2px solid #1976d2" : "1px solid #ccc",
+                borderRadius: 3, background: displayCurrency === c ? "#e3f2fd" : "#fff",
+                cursor: selectedPlatform === "all" && c === "default" ? "not-allowed" : "pointer",
+                fontWeight: displayCurrency === c ? "bold" : "normal",
+                opacity: selectedPlatform === "all" && c === "default" ? 0.4 : 1,
+              }}>{c === "default" ? "Default" : c}</button>
+          ))}
+          <span style={{ color: "#999", marginLeft: 4 }}>1 USD = ₹{exchangeRate?.toFixed(2)}</span>
+        </div>
+      )}
+
       <nav style={{ borderBottom: "1px solid #eee", marginBottom: 16 }}>
         <button style={subTab(tab === "freeze")} onClick={() => setTab("freeze")}>Freeze & Diff</button>
         <button style={subTab(tab === "cashflows")} onClick={() => setTab("cashflows")}>Cash Flows</button>
@@ -96,9 +137,9 @@ export default function PositionTracker({ user }) {
         <button style={subTab(tab === "performance")} onClick={() => setTab("performance")}>Performance</button>
       </nav>
       {tab === "freeze" && <FreezeSection userId={userId} platform={selectedPlatform} getDisplayName={getDisplayName} />}
-      {tab === "cashflows" && <CashFlowSection userId={userId} platform={selectedPlatform} getDisplayName={getDisplayName} />}
-      {tab === "positions" && <PositionsSection userId={userId} platform={selectedPlatform} />}
-      {tab === "xirr" && <XirrSection userId={userId} platform={selectedPlatform} getDisplayName={getDisplayName} />}
+      {tab === "cashflows" && <CashFlowSection userId={userId} platform={selectedPlatform} getDisplayName={getDisplayName} displayCurrency={displayCurrency} exchangeRate={exchangeRate} />}
+      {tab === "positions" && <PositionsSection userId={userId} platform={selectedPlatform} displayCurrency={displayCurrency} exchangeRate={exchangeRate} />}
+      {tab === "xirr" && <XirrSection userId={userId} platform={selectedPlatform} getDisplayName={getDisplayName} displayCurrency={displayCurrency} exchangeRate={exchangeRate} />}
       {tab === "performance" && <PerformanceSection userId={userId} platform={selectedPlatform} />}
     </div>
   );
@@ -261,7 +302,7 @@ function FreezeSection({ userId, platform, getDisplayName }) {
 }
 
 // ==================== CASH FLOWS ====================
-function CashFlowSection({ userId, platform: selectedPlatform, getDisplayName }) {
+function CashFlowSection({ userId, platform: selectedPlatform, getDisplayName, displayCurrency, exchangeRate }) {
   const [flows, setFlows] = useState([]);
   const [platform, setPlatform] = useState("");
   const [cfType, setCfType] = useState("DEPOSIT");
@@ -341,7 +382,7 @@ function CashFlowSection({ userId, platform: selectedPlatform, getDisplayName })
 }
 
 // ==================== POSITIONS ====================
-function PositionsSection({ userId, platform: selectedPlatform }) {
+function PositionsSection({ userId, platform: selectedPlatform, displayCurrency, exchangeRate }) {
   const [data, setData] = useState({ open: [], closed: [], summary: {} });
   const [loading, setLoading] = useState(true);
 
@@ -355,20 +396,24 @@ function PositionsSection({ userId, platform: selectedPlatform }) {
 
   if (loading) return <p>Loading positions (fetching live prices)...</p>;
 
+  const cv = (val, currency) => convertValue(val, currency || "USD", displayCurrency === "default" ? (currency || "USD") : displayCurrency, exchangeRate);
+  const curSym = getCurSymbol(displayCurrency, selectedPlatform === "prostocks" ? "INR" : "USD");
+
   const openFiltered = selectedPlatform === "all" ? data.open : data.open.filter(p => p.platform_name === selectedPlatform);
   const closedFiltered = selectedPlatform === "all" ? data.closed : data.closed.filter(p => p.platform === selectedPlatform);
 
-  const s = selectedPlatform === "all" ? (data.summary || {}) : (() => {
-    const inv = openFiltered.reduce((a, p) => a + (p.invested || 0), 0);
-    const cur = openFiltered.reduce((a, p) => a + (p.cur_value || 0), 0);
-    const pnl = cur - inv;
-    return {
-      total_invested: inv,
-      total_current: cur,
-      total_pnl: pnl,
-      total_pnl_pct: inv > 0 ? (pnl / inv * 100) : 0,
-    };
-  })();
+  const converted = openFiltered.map(p => {
+    const inv = cv(p.invested, p.currency);
+    const curVal = cv(p.cur_value, p.currency);
+    return { ...p, invested_cv: inv, cur_value_cv: curVal, pnl_cv: curVal - inv,
+      avg_cv: cv(p.avg_buy_price, p.currency), cur_price_cv: cv(p.cur_price, p.currency) };
+  });
+  const s = {
+    total_invested: converted.reduce((a, p) => a + (p.invested_cv || 0), 0),
+    total_current: converted.reduce((a, p) => a + (p.cur_value_cv || 0), 0),
+    total_pnl: converted.reduce((a, p) => a + (p.pnl_cv || 0), 0),
+  };
+  s.total_pnl_pct = s.total_invested > 0 ? (s.total_pnl / s.total_invested * 100) : 0;
 
   return (
     <div>
@@ -389,25 +434,29 @@ function PositionsSection({ userId, platform: selectedPlatform }) {
               {selectedPlatform === "all" && <th style={{ padding: 6, textAlign: "left" }}>Platform</th>}
             </tr></thead>
             <tbody>
-              {openFiltered.map((p) => (
+            {openFiltered.map((p, idx) => {
+              const c = converted[idx];
+              const pnlPct = c.invested_cv > 0 ? (c.pnl_cv / c.invested_cv * 100) : 0;
+              return (
                 <tr key={p.stock_name}>
                   <td style={{ padding: 6, fontWeight: "bold" }}>{p.symbol}</td>
                   <td style={{ padding: 6 }}>{p.stock_name}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{p.quantity}</td>
-                  <td style={{ padding: 6, textAlign: "right" }}>{fmt(p.avg_buy_price)}</td>
-                  <td style={{ padding: 6, textAlign: "right" }}>{fmt(p.cur_price)}</td>
-                  <td style={{ padding: 6, textAlign: "right" }}>{fmt(p.invested)}</td>
-                  <td style={{ padding: 6, textAlign: "right" }}>{fmt(p.cur_value)}</td>
-                  <td style={{ padding: 6, textAlign: "right", color: clr(p.pnl), fontWeight: "bold" }}>{fmt(p.pnl)}</td>
-                  <td style={{ padding: 6, textAlign: "right", color: clr(p.pnl_pct) }}>{p.pnl_pct}%</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{fmt(c.avg_cv)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{fmt(c.cur_price_cv)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{fmt(c.invested_cv)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{fmt(c.cur_value_cv)}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: clr(c.pnl_cv), fontWeight: "bold" }}>{curSym}{fmt(c.pnl_cv)}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: clr(pnlPct) }}>{pnlPct.toFixed(2)}%</td>
                   {selectedPlatform === "all" && <td style={{ padding: 6 }}>{p.platform_name}</td>}
                 </tr>
-              ))}
+              );
+            })}
               <tr style={{ background: "#e8f5e9", fontWeight: "bold" }}>
-                <td colSpan={selectedPlatform === "all" ? 5 : 5} style={{ padding: 6 }}>TOTAL</td>
-                <td style={{ padding: 6, textAlign: "right" }}>{fmt(s.total_invested)}</td>
-                <td style={{ padding: 6, textAlign: "right" }}>{fmt(s.total_current)}</td>
-                <td style={{ padding: 6, textAlign: "right", color: clr(s.total_pnl) }}>{fmt(s.total_pnl)}</td>
+                <td colSpan={5} style={{ padding: 6 }}>TOTAL</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{curSym}{fmt(s.total_invested)}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{curSym}{fmt(s.total_current)}</td>
+                <td style={{ padding: 6, textAlign: "right", color: clr(s.total_pnl) }}>{curSym}{fmt(s.total_pnl)}</td>
                 <td style={{ padding: 6, textAlign: "right", color: clr(s.total_pnl_pct) }}>{(s.total_pnl_pct || 0).toFixed(2)}%</td>
                 {selectedPlatform === "all" && <td></td>}
               </tr>
@@ -450,7 +499,7 @@ function PositionsSection({ userId, platform: selectedPlatform }) {
 }
 
 // ==================== XIRR ====================
-function XirrSection({ userId, platform: selectedPlatform, getDisplayName }) {
+function XirrSection({ userId, platform: selectedPlatform, getDisplayName, displayCurrency, exchangeRate }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
