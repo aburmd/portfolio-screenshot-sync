@@ -63,27 +63,38 @@ def handler(event, context):
         except Exception as e:
             print(f"Yahoo Finance batch fetch failed: {e}")
 
-    # Write daily records
+    # Write daily records — aggregate by (user_id, symbol) to avoid duplicate keys
+    from collections import defaultdict
+    agg = defaultdict(lambda: {"qty": 0, "currency": "USD", "platform": "unknown"})
+    for item in items:
+        sym = item["symbol"]
+        if sym == "WALLETBALANCE":
+            continue
+        price = prices.get(sym)
+        if not price:
+            continue
+        qty = float(item.get("quantity", 0))
+        if qty <= 0:
+            continue
+        key = (item["user_id"], sym)
+        agg[key]["qty"] += qty
+        agg[key]["currency"] = item.get("currency", "USD")
+        agg[key]["platform"] = item.get("platform_name", "unknown")
+
     written = 0
     with dp_table.batch_writer() as batch:
-        for item in items:
-            sym = item["symbol"]
-            price = prices.get(sym)
-            if not price:
-                continue
-            qty = float(item.get("quantity", 0))
-            if qty <= 0:
-                continue
+        for (uid, sym), data in agg.items():
+            price = prices.get(sym, 0)
             batch.put_item(Item={
-                "user_id": item["user_id"],
+                "user_id": uid,
                 "symbol_date": f"{sym}#{today}",
                 "symbol": sym,
                 "date": today,
                 "close_price": Decimal(str(price)),
-                "quantity": Decimal(str(round(qty, 6))),
-                "currency": item.get("currency", "USD"),
-                "platform": item.get("platform_name", "unknown"),
-                "value": Decimal(str(round(qty * price, 2))),
+                "quantity": Decimal(str(round(data["qty"], 6))),
+                "currency": data["currency"],
+                "platform": data["platform"],
+                "value": Decimal(str(round(data["qty"] * price, 2))),
             })
             written += 1
 
