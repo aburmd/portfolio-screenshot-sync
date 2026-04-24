@@ -140,7 +140,7 @@ export default function PositionTracker({ user }) {
       {tab === "cashflows" && <CashFlowSection userId={userId} platform={selectedPlatform} getDisplayName={getDisplayName} displayCurrency={displayCurrency} exchangeRate={exchangeRate} />}
       {tab === "positions" && <PositionsSection userId={userId} platform={selectedPlatform} displayCurrency={displayCurrency} exchangeRate={exchangeRate} />}
       {tab === "xirr" && <XirrSection userId={userId} platform={selectedPlatform} getDisplayName={getDisplayName} displayCurrency={displayCurrency} exchangeRate={exchangeRate} />}
-      {tab === "performance" && <PerformanceSection userId={userId} platform={selectedPlatform} />}
+      {tab === "performance" && <PerformanceSection userId={userId} platform={selectedPlatform} displayCurrency={displayCurrency} exchangeRate={exchangeRate} />}
     </div>
   );
 }
@@ -556,7 +556,7 @@ const periodBtn = (active) => ({
   color: active ? "#fff" : "#333",
 });
 
-function PerformanceSection({ userId, platform: selectedPlatform }) {
+function PerformanceSection({ userId, platform: selectedPlatform, displayCurrency, exchangeRate }) {
   const [period, setPeriod] = useState("1Y");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -619,7 +619,13 @@ function PerformanceSection({ userId, platform: selectedPlatform }) {
 
   const s = chartData?.summary || {};
   const isPositive = s.period_gain >= 0;
-  const cur = chartData?.currency === "INR" ? "₹" : "$";
+  const nativeCur = chartData?.currency || "USD";
+  const targetCur = displayCurrency === "default" ? nativeCur : displayCurrency;
+  const cur = targetCur === "INR" ? "₹" : "$";
+  const cv = (v) => {
+    if (v == null) return v;
+    return convertValue(v, nativeCur, targetCur, exchangeRate);
+  };
   const cfDates = new Set((chartData?.cash_flows || []).map(cf => cf.date));
   const sellDates = new Set((chartData?.sell_events || []).map(se => se.date));
 
@@ -630,9 +636,9 @@ function PerformanceSection({ userId, platform: selectedPlatform }) {
     return (
       <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, padding: 10, fontSize: 12 }}>
         <div style={{ fontWeight: "bold", marginBottom: 4 }}>{label}</div>
-        <div>Total: {cur}{fmt(payload[0].value)}</div>
-        {payload[0].payload.stock_value != null && <div style={{ color: "#666" }}>Stocks: {cur}{fmt(payload[0].payload.stock_value)}</div>}
-        {payload[0].payload.cash > 0 && <div style={{ color: "#1976d2" }}>Cash: {cur}{fmt(payload[0].payload.cash)}</div>}
+        <div>Total: {cur}{fmt(cv(payload[0].value))}</div>
+        {payload[0].payload.stock_value != null && <div style={{ color: "#666" }}>Stocks: {cur}{fmt(cv(payload[0].payload.stock_value))}</div>}
+        {payload[0].payload.cash > 0 && <div style={{ color: "#1976d2" }}>Cash: {cur}{fmt(cv(payload[0].payload.cash))}</div>}
         {cf.map((c, i) => (
           <div key={i} style={{ color: c.type === "DEPOSIT" ? "#2e7d32" : "#c62828", marginTop: 2 }}>
             {c.type === "DEPOSIT" ? "⬇" : "⬆"} {c.type}: {cur}{fmt(c.amount)}
@@ -670,26 +676,26 @@ function PerformanceSection({ userId, platform: selectedPlatform }) {
       {/* Summary card */}
       {chartData && chartData.data_points.length > 0 && (
         <div style={{ ...card, display: "flex", gap: 20, flexWrap: "wrap", background: isPositive ? "#e8f5e9" : "#ffebee" }}>
-          <div><span style={{ fontSize: 12, color: "#666" }}>Start Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.start_value)}</span></div>
-          <div><span style={{ fontSize: 12, color: "#666" }}>End Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.end_value)}</span></div>
+          <div><span style={{ fontSize: 12, color: "#666" }}>Start Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(cv(s.start_value))}</span></div>
+          <div><span style={{ fontSize: 12, color: "#666" }}>End Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(cv(s.end_value))}</span></div>
           <div><span style={{ fontSize: 12, color: "#666" }}>Period Gain</span><br />
             <span style={{ fontSize: 18, fontWeight: "bold", color: clr(s.period_gain) }}>
-              {s.period_gain >= 0 ? "+" : ""}{cur}{fmt(s.period_gain)} ({s.period_gain_pct >= 0 ? "+" : ""}{s.period_gain_pct}%)
+              {s.period_gain >= 0 ? "+" : ""}{cur}{fmt(cv(s.period_gain))} ({s.period_gain_pct >= 0 ? "+" : ""}{s.period_gain_pct}%)
             </span>
           </div>
-          <div><span style={{ fontSize: 12, color: "#666" }}>Stock Invested</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(s.end_stock_value)}</span></div>
-          <div><span style={{ fontSize: 12, color: "#666" }}>Balance Cash</span><br /><span style={{ fontSize: 18, fontWeight: "bold", color: "#1976d2" }}>{cur}{fmt(s.end_cash)}</span></div>
+          <div><span style={{ fontSize: 12, color: "#666" }}>Stock Invested</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(cv(s.end_stock_value))}</span></div>
+          <div><span style={{ fontSize: 12, color: "#666" }}>Balance Cash</span><br /><span style={{ fontSize: 18, fontWeight: "bold", color: "#1976d2" }}>{cur}{fmt(cv(s.end_cash))}</span></div>
           <div><span style={{ fontSize: 12, color: "#666" }}>Period</span><br /><span style={{ fontSize: 13 }}>{chartData.start_date} — {chartData.end_date}</span></div>
         </div>
       )}
       {chartData && chartData.data_points.length > 0 && s.net_invested > 0 && (
         <div style={{ ...card, display: "flex", gap: 20, flexWrap: "wrap", background: "#f5f5f5", padding: 12 }}>
-          <div><span style={{ fontSize: 11, color: "#666" }}>Net Deposited</span><br /><span style={{ fontSize: 15, fontWeight: "bold" }}>{cur}{fmt(s.net_invested)}</span></div>
-          <div><span style={{ fontSize: 11, color: "#666" }}>Unrealized P/L</span><br /><span style={{ fontSize: 15, fontWeight: "bold", color: clr(s.unrealized_pnl) }}>{s.unrealized_pnl >= 0 ? "+" : ""}{cur}{fmt(s.unrealized_pnl)}</span></div>
-          <div><span style={{ fontSize: 11, color: "#666" }}>Realized P/L</span><br /><span style={{ fontSize: 15, fontWeight: "bold", color: clr(s.realized_pnl) }}>{s.realized_pnl >= 0 ? "+" : ""}{cur}{fmt(s.realized_pnl)}</span></div>
+          <div><span style={{ fontSize: 11, color: "#666" }}>Net Deposited</span><br /><span style={{ fontSize: 15, fontWeight: "bold" }}>{cur}{fmt(cv(s.net_invested))}</span></div>
+          <div><span style={{ fontSize: 11, color: "#666" }}>Unrealized P/L</span><br /><span style={{ fontSize: 15, fontWeight: "bold", color: clr(s.unrealized_pnl) }}>{s.unrealized_pnl >= 0 ? "+" : ""}{cur}{fmt(cv(s.unrealized_pnl))}</span></div>
+          <div><span style={{ fontSize: 11, color: "#666" }}>Realized P/L</span><br /><span style={{ fontSize: 15, fontWeight: "bold", color: clr(s.realized_pnl) }}>{s.realized_pnl >= 0 ? "+" : ""}{cur}{fmt(cv(s.realized_pnl))}</span></div>
           <div><span style={{ fontSize: 11, color: "#666" }}>Total P/L</span><br />
             <span style={{ fontSize: 15, fontWeight: "bold", color: clr(s.total_pnl) }}>
-              {s.total_pnl >= 0 ? "+" : ""}{cur}{fmt(s.total_pnl)} ({s.total_pnl_pct >= 0 ? "+" : ""}{s.total_pnl_pct}%)
+              {s.total_pnl >= 0 ? "+" : ""}{cur}{fmt(cv(s.total_pnl))} ({s.total_pnl_pct >= 0 ? "+" : ""}{s.total_pnl_pct}%)
             </span>
           </div>
         </div>
@@ -714,7 +720,7 @@ function PerformanceSection({ userId, platform: selectedPlatform }) {
                   ? `${months[parseInt(parts[1])-1]} '${parts[0].slice(2)}`
                   : `${months[parseInt(parts[1])-1]} ${parseInt(parts[2])}`;
               }} interval="preserveStartEnd" />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${cur}${(v/1000).toFixed(0)}k`} />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${cur}${(cv(v)/1000).toFixed(0)}k`} />
               <Tooltip content={<CustomTooltip />} />
               <Area type="monotone" dataKey="value" stroke={isPositive ? "#2e7d32" : "#c62828"}
                 fill="url(#colorVal)" strokeWidth={2} dot={false} />
