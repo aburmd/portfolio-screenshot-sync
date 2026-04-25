@@ -515,6 +515,7 @@ function XirrSection({ userId, platform: selectedPlatform, getDisplayName, displ
   if (!data) return <p>Failed to load XIRR.</p>;
 
   const filteredPlatforms = selectedPlatform === "all" ? data.platforms : data.platforms.filter(p => p.platform === selectedPlatform);
+  const curSym = getCurSymbol(displayCurrency, selectedPlatform === "prostocks" ? "INR" : "USD");
 
   return (
     <div>
@@ -525,13 +526,13 @@ function XirrSection({ userId, platform: selectedPlatform, getDisplayName, displ
             <div style={{ fontSize: 28, fontWeight: "bold", color: clr(p.xirr) }}>{p.xirr_pct}</div>
             {p.total_pnl !== undefined && (
               <div style={{ fontSize: 16, fontWeight: "bold", color: clr(p.total_pnl), marginTop: 4 }}>
-                P/L: {p.total_pnl >= 0 ? "+" : ""}{fmt(p.total_pnl)}
+                P/L: {p.total_pnl >= 0 ? "+" : ""}{curSym}{fmt(Math.abs(p.total_pnl))}
               </div>
             )}
             <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
-              Deposited: {fmt(p.total_deposited)}<br />
-              Withdrawn: {fmt(p.total_withdrawn)}<br />
-              Current Value: {fmt(p.current_value)}
+              Deposited: {curSym}{fmt(p.total_deposited)}<br />
+              Withdrawn: {curSym}{fmt(p.total_withdrawn)}<br />
+              Current Value: {curSym}{fmt(p.current_value)}
             </div>
           </div>
         ))}
@@ -542,11 +543,11 @@ function XirrSection({ userId, platform: selectedPlatform, getDisplayName, displ
         <div style={{ fontSize: 32, fontWeight: "bold", color: clr(data.overall.xirr) }}>{data.overall.xirr_pct}</div>
         {data.overall.total_pnl !== undefined && (
           <div style={{ fontSize: 18, fontWeight: "bold", color: clr(data.overall.total_pnl), marginTop: 4 }}>
-            Total P/L: {data.overall.total_pnl >= 0 ? "+" : ""}{fmt(data.overall.total_pnl)}
+            Total P/L: {data.overall.total_pnl >= 0 ? "+" : ""}{curSym}{fmt(Math.abs(data.overall.total_pnl))}
           </div>
         )}
         <div style={{ fontSize: 13, color: "#666", marginTop: 8 }}>
-          Total Deposited: {fmt(data.overall.total_deposited)} | Withdrawn: {fmt(data.overall.total_withdrawn)} | Current Value: {fmt(data.overall.current_value)}
+          Total Deposited: {curSym}{fmt(data.overall.total_deposited)} | Withdrawn: {curSym}{fmt(data.overall.total_withdrawn)} | Current Value: {curSym}{fmt(data.overall.current_value)}
         </div>
       </div>
 
