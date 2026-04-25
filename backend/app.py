@@ -896,8 +896,24 @@ async def calculate_xirr(user_id: str, platform: str = None):
         price = live_prices.get(sym) or h.get("current_price") or h["avg_buy_price"]
         hold_by_plat[p] += h["quantity"] * price
 
+    # Determine currency per platform from holdings
+    plat_currency = {}
+    for h in holdings:
+        p = h.get("platform_name", "unknown")
+        if h.get("currency") == "INR":
+            plat_currency[p] = "INR"
+        elif p not in plat_currency:
+            plat_currency[p] = "USD"
+
+    # Fetch exchange rate for INR→USD conversion
+    fx_rate = None
+    if "INR" in plat_currency.values():
+        fx_resp = await get_exchange_rate("USD", "INR")
+        fx_rate = fx_resp.get("rate")  # USD→INR rate (e.g. 85.5)
+
     results = []
-    all_cfs = []
+    all_cfs_usd = []  # all cash flows converted to USD for overall
+    overall_val_usd = 0
     for plat, cfs in platform_cfs.items():
         if platform and not _platform_matches(plat, platform):
             continue
@@ -908,32 +924,44 @@ async def calculate_xirr(user_id: str, platform: str = None):
         total_dep = sum(-cf for cf, _ in cfs if cf < 0)
         total_wd = sum(cf for cf, d in cfs if cf > 0 and d != today)
         total_pnl = round(cur_val + total_wd - total_dep, 2)
-        results.append({
+        currency = plat_currency.get(plat, "USD")
+        entry = {
             "platform": plat,
+            "currency": currency,
             "xirr": xirr_val, "xirr_pct": f"{xirr_val * 100:.2f}%" if xirr_val is not None else "N/A",
             "total_deposited": round(total_dep, 2),
             "total_withdrawn": round(total_wd, 2),
             "current_value": round(cur_val, 2),
             "total_pnl": total_pnl,
-        })
-        all_cfs.extend(cfs)
+        }
+        # Add USD-converted values for INR platforms
+        if currency == "INR" and fx_rate:
+            entry["total_deposited_usd"] = round(total_dep / fx_rate, 2)
+            entry["total_withdrawn_usd"] = round(total_wd / fx_rate, 2)
+            entry["current_value_usd"] = round(cur_val / fx_rate, 2)
+            entry["total_pnl_usd"] = round(total_pnl / fx_rate, 2)
+        results.append(entry)
+        # Convert to USD for overall
+        conv = (1 / fx_rate) if currency == "INR" and fx_rate else 1
+        all_cfs_usd.extend([(cf * conv, d) for cf, d in cfs])
+        overall_val_usd += cur_val * conv
 
-    overall_xirr = _compute_xirr(all_cfs) if all_cfs else None
-    overall_dep = sum(-cf for cf, _ in all_cfs if cf < 0)
-    overall_val = sum(hold_by_plat.values())
-
-    overall_wd = sum(cf for cf, d in all_cfs if cf > 0 and d != today)
-    overall_pnl = round(overall_val + overall_wd - overall_dep, 2)
+    overall_xirr = _compute_xirr(all_cfs_usd) if all_cfs_usd else None
+    overall_dep = sum(-cf for cf, _ in all_cfs_usd if cf < 0)
+    overall_wd = sum(cf for cf, d in all_cfs_usd if cf > 0 and d != today)
+    overall_pnl = round(overall_val_usd + overall_wd - overall_dep, 2)
     return {
         "platforms": results,
         "overall": {
+            "currency": "USD",
             "xirr": overall_xirr,
             "xirr_pct": f"{overall_xirr * 100:.2f}%" if overall_xirr is not None else "N/A",
             "total_deposited": round(overall_dep, 2),
             "total_withdrawn": round(overall_wd, 2),
-            "current_value": round(overall_val, 2),
+            "current_value": round(overall_val_usd, 2),
             "total_pnl": overall_pnl,
         },
+        "exchange_rate": fx_rate,
     }
 
 

@@ -515,40 +515,52 @@ function XirrSection({ userId, platform: selectedPlatform, getDisplayName, displ
   if (!data) return <p>Failed to load XIRR.</p>;
 
   const filteredPlatforms = selectedPlatform === "all" ? data.platforms : data.platforms.filter(p => p.platform === selectedPlatform);
-  const curSym = getCurSymbol(displayCurrency, selectedPlatform === "prostocks" ? "INR" : "USD");
+
+  const fmtC = (v, cur) => {
+    const sym = cur === "INR" ? "₹" : "$";
+    return v != null ? `${sym}${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—";
+  };
 
   return (
     <div>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
-        {filteredPlatforms.map((p) => (
+        {filteredPlatforms.map((p) => {
+          const cur = p.currency || "USD";
+          const isINR = cur === "INR";
+          return (
           <div key={p.platform} style={{ ...card, minWidth: 200, flex: 1 }}>
             <h4 style={{ margin: "0 0 8px" }}>{getDisplayName(p.platform)}</h4>
             <div style={{ fontSize: 28, fontWeight: "bold", color: clr(p.xirr) }}>{p.xirr_pct}</div>
             {p.total_pnl !== undefined && (
               <div style={{ fontSize: 16, fontWeight: "bold", color: clr(p.total_pnl), marginTop: 4 }}>
-                P/L: {p.total_pnl >= 0 ? "+" : ""}{curSym}{fmt(Math.abs(p.total_pnl))}
+                P/L: {p.total_pnl >= 0 ? "+" : "-"}{fmtC(p.total_pnl, cur)}
+                {isINR && p.total_pnl_usd !== undefined && (
+                  <span style={{ fontSize: 12, color: "#888", fontWeight: "normal" }}> ({p.total_pnl_usd >= 0 ? "+" : "-"}${fmt(Math.abs(p.total_pnl_usd))})</span>
+                )}
               </div>
             )}
             <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
-              Deposited: {curSym}{fmt(p.total_deposited)}<br />
-              Withdrawn: {curSym}{fmt(p.total_withdrawn)}<br />
-              Current Value: {curSym}{fmt(p.current_value)}
+              Deposited: {fmtC(p.total_deposited, cur)}{isINR && p.total_deposited_usd ? ` ($${fmt(p.total_deposited_usd)})` : ""}<br />
+              Withdrawn: {fmtC(p.total_withdrawn, cur)}{isINR && p.total_withdrawn_usd ? ` ($${fmt(p.total_withdrawn_usd)})` : ""}<br />
+              Current Value: {fmtC(p.current_value, cur)}{isINR && p.current_value_usd ? ` ($${fmt(p.current_value_usd)})` : ""}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div style={{ ...card, background: "#e3f2fd" }}>
-        <h4 style={{ margin: "0 0 8px" }}>Overall</h4>
+        <h4 style={{ margin: "0 0 8px" }}>Overall (USD)</h4>
         <div style={{ fontSize: 32, fontWeight: "bold", color: clr(data.overall.xirr) }}>{data.overall.xirr_pct}</div>
         {data.overall.total_pnl !== undefined && (
           <div style={{ fontSize: 18, fontWeight: "bold", color: clr(data.overall.total_pnl), marginTop: 4 }}>
-            Total P/L: {data.overall.total_pnl >= 0 ? "+" : ""}{curSym}{fmt(Math.abs(data.overall.total_pnl))}
+            Total P/L: {data.overall.total_pnl >= 0 ? "+" : "-"}${fmt(Math.abs(data.overall.total_pnl))}
           </div>
         )}
         <div style={{ fontSize: 13, color: "#666", marginTop: 8 }}>
-          Total Deposited: {curSym}{fmt(data.overall.total_deposited)} | Withdrawn: {curSym}{fmt(data.overall.total_withdrawn)} | Current Value: {curSym}{fmt(data.overall.current_value)}
+          Total Deposited: ${fmt(data.overall.total_deposited)} | Withdrawn: ${fmt(data.overall.total_withdrawn)} | Current Value: ${fmt(data.overall.current_value)}
         </div>
+        {data.exchange_rate && <div style={{ fontSize: 11, color: "#999", marginTop: 4 }}>1 USD = ₹{data.exchange_rate.toFixed(2)}</div>}
       </div>
 
       {data.platforms.length === 0 && (
