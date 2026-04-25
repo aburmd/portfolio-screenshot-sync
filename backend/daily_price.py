@@ -63,9 +63,9 @@ def handler(event, context):
         except Exception as e:
             print(f"Yahoo Finance batch fetch failed: {e}")
 
-    # Write daily records — aggregate by (user_id, symbol) to avoid duplicate keys
+    # Write daily records — one per (user_id, platform, symbol) for per-account tracking
     from collections import defaultdict
-    agg = defaultdict(lambda: {"qty": 0, "currency": "USD", "platform": "unknown"})
+    agg = defaultdict(lambda: {"qty": 0, "currency": "USD"})
     for item in items:
         sym = item["symbol"]
         if sym == "WALLETBALANCE":
@@ -76,24 +76,24 @@ def handler(event, context):
         qty = float(item.get("quantity", 0))
         if qty <= 0:
             continue
-        key = (item["user_id"], sym)
+        plat = item.get("platform_name", "unknown")
+        key = (item["user_id"], plat, sym)
         agg[key]["qty"] += qty
         agg[key]["currency"] = item.get("currency", "USD")
-        agg[key]["platform"] = item.get("platform_name", "unknown")
 
     written = 0
     with dp_table.batch_writer() as batch:
-        for (uid, sym), data in agg.items():
+        for (uid, plat, sym), data in agg.items():
             price = prices.get(sym, 0)
             batch.put_item(Item={
                 "user_id": uid,
-                "symbol_date": f"{sym}#{today}",
+                "symbol_date": f"{plat}#{sym}#{today}",
                 "symbol": sym,
                 "date": today,
                 "close_price": Decimal(str(price)),
                 "quantity": Decimal(str(round(data["qty"], 6))),
                 "currency": data["currency"],
-                "platform": data["platform"],
+                "platform": plat,
                 "value": Decimal(str(round(data["qty"] * price, 2))),
             })
             written += 1

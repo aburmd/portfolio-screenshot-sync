@@ -523,6 +523,11 @@ function XirrSection({ userId, platform: selectedPlatform, getDisplayName, displ
           <div key={p.platform} style={{ ...card, minWidth: 200, flex: 1 }}>
             <h4 style={{ margin: "0 0 8px" }}>{getDisplayName(p.platform)}</h4>
             <div style={{ fontSize: 28, fontWeight: "bold", color: clr(p.xirr) }}>{p.xirr_pct}</div>
+            {p.total_pnl !== undefined && (
+              <div style={{ fontSize: 16, fontWeight: "bold", color: clr(p.total_pnl), marginTop: 4 }}>
+                P/L: {p.total_pnl >= 0 ? "+" : ""}{fmt(p.total_pnl)}
+              </div>
+            )}
             <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
               Deposited: {fmt(p.total_deposited)}<br />
               Withdrawn: {fmt(p.total_withdrawn)}<br />
@@ -535,8 +540,13 @@ function XirrSection({ userId, platform: selectedPlatform, getDisplayName, displ
       <div style={{ ...card, background: "#e3f2fd" }}>
         <h4 style={{ margin: "0 0 8px" }}>Overall</h4>
         <div style={{ fontSize: 32, fontWeight: "bold", color: clr(data.overall.xirr) }}>{data.overall.xirr_pct}</div>
+        {data.overall.total_pnl !== undefined && (
+          <div style={{ fontSize: 18, fontWeight: "bold", color: clr(data.overall.total_pnl), marginTop: 4 }}>
+            Total P/L: {data.overall.total_pnl >= 0 ? "+" : ""}{fmt(data.overall.total_pnl)}
+          </div>
+        )}
         <div style={{ fontSize: 13, color: "#666", marginTop: 8 }}>
-          Total Deposited: {fmt(data.overall.total_deposited)} | Current Value: {fmt(data.overall.current_value)}
+          Total Deposited: {fmt(data.overall.total_deposited)} | Withdrawn: {fmt(data.overall.total_withdrawn)} | Current Value: {fmt(data.overall.current_value)}
         </div>
       </div>
 

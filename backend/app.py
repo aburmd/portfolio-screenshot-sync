@@ -794,7 +794,7 @@ async def get_positions(user_id: str, platform: str = None):
 
     resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
     all_items = _decimal_to_float(resp.get("Items", []))
-    open_items = all_items if not platform else [i for i in all_items if i.get("platform_name") == platform]
+    open_items = all_items if not platform else [i for i in all_items if _platform_matches(i.get("platform_name", ""), platform)]
 
     # Fetch live prices only for filtered stocks
     usd_syms = list(set(h["symbol"] for h in open_items if h.get("currency", "USD") == "USD" and h["symbol"] != "UNKNOWN" and h["symbol"] != "WALLETBALANCE"))
@@ -821,7 +821,7 @@ async def get_positions(user_id: str, platform: str = None):
     for item in txn_resp.get("Items", []):
         if item.get("type") == "SELL":
             plat = item["platform_ts_type"].split("#")[0]
-            if platform and plat != platform:
+            if platform and not _platform_matches(plat, platform):
                 continue
             qty = float(item.get("quantity", 0))
             buy = float(item.get("avg_buy_price", 0))
@@ -862,7 +862,7 @@ async def calculate_xirr(user_id: str, platform: str = None):
     hold_resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
     holdings = _decimal_to_float(hold_resp.get("Items", []))
     if platform:
-        holdings = [h for h in holdings if h.get("platform_name") == platform]
+        holdings = [h for h in holdings if _platform_matches(h.get("platform_name", ""), platform)]
 
     # Build cash flows per platform
     platform_cfs = {}  # platform -> [(amount, date)]
@@ -899,7 +899,7 @@ async def calculate_xirr(user_id: str, platform: str = None):
     results = []
     all_cfs = []
     for plat, cfs in platform_cfs.items():
-        if platform and plat != platform:
+        if platform and not _platform_matches(plat, platform):
             continue
         cur_val = hold_by_plat.get(plat, 0)
         if cur_val > 0:
@@ -907,12 +907,14 @@ async def calculate_xirr(user_id: str, platform: str = None):
         xirr_val = _compute_xirr(cfs)
         total_dep = sum(-cf for cf, _ in cfs if cf < 0)
         total_wd = sum(cf for cf, d in cfs if cf > 0 and d != today)
+        total_pnl = round(cur_val + total_wd - total_dep, 2)
         results.append({
             "platform": plat,
             "xirr": xirr_val, "xirr_pct": f"{xirr_val * 100:.2f}%" if xirr_val is not None else "N/A",
             "total_deposited": round(total_dep, 2),
             "total_withdrawn": round(total_wd, 2),
             "current_value": round(cur_val, 2),
+            "total_pnl": total_pnl,
         })
         all_cfs.extend(cfs)
 
@@ -920,18 +922,31 @@ async def calculate_xirr(user_id: str, platform: str = None):
     overall_dep = sum(-cf for cf, _ in all_cfs if cf < 0)
     overall_val = sum(hold_by_plat.values())
 
+    overall_wd = sum(cf for cf, d in all_cfs if cf > 0 and d != today)
+    overall_pnl = round(overall_val + overall_wd - overall_dep, 2)
     return {
         "platforms": results,
         "overall": {
             "xirr": overall_xirr,
             "xirr_pct": f"{overall_xirr * 100:.2f}%" if overall_xirr is not None else "N/A",
             "total_deposited": round(overall_dep, 2),
+            "total_withdrawn": round(overall_wd, 2),
             "current_value": round(overall_val, 2),
+            "total_pnl": overall_pnl,
         },
     }
 
 
 # --- Position Tracker helpers ---
+
+def _platform_matches(plat_value, filter_value):
+    """Check if a platform value matches the filter. 'fidelity' matches all 'Fid-*' and 'fidelity'."""
+    if not filter_value:
+        return True
+    if filter_value == "fidelity":
+        return plat_value.startswith("Fid-") or plat_value == "fidelity"
+    return plat_value == filter_value
+
 
 def _fetch_live_prices(usd_symbols, inr_symbols):
     """Fetch live prices from Yahoo Finance. Returns {symbol: price}."""
@@ -1402,8 +1417,12 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
     txn_table = ddb.Table(TRANSACTIONS_TABLE)
     txn_resp = txn_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
     all_txns_raw = txn_resp.get("Items", [])
+
+    def _platform_match(plat_value):
+        return _platform_matches(plat_value, platform)
+
     all_txns = all_txns_raw if platform == "all" else [
-        t for t in all_txns_raw if t.get("platform_ts_type", "").split("#")[0] == platform
+        t for t in all_txns_raw if _platform_match(t.get("platform_ts_type", "").split("#")[0])
     ]
 
     # 4. Query all buy lots (one query, reused for cash balance)
@@ -1411,18 +1430,20 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
     lots_resp = lots_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
     all_lots_raw = _decimal_to_float(lots_resp.get("Items", []))
     all_lots = all_lots_raw if platform == "all" else [
-        l for l in all_lots_raw if l.get("platform", "") == platform
+        l for l in all_lots_raw if _platform_match(l.get("platform", ""))
     ]
 
     # 5. Determine currency from filtered items only
-    filtered_items = items if platform == "all" else [i for i in items if i.get("platform", "") == platform]
+    filtered_items = items if platform == "all" else [
+        i for i in items if _platform_match(i.get("platform", ""))
+    ]
     currencies = set(item.get("currency", "USD") for item in filtered_items)
     currency = "INR" if currencies == {"INR"} else "USD"
 
     # 6. Aggregate stock values by date
     by_date = {}
     for item in items:
-        if platform != "all" and item.get("platform", "") != platform:
+        if platform != "all" and not _platform_match(item.get("platform", "")):
             continue
         d = item["date"]
         by_date.setdefault(d, {"value": 0, "count": 0})
@@ -1439,14 +1460,16 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
         data_points.pop()
 
     # 7. Build cash balance timeline: cash = cumulative(deposits - withdrawals) - cumulative(lot costs)
+    # Skip cash if no buy lots exist (e.g. Fidelity — daily prices already capture full value)
+    has_lots = len(all_lots) > 0
     cash_events = sorted(
         [(t.get("date", ""), float(t.get("amount", 0)) * (1 if t.get("type") == "DEPOSIT" else -1))
          for t in all_txns if t.get("type") in ("DEPOSIT", "WITHDRAW") and t.get("date")]
-    )
+    ) if has_lots else []
     lot_costs = sorted(
         [(l.get("buy_date", ""), l["quantity"] * l["buy_price"])
          for l in all_lots if l.get("buy_date")]
-    )
+    ) if has_lots else []
 
     def cash_at_date(target):
         cash = sum(amt for d, amt in cash_events if d <= target)
@@ -1484,11 +1507,15 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
     actual_end = data_points[-1]["date"] if data_points else ed.isoformat()
 
     # Period gain (amount) = value change minus deposits/withdrawals during period
-    period_net_cf = sum(
-        float(t.get("amount", 0)) * (1 if t.get("type") == "DEPOSIT" else -1)
-        for t in all_txns
-        if t.get("type") in ("DEPOSIT", "WITHDRAW") and actual_start < t.get("date", "") <= actual_end
-    )
+    # Skip cash flow adjustment when no buy lots (e.g. Fidelity — statement cash flows are internal)
+    if has_lots:
+        period_net_cf = sum(
+            float(t.get("amount", 0)) * (1 if t.get("type") == "DEPOSIT" else -1)
+            for t in all_txns
+            if t.get("type") in ("DEPOSIT", "WITHDRAW") and actual_start < t.get("date", "") <= actual_end
+        )
+    else:
+        period_net_cf = 0
     period_gain = round(end_val - start_val - period_net_cf, 2)
 
     # Period gain % = simple return relative to start value (changes per timeframe)
@@ -1497,19 +1524,25 @@ async def get_chart_data(user_id: str, period: str = "1Y", start_date: str = Non
     end_stock = data_points[-1].get("stock_value", 0) if data_points else 0
     end_cash = data_points[-1].get("cash", 0) if data_points else 0
 
-    # Account P/L breakdown
-    total_deposits = sum(float(t.get("amount", 0)) for t in all_txns if t.get("type") == "DEPOSIT")
-    total_withdrawals = sum(float(t.get("amount", 0)) for t in all_txns if t.get("type") == "WITHDRAW")
-    net_invested = round(total_deposits - total_withdrawals, 2)
-    realized_pnl = round(sum(
-        (float(t.get("avg_sold_price", 0)) - float(t.get("avg_buy_price", 0))) * float(t.get("quantity", 0))
-        for t in all_txns if t.get("type") == "SELL"
-    ), 2)
-    # Unrealized = current stock value - total lot cost
-    total_lot_cost = round(sum(l["quantity"] * l["buy_price"] for l in all_lots), 2)
-    unrealized_pnl = round(end_stock - total_lot_cost, 2)
-    total_pnl = round(realized_pnl + unrealized_pnl, 2)
-    total_pnl_pct = round(total_pnl / net_invested * 100, 2) if net_invested else 0
+    # Account P/L breakdown (only meaningful when buy lots exist)
+    if has_lots:
+        total_deposits = sum(float(t.get("amount", 0)) for t in all_txns if t.get("type") == "DEPOSIT")
+        total_withdrawals = sum(float(t.get("amount", 0)) for t in all_txns if t.get("type") == "WITHDRAW")
+        net_invested = round(total_deposits - total_withdrawals, 2)
+        realized_pnl = round(sum(
+            (float(t.get("avg_sold_price", 0)) - float(t.get("avg_buy_price", 0))) * float(t.get("quantity", 0))
+            for t in all_txns if t.get("type") == "SELL"
+        ), 2)
+        total_lot_cost = round(sum(l["quantity"] * l["buy_price"] for l in all_lots), 2)
+        unrealized_pnl = round(end_stock - total_lot_cost, 2)
+        total_pnl = round(realized_pnl + unrealized_pnl, 2)
+        total_pnl_pct = round(total_pnl / net_invested * 100, 2) if net_invested else 0
+    else:
+        net_invested = 0
+        realized_pnl = 0
+        unrealized_pnl = 0
+        total_pnl = 0
+        total_pnl_pct = 0
 
     return {
         "period": period, "start_date": sd.isoformat(), "end_date": ed.isoformat(),
@@ -1581,7 +1614,7 @@ def _backfill_symbol(user_id: str, symbol: str, from_date: str, currency: str, p
         if qty <= 0:
             continue
         records.append({
-            "user_id": user_id, "symbol_date": f"{symbol}#{d}",
+            "user_id": user_id, "symbol_date": f"{platform}#{symbol}#{d}",
             "symbol": symbol, "date": d,
             "close_price": Decimal(str(round(close, 2))),
             "quantity": Decimal(str(round(qty, 6))),
@@ -1599,14 +1632,13 @@ def _backfill_symbol(user_id: str, symbol: str, from_date: str, currency: str, p
         earliest_lot_date = min(l["buy_date"] for l in lots)
     else:
         earliest_lot_date = from_date
-    # Query all records for this symbol and delete ones before earliest lot
     cleanup_resp = dp_table.query(
-        KeyConditionExpression=Key("user_id").eq(user_id) & Key("symbol_date").begins_with(f"{symbol}#"),
+        KeyConditionExpression=Key("user_id").eq(user_id) & Key("symbol_date").begins_with(f"{platform}#{symbol}#"),
     )
     deleted = 0
     with dp_table.batch_writer() as batch:
         for item in cleanup_resp.get("Items", []):
-            rec_date = item["symbol_date"].split("#")[1]
+            rec_date = item["date"]
             if rec_date < earliest_lot_date:
                 batch.delete_item(Key={"user_id": user_id, "symbol_date": item["symbol_date"]})
                 deleted += 1
