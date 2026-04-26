@@ -1062,9 +1062,28 @@ async def calculate_xirr(user_id: str, platform: str = None):
         fx_resp = await get_exchange_rate("USD", "INR")
         fx_rate = fx_resp.get("rate")  # USD→INR rate (e.g. 85.5)
 
+    # Realized P/L per platform from SELL transactions
+    realized_by_plat = {}
+    for txn in txns:
+        if txn.get("type") != "SELL":
+            continue
+        plat = txn["platform_ts_type"].split("#")[0]
+        qty = float(txn.get("quantity", 0))
+        buy_p = float(txn.get("avg_buy_price", 0))
+        sell_p = float(txn.get("avg_sold_price", 0))
+        realized_by_plat[plat] = realized_by_plat.get(plat, 0) + (sell_p - buy_p) * qty
+
+    # Cost basis per platform from current holdings
+    cost_by_plat = {}
+    for h in holdings:
+        p = h.get("platform_name", "unknown")
+        cost_by_plat[p] = cost_by_plat.get(p, 0) + h["quantity"] * h["avg_buy_price"]
+
     results = []
-    all_cfs_usd = []  # all cash flows converted to USD for overall
+    all_cfs_usd = []
     overall_val_usd = 0
+    overall_realized_usd = 0
+    overall_unrealized_usd = 0
     for plat, cfs in platform_cfs.items():
         if platform and not _platform_matches(plat, platform):
             continue
@@ -1075,27 +1094,29 @@ async def calculate_xirr(user_id: str, platform: str = None):
         total_dep = sum(-cf for cf, _ in cfs if cf < 0)
         total_wd = sum(cf for cf, d in cfs if cf > 0 and d != today)
         total_pnl = round(cur_val + total_wd - total_dep, 2)
+        realized = round(realized_by_plat.get(plat, 0), 2)
+        unrealized = round(cur_val - cost_by_plat.get(plat, 0), 2)
         currency = plat_currency.get(plat, "USD")
         entry = {
-            "platform": plat,
-            "currency": currency,
+            "platform": plat, "currency": currency,
             "xirr": xirr_val, "xirr_pct": f"{xirr_val * 100:.2f}%" if xirr_val is not None else "N/A",
-            "total_deposited": round(total_dep, 2),
-            "total_withdrawn": round(total_wd, 2),
-            "current_value": round(cur_val, 2),
-            "total_pnl": total_pnl,
+            "total_deposited": round(total_dep, 2), "total_withdrawn": round(total_wd, 2),
+            "current_value": round(cur_val, 2), "total_pnl": total_pnl,
+            "realized_pnl": realized, "unrealized_pnl": unrealized,
         }
-        # Add USD-converted values for INR platforms
         if currency == "INR" and fx_rate:
             entry["total_deposited_usd"] = round(total_dep / fx_rate, 2)
             entry["total_withdrawn_usd"] = round(total_wd / fx_rate, 2)
             entry["current_value_usd"] = round(cur_val / fx_rate, 2)
             entry["total_pnl_usd"] = round(total_pnl / fx_rate, 2)
+            entry["realized_pnl_usd"] = round(realized / fx_rate, 2)
+            entry["unrealized_pnl_usd"] = round(unrealized / fx_rate, 2)
         results.append(entry)
-        # Convert to USD for overall
         conv = (1 / fx_rate) if currency == "INR" and fx_rate else 1
         all_cfs_usd.extend([(cf * conv, d) for cf, d in cfs])
         overall_val_usd += cur_val * conv
+        overall_realized_usd += realized * conv
+        overall_unrealized_usd += unrealized * conv
 
     overall_xirr = _compute_xirr(all_cfs_usd) if all_cfs_usd else None
     overall_dep = sum(-cf for cf, _ in all_cfs_usd if cf < 0)
@@ -1107,10 +1128,10 @@ async def calculate_xirr(user_id: str, platform: str = None):
             "currency": "USD",
             "xirr": overall_xirr,
             "xirr_pct": f"{overall_xirr * 100:.2f}%" if overall_xirr is not None else "N/A",
-            "total_deposited": round(overall_dep, 2),
-            "total_withdrawn": round(overall_wd, 2),
-            "current_value": round(overall_val_usd, 2),
-            "total_pnl": overall_pnl,
+            "total_deposited": round(overall_dep, 2), "total_withdrawn": round(overall_wd, 2),
+            "current_value": round(overall_val_usd, 2), "total_pnl": overall_pnl,
+            "realized_pnl": round(overall_realized_usd, 2),
+            "unrealized_pnl": round(overall_unrealized_usd, 2),
         },
         "exchange_rate": fx_rate,
     }

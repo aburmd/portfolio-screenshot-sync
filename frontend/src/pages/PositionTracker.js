@@ -613,6 +613,12 @@ function XirrSection({ userId, platform: selectedPlatform, getDisplayName, displ
                 )}
               </div>
             )}
+            {(p.realized_pnl !== undefined || p.unrealized_pnl !== undefined) && (
+              <div style={{ fontSize: 12, marginTop: 4 }}>
+                {p.unrealized_pnl !== undefined && <span style={{ color: clr(p.unrealized_pnl) }}>Unrealized: {p.unrealized_pnl >= 0 ? "+" : "-"}{fmtC(p.unrealized_pnl, cur)}</span>}
+                {p.realized_pnl !== undefined && p.realized_pnl !== 0 && <span style={{ color: clr(p.realized_pnl), marginLeft: 8 }}>Realized: {p.realized_pnl >= 0 ? "+" : "-"}{fmtC(p.realized_pnl, cur)}</span>}
+              </div>
+            )}
             <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
               Deposited: {fmtC(p.total_deposited, cur)}{isINR && p.total_deposited_usd ? ` ($${fmt(p.total_deposited_usd)})` : ""}<br />
               Withdrawn: {fmtC(p.total_withdrawn, cur)}{isINR && p.total_withdrawn_usd ? ` ($${fmt(p.total_withdrawn_usd)})` : ""}<br />
@@ -629,6 +635,12 @@ function XirrSection({ userId, platform: selectedPlatform, getDisplayName, displ
         {data.overall.total_pnl !== undefined && (
           <div style={{ fontSize: 18, fontWeight: "bold", color: clr(data.overall.total_pnl), marginTop: 4 }}>
             Total P/L: {data.overall.total_pnl >= 0 ? "+" : "-"}${fmt(Math.abs(data.overall.total_pnl))}
+          </div>
+        )}
+        {(data.overall.realized_pnl !== undefined || data.overall.unrealized_pnl !== undefined) && (
+          <div style={{ fontSize: 13, marginTop: 4 }}>
+            {data.overall.unrealized_pnl !== undefined && <span style={{ color: clr(data.overall.unrealized_pnl) }}>Unrealized: {data.overall.unrealized_pnl >= 0 ? "+" : "-"}${fmt(Math.abs(data.overall.unrealized_pnl))}</span>}
+            {data.overall.realized_pnl !== undefined && data.overall.realized_pnl !== 0 && <span style={{ color: clr(data.overall.realized_pnl), marginLeft: 12 }}>Realized: {data.overall.realized_pnl >= 0 ? "+" : "-"}${fmt(Math.abs(data.overall.realized_pnl))}</span>}
           </div>
         )}
         <div style={{ fontSize: 13, color: "#666", marginTop: 8 }}>
