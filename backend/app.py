@@ -1840,7 +1840,7 @@ def _backfill_symbol(user_id: str, symbol: str, from_date: str, currency: str, p
 # --- Research endpoints ---
 
 @app.get("/research/fundamentals/{symbol}")
-async def get_fundamentals(symbol: str, market: str = "US"):
+async def get_fundamentals(symbol: str, market: str = "US", period: str = "annual"):
     """Get operating income history + P/E for a stock. Actuals stored permanently in DDB, meta cached 24hr."""
     from datetime import datetime, timezone as tz, timedelta, date
     from decimal import Decimal
@@ -1848,9 +1848,12 @@ async def get_fundamentals(symbol: str, market: str = "US"):
 
     yf_symbol = f"{symbol}.NS" if market == "IN" else symbol
     fund_table = ddb.Table(FUNDAMENTALS_TABLE)
+    is_quarterly = period == "quarterly"
+    cache_prefix = "q_" if is_quarterly else ""
 
     # Check meta record for cache freshness
-    meta_resp = fund_table.get_item(Key={"symbol": yf_symbol, "year": "meta"})
+    meta_key = f"{cache_prefix}meta"
+    meta_resp = fund_table.get_item(Key={"symbol": yf_symbol, "year": meta_key})
     meta = meta_resp.get("Item")
     now = datetime.now(tz.utc)
 
@@ -1861,19 +1864,20 @@ async def get_fundamentals(symbol: str, market: str = "US"):
                 age_hours = (now - datetime.fromisoformat(last_updated)).total_seconds() / 3600
                 if age_hours < 24:
                     # Return cached data
-                    all_resp = fund_table.query(KeyConditionExpression=Key("symbol").eq(yf_symbol))
+                    all_resp = fund_table.query(
+                        KeyConditionExpression=Key("symbol").eq(yf_symbol) & Key("year").begins_with(cache_prefix))
                     items = all_resp.get("Items", [])
                     data = []
                     meta_item = {}
                     for item in items:
-                        if item["year"] == "meta":
+                        if item["year"] == meta_key:
                             meta_item = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
                             continue
                         row = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
-                        row["year"] = int(row["year"])
+                        row["sort_key"] = row.get("year", "").replace(cache_prefix, "")
                         data.append(row)
-                    data.sort(key=lambda x: x["year"])
-                    return {**meta_item, "data": data, "cached": True}
+                    data.sort(key=lambda x: x["sort_key"])
+                    return {**meta_item, "data": data, "cached": True, "period": period}
             except Exception:
                 pass
 
@@ -1881,7 +1885,7 @@ async def get_fundamentals(symbol: str, market: str = "US"):
     try:
         t = yf.Ticker(yf_symbol)
         info = t.info or {}
-        inc = t.income_stmt
+        inc = t.quarterly_income_stmt if is_quarterly else t.income_stmt
     except Exception as e:
         return {"error": f"Failed to fetch data for {yf_symbol}: {str(e)}"}
 
@@ -1891,15 +1895,16 @@ async def get_fundamentals(symbol: str, market: str = "US"):
     currency = info.get("currency", "INR" if market == "IN" else "USD")
     current_price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
 
-    # Load existing actuals from DDB (so we don't overwrite)
-    existing_resp = fund_table.query(KeyConditionExpression=Key("symbol").eq(yf_symbol))
-    existing_by_year = {}
+    # Load existing actuals from DDB
+    existing_resp = fund_table.query(
+        KeyConditionExpression=Key("symbol").eq(yf_symbol) & Key("year").begins_with(cache_prefix))
+    existing_by_key = {}
     for item in existing_resp.get("Items", []):
-        if item["year"] != "meta":
-            existing_by_year[item["year"]] = item
+        existing_by_key[item["year"]] = item
 
-    # Fetch year-end prices in one batch call for historical P/E
+    # Fetch prices in one batch for historical P/E
     fiscal_dates = sorted(inc.columns)
+    hist_prices = None
     if fiscal_dates:
         price_start = (fiscal_dates[0] - timedelta(days=5)).strftime("%Y-%m-%d")
         price_end = (fiscal_dates[-1] + timedelta(days=7)).strftime("%Y-%m-%d")
@@ -1908,19 +1913,23 @@ async def get_fundamentals(symbol: str, market: str = "US"):
             if hasattr(hist_prices.columns, "levels") and len(hist_prices.columns.levels) > 1:
                 hist_prices.columns = hist_prices.columns.droplevel(1)
         except Exception:
-            hist_prices = None
-    else:
-        hist_prices = None
+            pass
 
-    # Process annual data
+    # Process data
     all_data = []
     for col in sorted(inc.columns):
-        yr = str(col.year)
+        if is_quarterly:
+            q_num = (col.month - 1) // 3 + 1
+            sk = f"{cache_prefix}{col.year}-Q{q_num}"
+            display_label = f"{col.year}-Q{q_num}"
+        else:
+            sk = f"{cache_prefix}{col.year}"
+            display_label = str(col.year)
 
-        # If actual already in DDB, use it (permanent)
-        if yr in existing_by_year and existing_by_year[yr].get("type") == "actual":
-            row = {k: float(v) if hasattr(v, "is_finite") else v for k, v in existing_by_year[yr].items()}
-            row["year"] = int(yr)
+        # If actual already in DDB, use it
+        if sk in existing_by_key and existing_by_key[sk].get("type") == "actual":
+            row = {k: float(v) if hasattr(v, "is_finite") else v for k, v in existing_by_key[sk].items()}
+            row["sort_key"] = sk.replace(cache_prefix, "")
             all_data.append(row)
             continue
 
@@ -1935,7 +1944,7 @@ async def get_fundamentals(symbol: str, market: str = "US"):
             v = inc.loc["Diluted EPS", col]
             if v == v: eps = float(v)
 
-        # Historical P/E from year-end price
+        # P/E from price at fiscal date
         if eps and eps > 0 and hist_prices is not None and not hist_prices.empty:
             try:
                 mask = hist_prices.index >= col
@@ -1943,23 +1952,29 @@ async def get_fundamentals(symbol: str, market: str = "US"):
                     price_val = hist_prices.loc[mask, "Close"].iloc[0]
                     if hasattr(price_val, "item"): price_val = price_val.item()
                     year_end_price = round(float(price_val), 2)
-                    pe = round(year_end_price / eps, 2)
+                    if is_quarterly:
+                        # Quarterly P/E = price / (EPS * 4) for annualized
+                        pe = round(year_end_price / (eps * 4), 2)
+                    else:
+                        pe = round(year_end_price / eps, 2)
             except Exception:
                 pass
 
         record = {
-            "year": int(yr), "fiscal_date": col.strftime("%Y-%m-%d"), "type": "actual",
+            "year": sk, "label": display_label, "fiscal_date": col.strftime("%Y-%m-%d"),
+            "type": "actual",
             "operating_income": round(op_inc, 0) if op_inc is not None else None,
             "revenue": round(revenue, 0) if revenue is not None else None,
             "eps": round(eps, 2) if eps is not None else None,
             "pe": pe, "year_end_price": year_end_price,
         }
+        record["sort_key"] = sk.replace(cache_prefix, "")
         all_data.append(record)
 
-        # Store actual permanently in DDB
-        ddb_item = {"symbol": yf_symbol, "year": yr, "type": "actual"}
+        # Store actual permanently
+        ddb_item = {"symbol": yf_symbol, "year": sk, "type": "actual"}
         for k, v in record.items():
-            if k in ("year",) or v is None: continue
+            if k in ("sort_key",) or v is None: continue
             ddb_item[k] = Decimal(str(v)) if isinstance(v, (int, float)) else v
         fund_table.put_item(Item=ddb_item)
 
@@ -1970,38 +1985,60 @@ async def get_fundamentals(symbol: str, market: str = "US"):
         op_margin = info.get("operatingMargins", 0) or 0
 
         if ee is not None and not ee.empty:
-            last_yr = max(d["year"] for d in all_data) if all_data else date.today().year
-            for i, period in enumerate(["0y", "+1y"]):
-                if period not in ee.index: continue
-                est_eps = float(ee.loc[period, "avg"]) if "avg" in ee.columns else None
-                est_rev = float(re_.loc[period, "avg"]) if re_ is not None and not re_.empty and period in re_.index and "avg" in re_.columns else None
+            if is_quarterly:
+                est_periods = [("0q", 0), ("+1q", 1)]
+            else:
+                est_periods = [("0y", 0), ("+1y", 1)]
+
+            for period_key, offset in est_periods:
+                if period_key not in ee.index: continue
+                est_eps = float(ee.loc[period_key, "avg"]) if "avg" in ee.columns else None
+                est_rev = float(re_.loc[period_key, "avg"]) if re_ is not None and not re_.empty and period_key in re_.index and "avg" in re_.columns else None
                 est_op_inc = round(est_rev * op_margin, 0) if est_rev and op_margin else None
-                est_pe = round(current_price / est_eps, 2) if est_eps and est_eps > 0 and current_price else None
-                yr = last_yr + i + 1
-                # Skip if actual exists for this year
-                if any(d["year"] == yr and d["type"] == "actual" for d in all_data): continue
+
+                if is_quarterly:
+                    est_pe = round(current_price / (est_eps * 4), 2) if est_eps and est_eps > 0 and current_price else None
+                    # Determine quarter label
+                    today_q = (date.today().month - 1) // 3 + 1
+                    est_year = date.today().year
+                    est_q = today_q + offset
+                    if est_q > 4:
+                        est_q -= 4
+                        est_year += 1
+                    sk = f"{cache_prefix}{est_year}-Q{est_q}"
+                    display_label = f"{est_year}-Q{est_q}"
+                else:
+                    est_pe = round(current_price / est_eps, 2) if est_eps and est_eps > 0 and current_price else None
+                    last_yr = max(int(d["sort_key"]) for d in all_data if d.get("type") == "actual") if all_data else date.today().year
+                    yr = last_yr + offset + 1
+                    sk = f"{cache_prefix}{yr}"
+                    display_label = str(yr)
+
+                if any(d["year"] == sk and d["type"] == "actual" for d in all_data): continue
+
                 est_record = {
-                    "year": yr, "type": "estimate",
+                    "year": sk, "label": display_label, "type": "estimate",
                     "operating_income": est_op_inc,
                     "revenue": round(est_rev, 0) if est_rev else None,
                     "eps": round(est_eps, 2) if est_eps else None,
                     "pe": est_pe,
                 }
+                est_record["sort_key"] = sk.replace(cache_prefix, "")
                 all_data.append(est_record)
-                # Store estimate in DDB (overwritten on each refresh)
-                ddb_item = {"symbol": yf_symbol, "year": str(yr), "type": "estimate"}
+
+                ddb_item = {"symbol": yf_symbol, "year": sk, "type": "estimate"}
                 for k, v in est_record.items():
-                    if k in ("year",) or v is None: continue
+                    if k in ("sort_key",) or v is None: continue
                     ddb_item[k] = Decimal(str(v)) if isinstance(v, (int, float)) else v
                 fund_table.put_item(Item=ddb_item)
     except Exception:
         pass
 
-    all_data.sort(key=lambda x: x["year"])
+    all_data.sort(key=lambda x: x["sort_key"])
 
-    # Store/update meta (cached 24hr)
+    # Store/update meta
     meta_item = {
-        "symbol": yf_symbol, "year": "meta",
+        "symbol": yf_symbol, "year": meta_key,
         "display_symbol": symbol, "currency": currency,
         "company_name": info.get("longName") or info.get("shortName", symbol),
         "current_price": Decimal(str(round(current_price, 2))) if current_price else Decimal("0"),
@@ -2014,7 +2051,7 @@ async def get_fundamentals(symbol: str, market: str = "US"):
     fund_table.put_item(Item=meta_item)
 
     meta_out = {k: float(v) if hasattr(v, "is_finite") else v for k, v in meta_item.items()}
-    return {**meta_out, "data": all_data, "cached": False}
+    return {**meta_out, "data": all_data, "cached": False, "period": period}
 
 
 # Lambda handler via Mangum

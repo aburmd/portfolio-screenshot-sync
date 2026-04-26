@@ -9,6 +9,7 @@ const btnPrimary = { ...btn, background: "#1976d2", color: "#fff", border: "none
 export default function Research() {
   const [symbol, setSymbol] = useState("");
   const [market, setMarket] = useState("US");
+  const [period, setPeriod] = useState("annual");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -19,7 +20,7 @@ export default function Research() {
     setError(null);
     setData(null);
     try {
-      const result = await fetchFundamentals(symbol.trim().toUpperCase(), market);
+      const result = await fetchFundamentals(symbol.trim().toUpperCase(), market, period);
       if (result.error) {
         setError(result.error);
       } else {
@@ -29,7 +30,7 @@ export default function Research() {
       setError(e.message);
     }
     setLoading(false);
-  }, [symbol, market]);
+  }, [symbol, market, period]);
 
   const handleKeyDown = (e) => { if (e.key === "Enter") handleSearch(); };
 
@@ -46,7 +47,7 @@ export default function Research() {
   const curSym = data?.currency === "INR" ? "₹" : "$";
 
   const chartData = data?.data?.map(d => ({
-    year: d.type === "estimate" ? `${d.year}E` : `${d.year}`,
+    year: d.label ? (d.type === "estimate" ? `${d.label}E` : d.label) : (d.type === "estimate" ? `${d.year}E` : `${d.year}`),
     operating_income: d.operating_income,
     pe: d.pe,
     eps: d.eps,
@@ -71,6 +72,12 @@ export default function Research() {
           <select value={market} onChange={e => setMarket(e.target.value)} style={{ padding: 6 }}>
             <option value="US">US</option>
             <option value="IN">India (NSE)</option>
+          </select>
+        </label>
+        <label style={{ fontSize: 12 }}>Period<br />
+          <select value={period} onChange={e => setPeriod(e.target.value)} style={{ padding: 6 }}>
+            <option value="annual">Annual</option>
+            <option value="quarterly">Quarterly</option>
           </select>
         </label>
         <button style={btnPrimary} onClick={handleSearch} disabled={loading}>
@@ -147,7 +154,7 @@ export default function Research() {
               <tbody>
                 {data.data.map((d, i) => (
                   <tr key={i} style={{ background: d.type === "estimate" ? "#f3f8ff" : "transparent" }}>
-                    <td style={{ padding: 6, fontWeight: "bold" }}>{d.year}{d.type === "estimate" ? "E" : ""}</td>
+                    <td style={{ padding: 6, fontWeight: "bold" }}>{d.label || d.year}{d.type === "estimate" ? "E" : ""}</td></td>
                     <td style={{ padding: 6, textAlign: "right" }}>{d.revenue != null ? `${curSym}${fmtLarge(d.revenue)}` : "—"}</td>
                     <td style={{ padding: 6, textAlign: "right", color: d.operating_income != null ? (d.operating_income >= 0 ? "#2e7d32" : "#c62828") : "#999" }}>
                       {d.operating_income != null ? `${curSym}${fmtLarge(d.operating_income)}` : "—"}
