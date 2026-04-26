@@ -1864,17 +1864,26 @@ async def get_fundamentals(symbol: str, market: str = "US", period: str = "annua
                 age_hours = (now - datetime.fromisoformat(last_updated)).total_seconds() / 3600
                 if age_hours < 24:
                     # Return cached data
-                    all_resp = fund_table.query(
-                        KeyConditionExpression=Key("symbol").eq(yf_symbol) & Key("year").begins_with(cache_prefix))
+                    if cache_prefix:
+                        all_resp = fund_table.query(
+                            KeyConditionExpression=Key("symbol").eq(yf_symbol) & Key("year").begins_with(cache_prefix))
+                    else:
+                        all_resp = fund_table.query(
+                            KeyConditionExpression=Key("symbol").eq(yf_symbol))
                     items = all_resp.get("Items", [])
                     data = []
                     meta_item = {}
                     for item in items:
-                        if item["year"] == meta_key:
+                        yr = item["year"]
+                        if yr == meta_key:
                             meta_item = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
                             continue
+                        # Skip quarterly records when viewing annual and vice versa
+                        if is_quarterly and not yr.startswith("q_"): continue
+                        if not is_quarterly and yr.startswith("q_"): continue
+                        if yr.endswith("meta"): continue
                         row = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
-                        row["sort_key"] = row.get("year", "").replace(cache_prefix, "")
+                        row["sort_key"] = yr.replace(cache_prefix, "")
                         data.append(row)
                     data.sort(key=lambda x: x["sort_key"])
                     return {**meta_item, "data": data, "cached": True, "period": period}
@@ -1896,11 +1905,16 @@ async def get_fundamentals(symbol: str, market: str = "US", period: str = "annua
     current_price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
 
     # Load existing actuals from DDB
-    existing_resp = fund_table.query(
-        KeyConditionExpression=Key("symbol").eq(yf_symbol) & Key("year").begins_with(cache_prefix))
+    if cache_prefix:
+        existing_resp = fund_table.query(
+            KeyConditionExpression=Key("symbol").eq(yf_symbol) & Key("year").begins_with(cache_prefix))
+    else:
+        existing_resp = fund_table.query(
+            KeyConditionExpression=Key("symbol").eq(yf_symbol))
     existing_by_key = {}
     for item in existing_resp.get("Items", []):
-        existing_by_key[item["year"]] = item
+        if not item["year"].endswith("meta"):
+            existing_by_key[item["year"]] = item
 
     # Fetch prices in one batch for historical P/E
     fiscal_dates = sorted(inc.columns)
