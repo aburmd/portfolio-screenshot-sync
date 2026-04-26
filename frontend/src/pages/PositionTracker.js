@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   freezePortfolio, fetchSnapshots, fetchDiff, confirmSells,
   addCashFlow, fetchCashFlows, deleteCashFlow, fetchPositions, fetchXirr,
+  importFidelityCsv,
   fetchChartData, addBuyLot, fetchBuyLots, deleteBuyLot, triggerBackfill,
   fetchExchangeRate,
 } from "../services/api";
@@ -309,12 +310,15 @@ function CashFlowSection({ userId, platform: selectedPlatform, getDisplayName, d
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState("USD");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
 
   const load = useCallback(async () => { setFlows(await fetchCashFlows(userId)); }, [userId]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (selectedPlatform !== "all") setPlatform(selectedPlatform); }, [selectedPlatform]);
 
   const filtered = selectedPlatform === "all" ? flows : flows.filter(f => f.platform === selectedPlatform);
+  const isFidelity = selectedPlatform && selectedPlatform.startsWith("Fid-");
 
   const handleAdd = async () => {
     if (!platform || !amount) return;
@@ -327,8 +331,55 @@ function CashFlowSection({ userId, platform: selectedPlatform, getDisplayName, d
     if (window.confirm("Delete this cash flow?")) { await deleteCashFlow(userId, sk); load(); }
   };
 
+  const handleImport = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const result = await importFidelityCsv(userId, Array.from(files));
+      setImportResult(result);
+      load();
+    } catch (err) {
+      setImportResult({ error: err.message });
+    }
+    setImporting(false);
+    e.target.value = "";
+  };
+
+  const sourceIcon = (source) => {
+    if (!source || source === "manual") return "✏️";
+    if (source.includes("csv")) return "📄";
+    if (source.includes("statement")) return "📊";
+    return "✏️";
+  };
+
+  const sourceLabel = (source, sub) => {
+    const icon = sourceIcon(source);
+    const label = sub ? sub.replace(/_/g, " ").toLowerCase() : (source || "manual");
+    return `${icon} ${label}`;
+  };
+
+  // Projected summary: total deposits - total withdrawals = net invested
+  const totalDep = filtered.filter(f => f.type === "DEPOSIT").reduce((s, f) => s + f.amount, 0);
+  const totalWd = filtered.filter(f => f.type === "WITHDRAW").reduce((s, f) => s + f.amount, 0);
+  const netInvested = totalDep - totalWd;
+
   return (
     <div>
+      {/* Projected Summary */}
+      {filtered.length > 0 && (
+        <div style={{ ...card, background: "#f0f7ff", border: "1px solid #90caf9", marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>💰 Cash Flow Summary</div>
+          <div style={{ display: "flex", gap: 24, fontSize: 13 }}>
+            <span style={{ color: "#2e7d32" }}>⬇ Deposits: {fmt(totalDep)}</span>
+            <span style={{ color: "#c62828" }}>⬆ Withdrawals: {fmt(totalWd)}</span>
+            <span style={{ fontWeight: 600 }}>Net Invested: {fmt(netInvested)}</span>
+            <span style={{ color: "#666" }}>({filtered.length} transactions)</span>
+          </div>
+        </div>
+      )}
+
       <div style={{ ...card, display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
         <label style={{ fontSize: 12 }}>Platform<br />
           <input value={platform} onChange={(e) => setPlatform(e.target.value)} placeholder="e.g. prostocks" style={{ padding: 4, width: 120 }} />
@@ -350,7 +401,28 @@ function CashFlowSection({ userId, platform: selectedPlatform, getDisplayName, d
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ padding: 4 }} />
         </label>
         <button style={btnPrimary} onClick={handleAdd}>+ Add</button>
+        {(isFidelity || selectedPlatform === "all") && (
+          <label style={{ ...btnPrimary, background: "#1565c0", cursor: "pointer", display: "inline-block" }}>
+            {importing ? "Importing..." : "📄 Import Fidelity CSV"}
+            <input type="file" multiple accept=".csv" onChange={handleImport} style={{ display: "none" }} disabled={importing} />
+          </label>
+        )}
       </div>
+
+      {importResult && (
+        <div style={{ ...card, background: importResult.error ? "#fce4ec" : "#e8f5e9", fontSize: 13 }}>
+          {importResult.error ? `❌ ${importResult.error}` : (
+            <>
+              ✅ Imported {importResult.imported} new transactions from {importResult.files_processed} files
+              {importResult.accounts && importResult.accounts.map(a => (
+                <div key={a.platform} style={{ marginLeft: 12 }}>
+                  {getDisplayName(a.platform)}: {a.new_transactions} new (${a.new_deposits.toLocaleString()} deposits, ${a.new_withdrawals.toLocaleString()} withdrawals)
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
 
       {filtered.length > 0 && (
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -360,6 +432,7 @@ function CashFlowSection({ userId, platform: selectedPlatform, getDisplayName, d
             <th style={{ padding: 6, textAlign: "right" }}>Amount</th>
             <th style={{ padding: 6, textAlign: "left" }}>Currency</th>
             <th style={{ padding: 6, textAlign: "left" }}>Date</th>
+            <th style={{ padding: 6, textAlign: "left" }}>Source</th>
             <th style={{ padding: 6 }}></th>
           </tr></thead>
           <tbody>
@@ -370,6 +443,7 @@ function CashFlowSection({ userId, platform: selectedPlatform, getDisplayName, d
                 <td style={{ padding: 6, textAlign: "right" }}>{fmt(f.amount)}</td>
                 <td style={{ padding: 6 }}>{f.currency}</td>
                 <td style={{ padding: 6 }}>{f.date}</td>
+                <td style={{ padding: 6, fontSize: 11, color: "#666" }}>{sourceLabel(f.source, f.sub_type)}</td>
                 <td style={{ padding: 6 }}><button style={btnDanger} onClick={() => handleDelete(f.platform_ts_type)}>Del</button></td>
               </tr>
             ))}

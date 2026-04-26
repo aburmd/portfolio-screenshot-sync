@@ -758,7 +758,7 @@ async def add_cash_flow(user_id: str, data: dict):
 
 @app.get("/position-tracker/{user_id}/cash-flows")
 async def list_cash_flows(user_id: str):
-    """List all cash flows (deposits + withdrawals)."""
+    """List all cash flows (deposits + withdrawals) with source info."""
     table = ddb.Table(TRANSACTIONS_TABLE)
     resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id), ScanIndexForward=False)
     items = resp.get("Items", [])
@@ -773,6 +773,8 @@ async def list_cash_flows(user_id: str):
                 "amount": float(item.get("amount", 0)),
                 "currency": item.get("currency", "USD"),
                 "date": item.get("date", ""),
+                "source": item.get("source", "manual"),
+                "sub_type": item.get("sub_type", ""),
             })
     return result
 
@@ -784,6 +786,155 @@ async def delete_cash_flow(user_id: str, sk: str):
     table = ddb.Table(TRANSACTIONS_TABLE)
     table.delete_item(Key={"user_id": user_id, "platform_ts_type": unquote(sk)})
     return {"deleted": True}
+
+
+@app.post("/position-tracker/{user_id}/import-fidelity-csv")
+async def import_fidelity_csv(user_id: str, files: List[UploadFile] = File(...)):
+    """Import Fidelity CSV transaction history. Deduplicates against existing records."""
+    import csv as csv_mod
+    import re
+    from decimal import Decimal
+    from datetime import datetime as dt, timedelta
+    from collections import defaultdict
+
+    ACCOUNT_FORMAT = {
+        "231764141": "231-764141", "235437055": "235-437055", "236573958": "236-573958",
+        "652830498": "652-830498", "652830499": "652-830499", "X85604210": "X85-604210",
+        "X96593920": "X96-593920", "X96980648": "X96-980648", "Z07766664": "Z07-766664",
+        "Z21297172": "Z21-297172", "Z23126091": "Z23-126091", "Z23167394": "Z23-167394",
+        "Z29588902": "Z29-588902",
+    }
+
+    def classify(action):
+        al = action.lower()
+        if al.startswith("you bought rsu"): return ("DEPOSIT", "RSU_VEST")
+        if "journaled rsu" in al: return ("WITHDRAW", "RSU_TAX")
+        if "electronic funds transfer paid" in al: return ("WITHDRAW", "EFT_OUT")
+        if "electronic funds transfer received" in al: return ("DEPOSIT", "EFT_IN")
+        if al.startswith("transferred from to brokerage"): return ("DEPOSIT", "401K_CONTRIBUTION")
+        if "transferred to other plan option" in al: return ("WITHDRAW", "401K_LOAN")
+        if "transferred from vs" in al or "acat receive" in al: return ("DEPOSIT", "STOCK_TRANSFER_IN")
+        if "transferred to vs" in al or "acat deliver" in al: return ("WITHDRAW", "STOCK_TRANSFER_OUT")
+        if any(k in al for k in ["co contr", "partic contr", "contrib prior", "part contrib"]): return ("DEPOSIT", "HSA_CONTRIBUTION")
+        if al.startswith("debit card"): return ("WITHDRAW", "HSA_DEBIT")
+        if al.startswith("rollover"): return ("DEPOSIT", "ROLLOVER")
+        if al.startswith("distribution"): return ("DEPOSIT", "DISTRIBUTION")
+        if "transferred from amazon hsa" in al: return ("DEPOSIT", "HSA_TRANSFER_IN")
+        return (None, None)
+
+    def get_amt(row):
+        s = (row.get("Amount ($)") or row.get("Amount") or "").strip().replace(",", "").replace("$", "")
+        try: return float(s)
+        except: return 0.0
+
+    def get_qty(row):
+        s = (row.get("Quantity") or "").strip().replace(",", "")
+        try: return float(s)
+        except: return 0.0
+
+    # Load existing for dedup
+    txn_table = ddb.Table(TRANSACTIONS_TABLE)
+    existing = txn_table.query(KeyConditionExpression=Key("user_id").eq(user_id)).get("Items", [])
+    existing_keys = set()
+    for item in existing:
+        d, t, amt, sub = item.get("date", ""), item.get("type", ""), float(item.get("amount", 0)), item.get("sub_type", "")
+        existing_keys.add((d, t, f"{amt:.2f}", sub))
+
+    # Parse CSVs
+    all_rows = defaultdict(list)
+    for file in files:
+        content = (await file.read()).decode("utf-8-sig")
+        lines = content.splitlines()
+        header_idx = next((i for i, l in enumerate(lines) if l.strip().startswith("Run Date,")), None)
+        if header_idx is None:
+            continue
+        match = re.search(r"Account_([A-Z0-9]+)", file.filename or "")
+        acct_raw = match.group(1) if match else "unknown"
+        for row in csv_mod.DictReader(lines[header_idx:]):
+            date_str = (row.get("Run Date") or "").strip()
+            if re.match(r"\d{2}/\d{2}/\d{4}", date_str):
+                row["_acct"] = acct_raw
+                row["_date"] = dt.strptime(date_str, "%m/%d/%Y")
+                all_rows[acct_raw].append(row)
+
+    # Dedup within files
+    deduped = {}
+    for acct, rows in all_rows.items():
+        seen = set()
+        unique = []
+        for row in sorted(rows, key=lambda r: r["_date"]):
+            key = (row["_date"].strftime("%Y-%m-%d"), (row.get("Action") or "").strip(), f"{get_amt(row):.2f}", f"{get_qty(row):.6f}")
+            if key not in seen:
+                seen.add(key)
+                unique.append(row)
+        deduped[acct] = unique
+
+    # RSU sell prices for X85
+    rsu_prices = {}
+    for row in deduped.get("X85604210", []):
+        al = (row.get("Action") or "").strip().lower()
+        if al.startswith("you sold") and "amzn" in al:
+            ps = (row.get("Price") or row.get("Price ($)") or "").strip().replace(",", "").replace("$", "")
+            try:
+                p = float(ps)
+                if p > 0: rsu_prices[row["_date"].strftime("%Y-%m-%d")] = p
+            except: pass
+
+    # Extract and dedup against existing
+    new_txns = []
+    sk_counter = defaultdict(int)
+    for acct_raw, rows in sorted(deduped.items()):
+        acct_fmt = ACCOUNT_FORMAT.get(acct_raw, acct_raw)
+        platform = f"Fid-{acct_fmt.replace('-', '')}"
+        for row in rows:
+            flow_type, sub_type = classify((row.get("Action") or "").strip())
+            if not flow_type:
+                continue
+            date_str = row["_date"].strftime("%Y-%m-%d")
+            amt = get_amt(row)
+            if sub_type == "RSU_VEST":
+                qty = get_qty(row)
+                price = rsu_prices.get(date_str, 0)
+                if price <= 0:
+                    for delta in range(1, 3):
+                        c = (row["_date"] + timedelta(days=delta)).strftime("%Y-%m-%d")
+                        if c in rsu_prices: price = rsu_prices[c]; break
+                if qty <= 0 or price <= 0: continue
+                amt = qty * price
+            elif sub_type == "DISTRIBUTION":
+                if get_qty(row) > 0 or amt <= 0: continue
+            else:
+                amt = abs(amt)
+                if amt == 0: continue
+            amt = round(amt, 2)
+            if (date_str, flow_type, f"{amt:.2f}", sub_type) in existing_keys:
+                continue
+            sk_key = (platform, date_str, sub_type)
+            sk_counter[sk_key] += 1
+            seq = sk_counter[sk_key]
+            sk = f"{platform}#{date_str}T00:00:00.csv_{sub_type}_{seq:03d}#{flow_type}"
+            new_txns.append({
+                "user_id": user_id, "platform_ts_type": sk, "type": flow_type,
+                "amount": Decimal(str(amt)), "currency": "USD", "date": date_str,
+                "source": "fidelity-csv", "sub_type": sub_type,
+            })
+
+    for txn in new_txns:
+        txn_table.put_item(Item=txn)
+
+    by_plat = defaultdict(lambda: {"n": 0, "d": 0.0, "w": 0.0})
+    for txn in new_txns:
+        p = txn["platform_ts_type"].split("#")[0]
+        by_plat[p]["n"] += 1
+        by_plat[p]["d" if txn["type"] == "DEPOSIT" else "w"] += float(txn["amount"])
+
+    return {
+        "imported": len(new_txns),
+        "files_processed": len(files),
+        "accounts": [{"platform": p, "new_transactions": i["n"],
+            "new_deposits": round(i["d"], 2), "new_withdrawals": round(i["w"], 2)}
+            for p, i in sorted(by_plat.items())],
+    }
 
 
 @app.get("/position-tracker/{user_id}/positions")

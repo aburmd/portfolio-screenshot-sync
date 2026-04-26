@@ -164,6 +164,14 @@ export async function addCashFlow(userId, data) {
 export async function fetchCashFlows(userId) {
   const res = await fetch(`${API_BASE}/position-tracker/${userId}/cash-flows`); return res.json();
 }
+export async function importFidelityCsv(userId, files) {
+  const formData = new FormData();
+  formData.append("user_id", userId);
+  for (const file of files) formData.append("files", file);
+  const res = await fetch(`${API_BASE}/position-tracker/${userId}/import-fidelity-csv`, { method: "POST", body: formData });
+  if (!res.ok) throw new Error("Import failed");
+  return res.json();
+}
 export async function deleteCashFlow(userId, sk) {
   const res = await fetch(`${API_BASE}/position-tracker/${userId}/cash-flow/${encodeURIComponent(sk)}`, { method: "DELETE" }); return res.json();
 }
