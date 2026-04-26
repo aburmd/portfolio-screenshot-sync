@@ -616,7 +616,7 @@ function XirrSection({ userId, platform: selectedPlatform, getDisplayName, displ
             {(p.realized_pnl !== undefined || p.unrealized_pnl !== undefined) && (
               <div style={{ fontSize: 12, marginTop: 4 }}>
                 {p.unrealized_pnl !== undefined && <span style={{ color: clr(p.unrealized_pnl) }}>Unrealized: {p.unrealized_pnl >= 0 ? "+" : "-"}{fmtC(p.unrealized_pnl, cur)}</span>}
-                {p.realized_pnl !== undefined && p.realized_pnl !== 0 && <span style={{ color: clr(p.realized_pnl), marginLeft: 8 }}>Realized: {p.realized_pnl >= 0 ? "+" : "-"}{fmtC(p.realized_pnl, cur)}</span>}
+                {p.realized_pnl !== undefined && <span style={{ color: clr(p.realized_pnl), marginLeft: 8 }}>Realized: {p.realized_pnl >= 0 ? "+" : "-"}{fmtC(p.realized_pnl, cur)}</span>}
               </div>
             )}
             <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
@@ -640,7 +640,7 @@ function XirrSection({ userId, platform: selectedPlatform, getDisplayName, displ
         {(data.overall.realized_pnl !== undefined || data.overall.unrealized_pnl !== undefined) && (
           <div style={{ fontSize: 13, marginTop: 4 }}>
             {data.overall.unrealized_pnl !== undefined && <span style={{ color: clr(data.overall.unrealized_pnl) }}>Unrealized: {data.overall.unrealized_pnl >= 0 ? "+" : "-"}${fmt(Math.abs(data.overall.unrealized_pnl))}</span>}
-            {data.overall.realized_pnl !== undefined && data.overall.realized_pnl !== 0 && <span style={{ color: clr(data.overall.realized_pnl), marginLeft: 12 }}>Realized: {data.overall.realized_pnl >= 0 ? "+" : "-"}${fmt(Math.abs(data.overall.realized_pnl))}</span>}
+            {data.overall.realized_pnl !== undefined && <span style={{ color: clr(data.overall.realized_pnl), marginLeft: 12 }}>Realized: {data.overall.realized_pnl >= 0 ? "+" : "-"}${fmt(Math.abs(data.overall.realized_pnl))}</span>}
           </div>
         )}
         <div style={{ fontSize: 13, color: "#666", marginTop: 8 }}>

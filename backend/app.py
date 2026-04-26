@@ -1062,17 +1062,6 @@ async def calculate_xirr(user_id: str, platform: str = None):
         fx_resp = await get_exchange_rate("USD", "INR")
         fx_rate = fx_resp.get("rate")  # USD→INR rate (e.g. 85.5)
 
-    # Realized P/L per platform from SELL transactions
-    realized_by_plat = {}
-    for txn in txns:
-        if txn.get("type") != "SELL":
-            continue
-        plat = txn["platform_ts_type"].split("#")[0]
-        qty = float(txn.get("quantity", 0))
-        buy_p = float(txn.get("avg_buy_price", 0))
-        sell_p = float(txn.get("avg_sold_price", 0))
-        realized_by_plat[plat] = realized_by_plat.get(plat, 0) + (sell_p - buy_p) * qty
-
     # Cost basis per platform from current holdings
     cost_by_plat = {}
     for h in holdings:
@@ -1094,8 +1083,8 @@ async def calculate_xirr(user_id: str, platform: str = None):
         total_dep = sum(-cf for cf, _ in cfs if cf < 0)
         total_wd = sum(cf for cf, d in cfs if cf > 0 and d != today)
         total_pnl = round(cur_val + total_wd - total_dep, 2)
-        realized = round(realized_by_plat.get(plat, 0), 2)
         unrealized = round(cur_val - cost_by_plat.get(plat, 0), 2)
+        realized = round(total_pnl - unrealized, 2)
         currency = plat_currency.get(plat, "USD")
         entry = {
             "platform": plat, "currency": currency,
