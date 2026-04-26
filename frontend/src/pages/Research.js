@@ -14,6 +14,10 @@ export default function Research() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const [customPrice, setCustomPrice] = useState("");
+  const [buyPrice, setBuyPrice] = useState("");
+  const [sellPrice, setSellPrice] = useState("");
+
   const handleSearch = useCallback(async () => {
     if (!symbol.trim()) return;
     setLoading(true);
@@ -25,6 +29,9 @@ export default function Research() {
         setError(result.error);
       } else {
         setData(result);
+        setCustomPrice("");
+        setBuyPrice("");
+        setSellPrice("");
       }
     } catch (e) {
       setError(e.message);
@@ -46,15 +53,26 @@ export default function Research() {
 
   const curSym = data?.currency === "INR" ? "₹" : "$";
 
-  const chartData = data?.data?.map(d => ({
-    year: d.label ? (d.type === "estimate" ? `${d.label}E` : d.label) : (d.type === "estimate" ? `${d.year}E` : `${d.year}`),
-    operating_income: d.operating_income,
-    pe: d.pe,
-    eps: d.eps,
-    revenue: d.revenue,
-    type: d.type,
-    op_income_display: d.operating_income != null ? d.operating_income / (data.currency === "INR" ? 1e7 : 1e6) : null,
-  })) || [];
+  const cp = parseFloat(customPrice) || 0;
+  const bp = parseFloat(buyPrice) || 0;
+  const sp = parseFloat(sellPrice) || 0;
+
+  const chartData = data?.data?.map(d => {
+    const eps = d.eps || 0;
+    const annualizedEps = data?.period === "quarterly" ? eps * 4 : eps;
+    return {
+      year: d.label ? (d.type === "estimate" ? `${d.label}E` : d.label) : (d.type === "estimate" ? `${d.year}E` : `${d.year}`),
+      operating_income: d.operating_income,
+      pe: d.pe,
+      eps: d.eps,
+      revenue: d.revenue,
+      type: d.type,
+      op_income_display: d.operating_income != null ? d.operating_income / (data.currency === "INR" ? 1e7 : 1e6) : null,
+      custom_pe: annualizedEps > 0 && cp > 0 ? parseFloat((cp / annualizedEps).toFixed(2)) : null,
+      buy_pe: annualizedEps > 0 && bp > 0 ? parseFloat((bp / annualizedEps).toFixed(2)) : null,
+      sell_pe: annualizedEps > 0 && sp > 0 ? parseFloat((sp / annualizedEps).toFixed(2)) : null,
+    };
+  }) || [];
 
   const opUnit = data?.currency === "INR" ? "Cr" : "M";
   const opDivisor = data?.currency === "INR" ? 1e7 : 1e6;
@@ -122,7 +140,10 @@ export default function Research() {
                         {d?.operating_income != null && <div>Op Income: {curSym}{fmtLarge(d.operating_income)}</div>}
                         {d?.revenue != null && <div>Revenue: {curSym}{fmtLarge(d.revenue)}</div>}
                         {d?.eps != null && <div>EPS: {curSym}{d.eps.toFixed(2)}</div>}
-                        {d?.pe != null && <div>P/E: {d.pe.toFixed(1)}x</div>}
+                        {d?.pe != null && <div>Historical P/E: {d.pe.toFixed(1)}x</div>}
+                        {d?.custom_pe != null && <div style={{ color: "#9c27b0" }}>Custom P/E: {d.custom_pe.toFixed(1)}x</div>}
+                        {d?.buy_pe != null && <div style={{ color: "#2e7d32" }}>Buy P/E: {d.buy_pe.toFixed(1)}x</div>}
+                        {d?.sell_pe != null && <div style={{ color: "#c62828" }}>Sell P/E: {d.sell_pe.toFixed(1)}x</div>}
                       </div>
                     );
                   }} />
@@ -132,10 +153,36 @@ export default function Research() {
                       <Cell key={i} fill={d.type === "estimate" ? "#90caf9" : (d.op_income_display >= 0 ? "#2e7d32" : "#c62828")} opacity={d.type === "estimate" ? 0.6 : 1} />
                     ))}
                   </Bar>
-                  <Line yAxisId="right" type="monotone" dataKey="pe" name="P/E Ratio" stroke="#ff9800" strokeWidth={2}
-                    dot={{ r: 4, fill: "#ff9800" }} connectNulls />
+                  <Line yAxisId="right" type="monotone" dataKey="pe" name="Historical P/E" stroke="#ff9800" strokeWidth={2}
+                    dot={{ r: 4, fill: "#ff9800" }} connectNulls strokeDasharray={cp > 0 ? "5 3" : undefined} />
+                  {cp > 0 && <Line yAxisId="right" type="monotone" dataKey="custom_pe" name={`P/E @ ${curSym}${cp}`} stroke="#9c27b0" strokeWidth={2}
+                    dot={{ r: 4, fill: "#9c27b0" }} connectNulls />}
+                  {bp > 0 && <Line yAxisId="right" type="monotone" dataKey="buy_pe" name={`Buy @ ${curSym}${bp}`} stroke="#2e7d32" strokeWidth={2}
+                    dot={{ r: 3, fill: "#2e7d32" }} connectNulls strokeDasharray="8 4" />}
+                  {sp > 0 && <Line yAxisId="right" type="monotone" dataKey="sell_pe" name={`Sell @ ${curSym}${sp}`} stroke="#c62828" strokeWidth={2}
+                    dot={{ r: 3, fill: "#c62828" }} connectNulls strokeDasharray="8 4" />}
                 </ComposedChart>
               </ResponsiveContainer>
+
+              {/* Price simulator */}
+              <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", marginTop: 12, padding: "8px 0", borderTop: "1px solid #eee" }}>
+                <label style={{ fontSize: 12 }}>Custom Price<br />
+                  <input type="number" value={customPrice} onChange={e => setCustomPrice(e.target.value)}
+                    placeholder={data?.current_price ? `${data.current_price}` : "Price"}
+                    style={{ padding: 4, width: 90, border: "2px solid #9c27b0", borderRadius: 4 }} />
+                </label>
+                <label style={{ fontSize: 12, color: "#2e7d32" }}>Buy Target<br />
+                  <input type="number" value={buyPrice} onChange={e => setBuyPrice(e.target.value)}
+                    placeholder="Buy price"
+                    style={{ padding: 4, width: 90, border: "2px solid #2e7d32", borderRadius: 4 }} />
+                </label>
+                <label style={{ fontSize: 12, color: "#c62828" }}>Sell Target<br />
+                  <input type="number" value={sellPrice} onChange={e => setSellPrice(e.target.value)}
+                    placeholder="Sell price"
+                    style={{ padding: 4, width: 90, border: "2px solid #c62828", borderRadius: 4 }} />
+                </label>
+                <span style={{ fontSize: 11, color: "#666" }}>Current: {curSym}{data?.current_price?.toLocaleString()}</span>
+              </div>
             </div>
           )}
 
