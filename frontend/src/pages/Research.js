@@ -154,7 +154,7 @@ export default function Research() {
               <tbody>
                 {data.data.map((d, i) => (
                   <tr key={i} style={{ background: d.type === "estimate" ? "#f3f8ff" : "transparent" }}>
-                    <td style={{ padding: 6, fontWeight: "bold" }}>{d.label || d.year}{d.type === "estimate" ? "E" : ""}</td></td>
+                    <td style={{ padding: 6, fontWeight: "bold" }}>{d.label || d.year}{d.type === "estimate" ? "E" : ""}</td>
                     <td style={{ padding: 6, textAlign: "right" }}>{d.revenue != null ? `${curSym}${fmtLarge(d.revenue)}` : "—"}</td>
                     <td style={{ padding: 6, textAlign: "right", color: d.operating_income != null ? (d.operating_income >= 0 ? "#2e7d32" : "#c62828") : "#999" }}>
                       {d.operating_income != null ? `${curSym}${fmtLarge(d.operating_income)}` : "—"}
