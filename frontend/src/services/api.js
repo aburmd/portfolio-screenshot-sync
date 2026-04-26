@@ -207,3 +207,10 @@ export async function triggerBackfill(userId, symbol) {
   const url = symbol ? `${API_BASE}/performance/${userId}/backfill/${symbol}` : `${API_BASE}/performance/${userId}/backfill`;
   const res = await fetch(url, { method: "POST" }); return res.json();
 }
+
+// --- Research ---
+export async function fetchFundamentals(symbol, market = "US") {
+  const res = await fetch(`${API_BASE}/research/fundamentals/${encodeURIComponent(symbol)}?market=${market}`);
+  if (!res.ok) throw new Error("Failed to fetch fundamentals");
+  return res.json();
+}
