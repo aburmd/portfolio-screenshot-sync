@@ -1,12 +1,144 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell } from "recharts";
-import { fetchFundamentals } from "../services/api";
+import { fetchFundamentals, fetchScreenerResults, runScreener, refreshIndexes } from "../services/api";
 
 const card = { border: "1px solid #e0e0e0", borderRadius: 8, padding: 16, marginBottom: 16, background: "#fafafa" };
 const btn = { padding: "6px 16px", cursor: "pointer", borderRadius: 4, fontSize: 13 };
 const btnPrimary = { ...btn, background: "#1976d2", color: "#fff", border: "none" };
 
 export default function Research() {
+  const [tab, setTab] = useState("screener");
+  return (
+    <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
+      <h2 style={{ marginBottom: 16 }}>📊 Research</h2>
+      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
+        <button style={{ ...btn, background: tab === "screener" ? "#1976d2" : "#fff", color: tab === "screener" ? "#fff" : "#333", border: tab === "screener" ? "none" : "1px solid #ccc" }} onClick={() => setTab("screener")}>Earnings Dip Screener</button>
+        <button style={{ ...btn, background: tab === "fundamentals" ? "#1976d2" : "#fff", color: tab === "fundamentals" ? "#fff" : "#333", border: tab === "fundamentals" ? "none" : "1px solid #ccc" }} onClick={() => setTab("fundamentals")}>Fundamentals</button>
+      </div>
+      {tab === "screener" && <ScreenerSection />}
+      {tab === "fundamentals" && <FundamentalsSection />}
+    </div>
+  );
+}
+
+function ScreenerSection() {
+  const [market, setMarket] = useState("US");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [peFilter, setPeFilter] = useState(false);
+  const [error, setError] = useState(null);
+
+  const loadResults = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setResults(await fetchScreenerResults(market));
+    } catch (e) {
+      setError(e.message);
+    }
+    setLoading(false);
+  }, [market]);
+
+  useEffect(() => { loadResults(); }, [loadResults]);
+
+  const handleRun = async () => {
+    setRunning(true);
+    setError(null);
+    try {
+      const r = await runScreener(market);
+      alert(`Scanned ${r.scanned} stocks, ${r.qualifying} qualifying`);
+      loadResults();
+    } catch (e) {
+      setError(e.message);
+    }
+    setRunning(false);
+  };
+
+  const handleRefreshIndexes = async () => {
+    try {
+      const r = await refreshIndexes(market);
+      alert(`Indexes refreshed: ${JSON.stringify(r.indexes)}`);
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
+  };
+
+  const filtered = peFilter ? results.filter(r => r.forward_pe && r.forward_pe < 30) : results;
+  const curSym = market === "IN" ? "₹" : "$";
+
+  const fmtLarge = (v) => {
+    if (v == null) return "—";
+    const abs = Math.abs(v);
+    if (abs >= 1e12) return `${(v / 1e12).toFixed(1)}T`;
+    if (abs >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
+    if (abs >= 1e6) return `${(v / 1e6).toFixed(0)}M`;
+    return v.toLocaleString();
+  };
+
+  return (
+    <div>
+      <div style={{ ...card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ fontSize: 12 }}>Market<br />
+          <select value={market} onChange={e => setMarket(e.target.value)} style={{ padding: 6 }}>
+            <option value="US">US (S&P 500 + Nasdaq 100)</option>
+            <option value="IN">India (Nifty 500)</option>
+          </select>
+        </label>
+        <button style={btnPrimary} onClick={handleRun} disabled={running}>
+          {running ? "Scanning..." : "🔍 Run Screener"}
+        </button>
+        <button style={{ ...btn, border: "1px solid #ccc" }} onClick={handleRefreshIndexes}>↻ Refresh Indexes</button>
+        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+          <input type="checkbox" checked={peFilter} onChange={e => setPeFilter(e.target.checked)} />
+          Forward P/E &lt; 30
+        </label>
+        <span style={{ fontSize: 11, color: "#999" }}>{filtered.length} stocks</span>
+      </div>
+
+      {error && <div style={{ ...card, background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
+
+      {loading ? <p>Loading...</p> : filtered.length > 0 ? (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead><tr style={{ background: "#f5f5f5" }}>
+            <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
+            <th style={{ padding: 6, textAlign: "left" }}>Name</th>
+            <th style={{ padding: 6, textAlign: "left" }}>Earnings</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Pre Price</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Cur Price</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Day Drop</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Cum Drop</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Op Inc (CY)</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Op Inc (NY)</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Rev Growth</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Fwd P/E</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Mkt Cap</th>
+          </tr></thead>
+          <tbody>
+            {filtered.map((r, i) => (
+              <tr key={r.symbol} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
+                <td style={{ padding: 6, fontWeight: "bold" }}>{r.symbol}</td>
+                <td style={{ padding: 6, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</td>
+                <td style={{ padding: 6 }}>{r.report_date}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.pre_earnings_price?.toLocaleString()}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.current_price?.toLocaleString()}</td>
+                <td style={{ padding: 6, textAlign: "right", color: "#c62828", fontWeight: "bold" }}>{r.day_drop?.toFixed(1)}%</td>
+                <td style={{ padding: 6, textAlign: "right", color: "#c62828", fontWeight: "bold" }}>{r.cumulative_drop?.toFixed(1)}%</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{r.op_income_cy != null ? `${curSym}${fmtLarge(r.op_income_cy)}` : "—"}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{r.op_income_ny != null ? `${curSym}${fmtLarge(r.op_income_ny)}` : "—"}</td>
+                <td style={{ padding: 6, textAlign: "right", color: r.revenue_growth > 0 ? "#2e7d32" : "#c62828" }}>{r.revenue_growth != null ? `${r.revenue_growth.toFixed(1)}%` : "—"}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{r.forward_pe != null ? `${r.forward_pe.toFixed(1)}x` : "—"}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{curSym}{fmtLarge(r.market_cap)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : !loading && <p style={{ color: "#999" }}>No qualifying stocks found. Run the screener or wait for the daily scan.</p>}
+    </div>
+  );
+}
+
+function FundamentalsSection() {
   const [symbol, setSymbol] = useState("");
   const [market, setMarket] = useState("US");
   const [period, setPeriod] = useState("annual");

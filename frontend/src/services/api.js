@@ -214,3 +214,18 @@ export async function fetchFundamentals(symbol, market = "US", period = "annual"
   if (!res.ok) throw new Error("Failed to fetch fundamentals");
   return res.json();
 }
+export async function fetchScreenerResults(market) {
+  const res = await fetch(`${API_BASE}/research/screener/${market}`);
+  if (!res.ok) throw new Error("Failed to fetch screener");
+  return res.json();
+}
+export async function runScreener(market) {
+  const res = await fetch(`${API_BASE}/research/screener/run/${market}`, { method: "POST" });
+  if (!res.ok) throw new Error("Screener run failed");
+  return res.json();
+}
+export async function refreshIndexes(market) {
+  const res = await fetch(`${API_BASE}/research/refresh-indexes/${market}`, { method: "POST" });
+  if (!res.ok) throw new Error("Index refresh failed");
+  return res.json();
+}

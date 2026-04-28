@@ -2,6 +2,7 @@
 import io
 import csv
 import os
+import json
 import uuid
 from typing import List
 
@@ -35,6 +36,8 @@ TRANSACTIONS_TABLE = os.environ.get("TRANSACTIONS_TABLE", "portfolio-transaction
 DAILY_PRICES_TABLE = os.environ.get("DAILY_PRICES_TABLE", "portfolio-daily-prices-dev")
 BUY_LOTS_TABLE = os.environ.get("BUY_LOTS_TABLE", "portfolio-buy-lots-dev")
 
+SCREENER_TABLE = os.environ.get("SCREENER_TABLE", "portfolio-screener-dev")
+INDEX_CONSTITUENTS_TABLE = os.environ.get("INDEX_CONSTITUENTS_TABLE", "portfolio-index-constituents-dev")
 FUNDAMENTALS_TABLE = os.environ.get("FUNDAMENTALS_TABLE", "portfolio-fundamentals-dev")
 
 s3 = boto3.client("s3", region_name=REGION)
@@ -2126,6 +2129,45 @@ async def get_fundamentals(symbol: str, market: str = "US", period: str = "annua
 
     meta_out = {k: float(v) if hasattr(v, "is_finite") else v for k, v in meta_item.items()}
     return {**meta_out, "data": all_data, "cached": False, "period": period}
+
+
+@app.get("/research/screener/{market}")
+async def get_screener_results(market: str):
+    """Get earnings dip screener results for a market (US or IN)."""
+    table = ddb.Table(SCREENER_TABLE)
+    resp = table.query(KeyConditionExpression=Key("market").eq(market.upper()))
+    items = resp.get("Items", [])
+    results = []
+    for item in items:
+        row = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
+        results.append(row)
+    results.sort(key=lambda x: x.get("market_cap", 0), reverse=True)
+    return results
+
+
+@app.post("/research/screener/run/{market}")
+async def run_screener(market: str):
+    """Trigger earnings dip screener Lambda asynchronously."""
+    lambda_client = boto3.client("lambda", region_name=REGION)
+    lambda_client.invoke(
+        FunctionName=f"portfolio-screener-{os.environ.get('ENV', 'dev')}",
+        InvocationType="Event",
+        Payload=json.dumps({"market": market.upper()}),
+    )
+    return {"status": "triggered", "market": market.upper()}
+
+
+@app.post("/research/refresh-indexes/{market}")
+async def refresh_indexes(market: str):
+    """Refresh index constituent lists from FMP."""
+    from screener import refresh_index_constituents
+    refresh_index_constituents(market.upper())
+    table = ddb.Table(INDEX_CONSTITUENTS_TABLE)
+    counts = {}
+    for idx in (["SP500", "NASDAQ100"] if market.upper() == "US" else ["NIFTY500"]):
+        resp = table.query(KeyConditionExpression=Key("index_name").eq(idx), Select="COUNT")
+        counts[idx] = resp.get("Count", 0)
+    return {"market": market.upper(), "indexes": counts}
 
 
 # Lambda handler via Mangum
