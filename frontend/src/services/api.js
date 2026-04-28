@@ -219,11 +219,6 @@ export async function fetchScreenerResults(market) {
   if (!res.ok) throw new Error("Failed to fetch screener");
   return res.json();
 }
-export async function fetchEarningsCalendar(market) {
-  const res = await fetch(`${API_BASE}/research/earnings-calendar/${market}`);
-  if (!res.ok) throw new Error("Failed to fetch earnings calendar");
-  return res.json();
-}
 export async function runScreener(market) {
   const res = await fetch(`${API_BASE}/research/screener/run/${market}`, { method: "POST" });
   if (!res.ok) throw new Error("Screener run failed");
