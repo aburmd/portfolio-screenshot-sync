@@ -576,6 +576,17 @@ async def freeze_portfolio(user_id: str, data: dict = None):
             if curr and not prev:
                 changes.append({"type": "ADDED", "symbol": sym, "stock_name": curr["stock_name"],
                     "curr_qty": curr["quantity"], "curr_avg": curr["avg_buy_price"], "currency": curr["currency"]})
+                # Auto-create buy lot for new stock
+                lots_table = ddb.Table(BUY_LOTS_TABLE)
+                lot_sk = f"{sym}#{now}"
+                lots_table.put_item(Item={
+                    "user_id": user_id, "symbol_ts": lot_sk,
+                    "symbol": sym, "stock_name": curr["stock_name"],
+                    "quantity": Decimal(str(round(curr["quantity"], 6))),
+                    "buy_price": Decimal(str(round(curr["avg_buy_price"], 2))),
+                    "buy_date": now[:10], "currency": curr["currency"],
+                    "platform": platform,
+                })
             elif prev and not curr:
                 changes.append({"type": "REMOVED", "symbol": sym, "stock_name": prev["stock_name"],
                     "prev_qty": prev["quantity"], "prev_avg": prev["avg_buy_price"],
@@ -708,22 +719,28 @@ async def get_diff(user_id: str, platform: str = None):
 
 @app.post("/position-tracker/{user_id}/confirm-sells")
 async def confirm_sells(user_id: str, data: dict):
-    """Record sell transactions for removed/reduced stocks."""
+    """Record sell transactions and update buy lots (FIFO)."""
     from datetime import datetime, timezone as tz
     from decimal import Decimal
 
     txn_table = ddb.Table(TRANSACTIONS_TABLE)
+    lots_table = ddb.Table(BUY_LOTS_TABLE)
+    holdings_table = ddb.Table(PORTFOLIO_TABLE)
     platform = data.get("platform", "unknown")
     sells = data.get("sells", [])
     now = datetime.now(tz.utc)
 
     recorded = []
     for i, sell in enumerate(sells):
-        ts = (now.isoformat() + f"_{i:03d}")  # ensure unique SK
+        sym = sell["symbol"]
+        sell_qty = float(sell["quantity"])
+
+        # Record SELL transaction
+        ts = (now.isoformat() + f"_{i:03d}")
         sk = f"{platform}#{ts}#SELL"
         txn_table.put_item(Item={
             "user_id": user_id, "platform_ts_type": sk,
-            "type": "SELL", "symbol": sell["symbol"],
+            "type": "SELL", "symbol": sym,
             "stock_name": sell.get("stock_name", ""),
             "quantity": Decimal(str(sell["quantity"])),
             "avg_buy_price": Decimal(str(sell["avg_buy_price"])),
@@ -731,7 +748,50 @@ async def confirm_sells(user_id: str, data: dict):
             "currency": sell.get("currency", "USD"),
             "date": now.strftime("%Y-%m-%d"),
         })
-        recorded.append(sell["symbol"])
+        recorded.append(sym)
+
+        # FIFO: reduce buy lots for this symbol
+        lots_resp = lots_table.query(
+            KeyConditionExpression=Key("user_id").eq(user_id) & Key("symbol_ts").begins_with(f"{sym}#"))
+        lots = sorted(lots_resp.get("Items", []), key=lambda l: l.get("buy_date", ""))
+
+        remaining = sell_qty
+        for lot in lots:
+            if remaining <= 0:
+                break
+            lot_qty = float(lot.get("quantity", 0))
+            if lot_qty <= 0:
+                continue
+            if lot_qty <= remaining:
+                # Fully consumed — delete lot
+                lots_table.delete_item(Key={"user_id": user_id, "symbol_ts": lot["symbol_ts"]})
+                remaining -= lot_qty
+            else:
+                # Partially consumed — reduce qty
+                new_qty = round(lot_qty - remaining, 6)
+                lots_table.update_item(
+                    Key={"user_id": user_id, "symbol_ts": lot["symbol_ts"]},
+                    UpdateExpression="SET quantity = :q",
+                    ExpressionAttributeValues={":q": Decimal(str(new_qty))},
+                )
+                remaining = 0
+
+        # Sync remaining lots: if only 1 lot left, set price to portfolio avg
+        remaining_resp = lots_table.query(
+            KeyConditionExpression=Key("user_id").eq(user_id) & Key("symbol_ts").begins_with(f"{sym}#"))
+        remaining_lots = remaining_resp.get("Items", [])
+        holding = next((h for h in _decimal_to_float(
+            holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id)).get("Items", []))
+            if h.get("symbol") == sym), None)
+        if holding and len(remaining_lots) == 1:
+            lots_table.update_item(
+                Key={"user_id": user_id, "symbol_ts": remaining_lots[0]["symbol_ts"]},
+                UpdateExpression="SET buy_price = :p, quantity = :q",
+                ExpressionAttributeValues={
+                    ":p": Decimal(str(round(holding["avg_buy_price"], 2))),
+                    ":q": Decimal(str(round(holding["quantity"], 6))),
+                },
+            )
 
     return {"recorded": len(recorded), "symbols": recorded}
 
