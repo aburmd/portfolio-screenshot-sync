@@ -56,11 +56,30 @@ def refresh_index_constituents(market):
                     })
             print(f"  {index_name}: {len(data)} constituents stored")
     else:
-        resp = table.query(KeyConditionExpression=Key("index_name").eq("NIFTY500"), Limit=1)
-        if resp.get("Items"):
-            print("  NIFTY500: already populated")
-        else:
-            print("  NIFTY500: not populated")
+        # Nifty 500 from NSE India
+        try:
+            resp = requests.get(
+                "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv",
+                timeout=15, headers={"User-Agent": "Mozilla/5.0"},
+            )
+            if resp.status_code == 200:
+                reader = csv.DictReader(io.StringIO(resp.text))
+                rows = list(reader)
+                with table.batch_writer() as batch:
+                    for row in rows:
+                        sym = row.get("Symbol", "").strip()
+                        if sym:
+                            batch.put_item(Item={
+                                "index_name": "NIFTY500", "symbol": sym,
+                                "name": row.get("Company Name", "").strip(),
+                                "sector": row.get("Industry", "").strip(),
+                                "updated_at": now,
+                            })
+                print(f"  NIFTY500: {len(rows)} constituents stored")
+            else:
+                print(f"  NIFTY500: HTTP {resp.status_code}")
+        except Exception as e:
+            print(f"  NIFTY500: error {e}")
 
 
 def get_index_symbols(market):
