@@ -239,9 +239,68 @@ def update_existing_prices(market):
     print(f"  Updated {updated} existing entries for {market}")
 
 
+def scan_earnings_dates(market):
+    """Scan all index stocks for their most recent/next earnings date using yfinance.
+    Store in screener table with earnings_date field. Fast: uses only .calendar (no price fetch)."""
+    table = ddb.Table(SCREENER_TABLE)
+    index_symbols = get_index_symbols(market)
+    if not index_symbols:
+        return 0
+
+    today = date.today()
+    week_ago = today - timedelta(days=7)
+    stored = 0
+    total = len(index_symbols)
+
+    for i, (sym, info) in enumerate(index_symbols.items()):
+        try:
+            yf_sym = f"{sym}.NS" if market == "IN" else sym
+            t = yf.Ticker(yf_sym)
+            cal = t.calendar
+            if not cal or "Earnings Date" not in cal:
+                continue
+            ed = cal["Earnings Date"]
+            if not isinstance(ed, list) or not ed:
+                continue
+            report_date = ed[0].isoformat() if hasattr(ed[0], "isoformat") else str(ed[0])
+
+            # Only store if earnings date is within last 7 days
+            try:
+                rd = date.fromisoformat(report_date)
+            except ValueError:
+                continue
+            if not (week_ago <= rd <= today):
+                continue
+
+            # Check if already in DDB with full data
+            existing = table.get_item(Key={"market": market, "symbol": sym}).get("Item")
+            if existing and existing.get("current_price"):
+                continue  # Already scanned with full data
+
+            # Store minimal record — full data will be filled by scan_stock later
+            table.put_item(Item={
+                "market": market,
+                "symbol": sym,
+                "name": info.get("name", ""),
+                "sector": info.get("sector", ""),
+                "report_date": report_date,
+                "last_updated": datetime.now(timezone.utc).isoformat(),
+                "needs_scan": "true",
+            })
+            stored += 1
+            if (i + 1) % 50 == 0:
+                print(f"  [{i+1}/{total}] scanned, {stored} with earnings this week")
+        except Exception as e:
+            continue
+
+    print(f"  Earnings date scan complete: {stored} stocks with earnings in last 7 days")
+    return stored
+
+
 def handler(event, context):
     market = event.get("market", "US")
-    print(f"=== Earnings Screener: {market} ===")
+    mode = event.get("mode", "full")  # "full" = dates + data, "dates_only" = just scan dates
+    print(f"=== Earnings Screener: {market} (mode={mode}) ===")
 
     # Step 1: Ensure index constituents loaded
     index_symbols = get_index_symbols(market)
@@ -251,36 +310,76 @@ def handler(event, context):
         index_symbols = get_index_symbols(market)
     print(f"Index universe: {len(index_symbols)} symbols")
 
-    # Step 2: Get earnings calendar
-    av_key = get_api_key("alpha_vantage")
-    all_earnings = get_earnings_this_week(av_key)
-    print(f"Earnings in last 7 days: {len(all_earnings)} total")
+    # Step 2: Scan all stocks for earnings dates (yfinance calendar)
+    print("Scanning earnings dates...")
+    new_earnings = scan_earnings_dates(market)
+    print(f"New earnings found: {new_earnings}")
 
-    # Step 3: Filter to our universe
-    to_scan = {sym: info for sym, info in all_earnings.items() if sym in index_symbols}
-    print(f"In our universe: {len(to_scan)} stocks to scan")
+    if mode == "dates_only":
+        return {"market": market, "new_earnings": new_earnings}
 
-    if not to_scan:
-        update_existing_prices(market)
-        return {"market": market, "scanned": 0, "stored": 0}
+    # Step 3: Also check Alpha Vantage for any we missed
+    try:
+        av_key = get_api_key("alpha_vantage")
+        all_earnings = get_earnings_this_week(av_key)
+        to_scan_av = {sym: info for sym, info in all_earnings.items() if sym in index_symbols}
+        print(f"Alpha Vantage: {len(to_scan_av)} stocks in our universe")
 
-    # Step 4: Scan all stocks
+        # Add any AV stocks not already in DDB
+        table = ddb.Table(SCREENER_TABLE)
+        for sym, info in to_scan_av.items():
+            existing = table.get_item(Key={"market": market, "symbol": sym}).get("Item")
+            if not existing:
+                table.put_item(Item={
+                    "market": market, "symbol": sym,
+                    "name": info.get("name", ""),
+                    "report_date": info["report_date"],
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                    "needs_scan": "true",
+                })
+    except Exception as e:
+        print(f"Alpha Vantage error: {e}")
+
+    # Step 4: Fetch full data for all stocks that need scanning
+    table = ddb.Table(SCREENER_TABLE)
+    all_resp = table.query(KeyConditionExpression=Key("market").eq(market))
+    all_items = all_resp.get("Items", [])
+
+    to_scan = [item for item in all_items if item.get("needs_scan") == "true" or not item.get("current_price")]
+    print(f"Stocks needing full scan: {len(to_scan)}")
+
     results = []
-    for i, (sym, info) in enumerate(to_scan.items()):
+    for i, item in enumerate(to_scan):
+        sym = item["symbol"]
+        report_date = item.get("report_date", "")
+        if not report_date:
+            continue
         print(f"  [{i+1}/{len(to_scan)}] {sym}...", end="")
-        r = scan_stock(sym, info, market)
+        earnings_info = {"report_date": report_date, "name": item.get("name", "")}
+        r = scan_stock(sym, earnings_info, market)
         if r:
             results.append(r)
             print(f" drop={r['day_drop']}%")
         else:
             print(" skipped")
 
-    print(f"Scanned: {len(to_scan)}, stored: {len(results)}")
+    print(f"Full scan complete: {len(results)} stocks with data")
 
-    # Step 5: Store
-    store_results(results, market)
+    # Step 5: Store results
+    if results:
+        store_results(results, market)
 
-    # Step 6: Update existing entries not in this scan
+    # Step 6: Update existing entries (cumulative drops)
     update_existing_prices(market)
 
-    return {"market": market, "scanned": len(to_scan), "stored": len(results)}
+    # Step 7: Expire old entries
+    today = date.today()
+    for item in all_items:
+        rd = item.get("report_date", "")
+        try:
+            if rd and (today - date.fromisoformat(rd)).days > 7:
+                table.delete_item(Key={"market": market, "symbol": item["symbol"]})
+        except ValueError:
+            pass
+
+    return {"market": market, "new_earnings": new_earnings, "scanned": len(to_scan), "stored": len(results)}
