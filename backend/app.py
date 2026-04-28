@@ -2145,6 +2145,50 @@ async def get_screener_results(market: str):
     return results
 
 
+@app.get("/research/earnings-calendar/{market}")
+async def get_earnings_calendar(market: str):
+    """Get all stocks from our index universe that reported earnings in last 7 days."""
+    import csv as csv_mod
+    from datetime import date, timedelta
+    from screener import get_api_key, get_index_symbols
+
+    index_symbols = get_index_symbols(market.upper())
+    if not index_symbols:
+        return []
+
+    av_key = get_api_key("alpha_vantage")
+    resp = __import__("requests").get(
+        f"https://www.alphavantage.co/query?function=EARNINGS_CALENDAR&horizon=3month&apikey={av_key}",
+        timeout=30,
+    )
+    reader = csv_mod.DictReader(__import__("io").StringIO(resp.text))
+
+    today = date.today()
+    week_ago = today - timedelta(days=7)
+
+    results = []
+    for row in reader:
+        report_date = row.get("reportDate", "")
+        sym = row.get("symbol", "")
+        if not report_date or not sym or sym not in index_symbols:
+            continue
+        try:
+            rd = date.fromisoformat(report_date)
+        except ValueError:
+            continue
+        if week_ago <= rd <= today:
+            results.append({
+                "symbol": sym,
+                "name": row.get("name", ""),
+                "report_date": report_date,
+                "estimate": row.get("estimate", ""),
+                "currency": row.get("currency", "USD"),
+            })
+
+    results.sort(key=lambda x: x["report_date"], reverse=True)
+    return results
+
+
 @app.post("/research/screener/run/{market}")
 async def run_screener(market: str):
     """Trigger earnings dip screener Lambda asynchronously."""

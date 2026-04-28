@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell } from "recharts";
-import { fetchFundamentals, fetchScreenerResults, runScreener, refreshIndexes } from "../services/api";
+import { fetchFundamentals, fetchScreenerResults, fetchEarningsCalendar, runScreener, refreshIndexes } from "../services/api";
 
 const card = { border: "1px solid #e0e0e0", borderRadius: 8, padding: 16, marginBottom: 16, background: "#fafafa" };
 const btn = { padding: "6px 16px", cursor: "pointer", borderRadius: 4, fontSize: 13 };
@@ -24,7 +24,9 @@ export default function Research() {
 function ScreenerSection() {
   const [market, setMarket] = useState("US");
   const [results, setResults] = useState([]);
+  const [calendar, setCalendar] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [calLoading, setCalLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [peFilter, setPeFilter] = useState(false);
   const [error, setError] = useState(null);
@@ -40,7 +42,15 @@ function ScreenerSection() {
     setLoading(false);
   }, [market]);
 
-  useEffect(() => { loadResults(); }, [loadResults]);
+  const loadCalendar = useCallback(async () => {
+    setCalLoading(true);
+    try {
+      setCalendar(await fetchEarningsCalendar(market));
+    } catch (e) { /* ignore */ }
+    setCalLoading(false);
+  }, [market]);
+
+  useEffect(() => { loadResults(); loadCalendar(); }, [loadResults, loadCalendar]);
 
   const handleRun = async () => {
     setRunning(true);
@@ -134,6 +144,31 @@ function ScreenerSection() {
           </tbody>
         </table>
       ) : !loading && <p style={{ color: "#999" }}>No qualifying stocks found. Run the screener or wait for the daily scan.</p>}
+
+      {/* Earnings Calendar */}
+      <div style={{ ...card, marginTop: 16 }}>
+        <h4 style={{ margin: "0 0 8px" }}>📅 Earnings Calendar — Last 7 Days ({market === "US" ? "S&P 500 + Nasdaq 100" : "Nifty 500"})</h4>
+        {calLoading ? <p>Loading...</p> : calendar.length > 0 ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {Object.entries(calendar.reduce((acc, c) => {
+              acc[c.report_date] = acc[c.report_date] || [];
+              acc[c.report_date].push(c);
+              return acc;
+            }, {})).sort((a, b) => b[0].localeCompare(a[0])).map(([dt, stocks]) => (
+              <div key={dt} style={{ border: "1px solid #e0e0e0", borderRadius: 6, padding: 8, minWidth: 200, flex: 1 }}>
+                <div style={{ fontWeight: "bold", fontSize: 12, marginBottom: 4, color: "#1565c0" }}>{dt} ({stocks.length})</div>
+                {stocks.map(s => (
+                  <div key={s.symbol} style={{ fontSize: 11, padding: "1px 0" }}>
+                    <span style={{ fontWeight: "bold" }}>{s.symbol}</span>
+                    <span style={{ color: "#666", marginLeft: 4 }}>{s.name?.substring(0, 25)}</span>
+                    {s.estimate && <span style={{ color: "#999", marginLeft: 4 }}>est: {s.estimate}</span>}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : !calLoading && <p style={{ color: "#999" }}>No earnings data. Click "↻ Refresh Indexes" first.</p>}
+      </div>
     </div>
   );
 }
