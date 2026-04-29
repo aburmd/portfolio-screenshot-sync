@@ -2291,11 +2291,12 @@ async def get_pullback_buys(market: str):
         if pct_from_50ma > 3 or pct_from_50ma < -8:
             continue
 
-        # Fundamental filters (mandatory)
+        # Fundamental filters (mandatory: op margin must be positive)
         op_margins = row.get("operating_margins")
         rev_growth = row.get("revenue_growth")
         if not op_margins or op_margins <= 0:
             continue
+        # Rev growth: filter out only if explicitly negative (None = no data = allow)
         if rev_growth is not None and rev_growth <= 0:
             continue
 
@@ -2309,6 +2310,7 @@ async def get_pullback_buys(market: str):
         fwd_pe = row.get("forward_pe")
         if fwd_pe and 0 < fwd_pe < 30:
             fund_score += 1
+        # Earnings score (0-2) - not filtered, just scored
         earn_score = 0
         if row.get("report_date"):
             earn_score += 1
@@ -2339,6 +2341,132 @@ async def refresh_indexes(market: str):
         resp = table.query(KeyConditionExpression=Key("index_name").eq(idx), Select="COUNT")
         counts[idx] = resp.get("Count", 0)
     return {"market": market.upper(), "indexes": counts}
+
+
+@app.get("/research/position-monitor/{user_id}")
+async def get_position_monitor(user_id: str, platform: str = None):
+    """Analyze holdings against exit framework using cached MA data from screener table."""
+    holdings_table = ddb.Table(PORTFOLIO_TABLE)
+    screener_table = ddb.Table(SCREENER_TABLE)
+
+    resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    items = _decimal_to_float(resp.get("Items", []))
+    if platform:
+        items = [i for i in items if _platform_matches(i.get("platform_name", ""), platform)]
+
+    # Determine markets from holdings
+    markets = set()
+    for h in items:
+        markets.add("IN" if h.get("currency") == "INR" else "US")
+
+    # Load cached MA data from screener table
+    ma_cache = {}
+    for market in markets:
+        sc_resp = screener_table.query(KeyConditionExpression=Key("market").eq(market))
+        for item in sc_resp.get("Items", []):
+            row = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
+            ma_cache[item["symbol"]] = row
+
+    # Fetch live prices in batch
+    usd_syms = list(set(h["symbol"] for h in items if h.get("currency", "USD") == "USD" and h["symbol"] not in ("UNKNOWN", "WALLETBALANCE")))
+    inr_syms = list(set(h["symbol"] for h in items if h.get("currency") == "INR" and h["symbol"] not in ("UNKNOWN", "WALLETBALANCE")))
+    live_prices = _fetch_live_prices(usd_syms, inr_syms)
+
+    results = []
+    for h in items:
+        sym = h.get("symbol", "")
+        if sym in ("UNKNOWN", "WALLETBALANCE", ""):
+            continue
+        avg = h.get("avg_buy_price", 0)
+        qty = h.get("quantity", 0)
+        currency = h.get("currency", "USD")
+        if avg <= 0 or qty <= 0:
+            continue
+
+        price = live_prices.get(sym) or h.get("current_price") or avg
+        pnl_pct = round((price - avg) / avg * 100, 2)
+        invested = round(qty * avg, 2)
+        current_val = round(qty * price, 2)
+        pnl_amount = round(current_val - invested, 2)
+
+        # Get MA data from cache
+        cached = ma_cache.get(sym, {})
+        ma50 = cached.get("ma50")
+        ma150 = cached.get("ma150")
+        ma200 = cached.get("ma200")
+        ma200_slope = cached.get("ma200_slope")
+        op_margins = cached.get("operating_margins")
+        rev_growth = cached.get("revenue_growth")
+        fwd_pe = cached.get("forward_pe")
+
+        # Fallback: fetch fundamentals from yfinance if not in cache
+        if op_margins is None or fwd_pe is None:
+            try:
+                yf_sym = f"{sym}.NS" if currency == "INR" else sym
+                info = yf.Ticker(yf_sym).info or {}
+                if op_margins is None and info.get("operatingMargins"):
+                    op_margins = round(info["operatingMargins"] * 100, 2)
+                if rev_growth is None and info.get("revenueGrowth"):
+                    rev_growth = round(info["revenueGrowth"] * 100, 2)
+                if fwd_pe is None and info.get("forwardPE"):
+                    fwd_pe = round(info["forwardPE"], 2)
+            except Exception:
+                pass
+
+        # Determine signal
+        signal = "HOLD"
+        reason = ""
+        is_quality = (op_margins and op_margins > 5 and fwd_pe and 0 < fwd_pe < 35)
+
+        if ma200 and price < ma200:
+            if is_quality:
+                if pnl_pct <= -15:
+                    signal = "AVERAGE"
+                    reason = f"Below 200MA but quality (OpMgn {op_margins:.0f}%, PE {fwd_pe:.0f}x) \u2014 average down"
+                else:
+                    signal = "HOLD"
+                    reason = f"Below 200MA but quality (OpMgn {op_margins:.0f}%, PE {fwd_pe:.0f}x) \u2014 hold, watch recovery"
+            else:
+                signal = "SELL"
+                reason = "Below 200MA + weak fundamentals \u2014 cut losses"
+        elif ma50 and ma150 and ma200 and price > ma50 > ma150 > ma200:
+            if pnl_pct >= 20:
+                signal = "TAKE_PROFIT"
+                reason = "Up 20%+ in uptrend \u2014 sell half, trail rest at 50MA"
+            else:
+                signal = "HOLD"
+                reason = "Strong uptrend \u2014 hold"
+        elif ma50 and ma200 and price > ma200 and price <= ma50:
+            signal = "HOLD"
+            reason = "Pullback in uptrend \u2014 watch 200MA support"
+        elif pnl_pct <= -20 and not is_quality:
+            signal = "SELL"
+            reason = f"Down {pnl_pct:.0f}% with weak fundamentals \u2014 cut losses"
+        elif pnl_pct >= 5 and pnl_pct < 20:
+            signal = "HOLD"
+            reason = "Moderate gain \u2014 hold with 50MA stop"
+
+        results.append({
+            "symbol": sym, "stock_name": h.get("stock_name", ""),
+            "platform": h.get("platform_name", ""), "currency": currency,
+            "quantity": qty, "avg_buy_price": avg,
+            "current_price": round(price, 2),
+            "pnl_pct": pnl_pct, "pnl_amount": pnl_amount,
+            "invested": invested, "current_val": current_val,
+            "ma50": round(ma50, 2) if ma50 else None,
+            "ma150": round(ma150, 2) if ma150 else None,
+            "ma200": round(ma200, 2) if ma200 else None,
+            "ma200_slope": ma200_slope,
+            "above_50ma": price > ma50 if ma50 else None,
+            "above_200ma": price > ma200 if ma200 else None,
+            "signal": signal, "reason": reason,
+            "operating_margins": op_margins,
+            "revenue_growth": rev_growth,
+            "forward_pe": fwd_pe,
+        })
+
+    results.sort(key=lambda x: x.get("pnl_pct", 0))
+    return results
 
 
 # Lambda handler via Mangum

@@ -55,7 +55,7 @@ function AppContent({ signOut, user }) {
       {page === "shared" && <SharedWithMe user={user} />}
       {page === "admin" && isAdmin && <AdminPage />}
       {page === "tracker" && isAdmin && <PositionTracker user={user} />}
-      {page === "research" && isAdmin && <Research />}
+      {page === "research" && isAdmin && <Research user={user} />}
     </div>
   );
 }

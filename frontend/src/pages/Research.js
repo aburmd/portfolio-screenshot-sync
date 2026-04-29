@@ -1,13 +1,14 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell } from "recharts";
-import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, fetchPullbackBuys, refreshIndexes } from "../services/api";
+import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, fetchPullbackBuys, fetchPositionMonitor, refreshIndexes } from "../services/api";
 
 const card = { border: "1px solid #e0e0e0", borderRadius: 8, padding: 16, marginBottom: 16, background: "#fafafa" };
 const btn = { padding: "6px 16px", cursor: "pointer", borderRadius: 4, fontSize: 13 };
 const btnPrimary = { ...btn, background: "#1976d2", color: "#fff", border: "none" };
 
-export default function Research() {
+export default function Research({ user }) {
   const [tab, setTab] = useState("screener");
+  const userId = user?.username || user?.userId || "";
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
       <h2 style={{ marginBottom: 16 }}>📊 Research</h2>
@@ -15,11 +16,13 @@ export default function Research() {
         <button style={{ ...btn, background: tab === "screener" ? "#1976d2" : "#fff", color: tab === "screener" ? "#fff" : "#333", border: tab === "screener" ? "none" : "1px solid #ccc" }} onClick={() => setTab("screener")}>Earnings Screener</button>
         <button style={{ ...btn, background: tab === "candidates" ? "#1976d2" : "#fff", color: tab === "candidates" ? "#fff" : "#333", border: tab === "candidates" ? "none" : "1px solid #ccc" }} onClick={() => setTab("candidates")}>Buy Candidates</button>
         <button style={{ ...btn, background: tab === "pullback" ? "#2e7d32" : "#fff", color: tab === "pullback" ? "#fff" : "#333", border: tab === "pullback" ? "none" : "1px solid #ccc" }} onClick={() => setTab("pullback")}>🎯 Pullback Buy</button>
+        <button style={{ ...btn, background: tab === "monitor" ? "#c62828" : "#fff", color: tab === "monitor" ? "#fff" : "#333", border: tab === "monitor" ? "none" : "1px solid #ccc" }} onClick={() => setTab("monitor")}>🚦 Position Monitor</button>
         <button style={{ ...btn, background: tab === "fundamentals" ? "#1976d2" : "#fff", color: tab === "fundamentals" ? "#fff" : "#333", border: tab === "fundamentals" ? "none" : "1px solid #ccc" }} onClick={() => setTab("fundamentals")}>Fundamentals</button>
       </div>
       {tab === "screener" && <ScreenerSection />}
       {tab === "candidates" && <BuyCandidatesSection />}
       {tab === "pullback" && <PullbackBuySection />}
+      {tab === "monitor" && <PositionMonitorSection userId={userId} />}
       {tab === "fundamentals" && <FundamentalsSection />}
     </div>
   );
@@ -421,6 +424,113 @@ function PullbackBuySection() {
           </tbody>
         </table>
       ) : !loading && <p style={{ color: "#999" }}>No stocks in pullback zone right now. Run MA Scanner from Buy Candidates tab first.</p>}
+    </div>
+  );
+}
+
+function PositionMonitorSection({ userId }) {
+  const [platform, setPlatform] = useState("");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [signalFilter, setSignalFilter] = useState("all");
+
+  const loadResults = useCallback(async () => {
+    if (!userId) return;
+    setLoading(true); setError(null);
+    try { setResults(await fetchPositionMonitor(userId, platform || null)); } catch (e) { setError(e.message); }
+    setLoading(false);
+  }, [userId, platform]);
+
+  useEffect(() => { loadResults(); }, [loadResults]);
+
+  let filtered = results;
+  if (signalFilter !== "all") filtered = filtered.filter(r => r.signal === signalFilter);
+
+  const signalStyle = (s) => {
+    if (s === "SELL") return { background: "#ffcdd2", color: "#b71c1c", padding: "2px 6px", borderRadius: 4, fontWeight: "bold", fontSize: 11 };
+    if (s === "TAKE_PROFIT") return { background: "#c8e6c9", color: "#1b5e20", padding: "2px 6px", borderRadius: 4, fontWeight: "bold", fontSize: 11 };
+    if (s === "AVERAGE") return { background: "#fff9c4", color: "#f57f17", padding: "2px 6px", borderRadius: 4, fontWeight: "bold", fontSize: 11 };
+    return { background: "#e3f2fd", color: "#1565c0", padding: "2px 6px", borderRadius: 4, fontSize: 11 };
+  };
+
+  const sellCount = results.filter(r => r.signal === "SELL").length;
+  const profitCount = results.filter(r => r.signal === "TAKE_PROFIT").length;
+  const avgCount = results.filter(r => r.signal === "AVERAGE").length;
+  const totalPnl = results.reduce((s, r) => s + (r.pnl_amount || 0), 0);
+
+  return (
+    <div>
+      <div style={{ ...card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ fontSize: 12 }}>Platform<br />
+          <input value={platform} onChange={e => setPlatform(e.target.value)} placeholder="all (or prostocks, Fid-...)" style={{ padding: 6, width: 140 }} />
+        </label>
+        <button style={{ ...btn, border: "1px solid #ccc" }} onClick={loadResults}>🔄 Reload</button>
+        <label style={{ fontSize: 12 }}>Signal<br />
+          <select value={signalFilter} onChange={e => setSignalFilter(e.target.value)} style={{ padding: 6 }}>
+            <option value="all">All</option>
+            <option value="SELL">🔴 Sell</option>
+            <option value="TAKE_PROFIT">🟢 Take Profit</option>
+            <option value="AVERAGE">🟡 Average Down</option>
+            <option value="HOLD">🔵 Hold</option>
+          </select>
+        </label>
+        <span style={{ fontSize: 11, color: "#999" }}>{filtered.length} of {results.length} positions</span>
+      </div>
+
+      {/* Summary */}
+      {results.length > 0 && (
+        <div style={{ ...card, display: "flex", gap: 16, flexWrap: "wrap", padding: 10 }}>
+          <span style={{ fontSize: 12 }}><b>{results.length}</b> positions</span>
+          {sellCount > 0 && <span style={{ fontSize: 12, color: "#c62828" }}>🔴 {sellCount} SELL</span>}
+          {profitCount > 0 && <span style={{ fontSize: 12, color: "#2e7d32" }}>🟢 {profitCount} TAKE PROFIT</span>}
+          {avgCount > 0 && <span style={{ fontSize: 12, color: "#f57f17" }}>🟡 {avgCount} AVERAGE</span>}
+          <span style={{ fontSize: 12, color: totalPnl >= 0 ? "#2e7d32" : "#c62828", fontWeight: "bold" }}>Total P/L: {totalPnl >= 0 ? "+" : ""}{totalPnl.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+        </div>
+      )}
+
+      {error && <div style={{ ...card, background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
+
+      {loading ? <p>Loading (fetching live prices for all holdings)...</p> : filtered.length > 0 ? (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead><tr style={{ background: "#f5f5f5" }}>
+            <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
+            <th style={{ padding: 6, textAlign: "center" }}>Signal</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Qty</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Avg</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Price</th>
+            <th style={{ padding: 6, textAlign: "right" }}>P/L %</th>
+            <th style={{ padding: 6, textAlign: "right" }}>P/L Amt</th>
+            <th style={{ padding: 6, textAlign: "right" }}>50MA</th>
+            <th style={{ padding: 6, textAlign: "right" }}>200MA</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Op Mgn</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Rev Gr</th>
+            <th style={{ padding: 6, textAlign: "left" }}>Reason</th>
+          </tr></thead>
+          <tbody>
+            {filtered.map((r, i) => {
+              const bg = r.signal === "SELL" ? "#ffebee" : r.signal === "TAKE_PROFIT" ? "#e8f5e9" : r.signal === "AVERAGE" ? "#fffde7" : i % 2 ? "#fafafa" : "#fff";
+              const cur = r.currency === "INR" ? "₹" : "$";
+              return (
+                <tr key={r.symbol + r.platform} style={{ background: bg }}>
+                  <td style={{ padding: 6, fontWeight: "bold" }}>{r.symbol}</td>
+                  <td style={{ padding: 6, textAlign: "center" }}><span style={signalStyle(r.signal)}>{r.signal}</span></td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{r.quantity}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{cur}{r.avg_buy_price?.toLocaleString()}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{cur}{r.current_price?.toLocaleString()}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: r.pnl_pct >= 0 ? "#2e7d32" : "#c62828", fontWeight: "bold" }}>{r.pnl_pct?.toFixed(1)}%</td>
+                  <td style={{ padding: 6, textAlign: "right", color: r.pnl_amount >= 0 ? "#2e7d32" : "#c62828" }}>{cur}{r.pnl_amount?.toLocaleString()}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: r.above_50ma ? "#2e7d32" : "#c62828" }}>{r.ma50 ? cur + r.ma50.toLocaleString() : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: r.above_200ma ? "#2e7d32" : "#c62828" }}>{r.ma200 ? cur + r.ma200.toLocaleString() : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{r.operating_margins != null ? `${r.operating_margins.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{r.revenue_growth != null ? `${r.revenue_growth.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: 6, fontSize: 11, maxWidth: 200 }}>{r.reason}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : !loading && <p style={{ color: "#999" }}>No positions found. Enter a platform name or leave blank for all.</p>}
     </div>
   );
 }
