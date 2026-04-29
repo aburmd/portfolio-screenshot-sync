@@ -153,44 +153,46 @@ def handler(event, context):
         # Update existing screener record or create MA-only record
         existing = table.get_item(Key={"market": market, "symbol": sym}).get("Item")
 
+
         if existing:
-            # Update with MA data
-            update_expr = "SET ma50=:m50, ma150=:m150, ma200=:m200, ma200_slope=:slope, " \
-                          "high_52w=:h52, low_52w=:l52, pct_from_high=:pfh, pct_from_low=:pfl, " \
-                          "trend_score=:ts, ma_aligned=:maa, ma200_up=:mau, near_high=:nh, " \
-                          "above_low=:al, ma_updated=:mu, " \
-                          "operating_margins=:om, revenue_growth=:rg, forward_pe=:fpe, market_cap=:mc"
-            expr_vals = {
-                ":m50": Decimal(str(signals["ma50"])) if signals["ma50"] else None,
-                ":m150": Decimal(str(signals["ma150"])) if signals["ma150"] else None,
-                ":m200": Decimal(str(signals["ma200"])) if signals["ma200"] else None,
-                ":slope": Decimal(str(signals["ma200_slope"])) if signals["ma200_slope"] is not None else None,
-                ":h52": Decimal(str(signals["high_52w"])),
-                ":l52": Decimal(str(signals["low_52w"])),
-                ":pfh": Decimal(str(signals["pct_from_high"])) if signals["pct_from_high"] is not None else None,
-                ":pfl": Decimal(str(signals["pct_from_low"])) if signals["pct_from_low"] is not None else None,
-                ":ts": Decimal(str(signals["trend_score"])),
-                ":maa": signals["ma_aligned"],
-                ":mau": signals["ma200_up"],
-                ":nh": signals["near_high"],
-                ":al": signals["above_low"],
-                ":mu": now,
-                ":om": Decimal(str(signals["operating_margins"])) if signals.get("operating_margins") is not None else None,
-                ":rg": Decimal(str(signals["revenue_growth"])) if signals.get("revenue_growth") is not None else None,
-                ":fpe": Decimal(str(signals["forward_pe"])) if signals.get("forward_pe") is not None else None,
-                ":mc": Decimal(str(signals["market_cap"])) if signals.get("market_cap") else None,
+            # Build update: SET non-None values, REMOVE None values
+            field_map = {
+                "ma50": signals["ma50"], "ma150": signals["ma150"], "ma200": signals["ma200"],
+                "ma200_slope": signals["ma200_slope"], "high_52w": signals["high_52w"],
+                "low_52w": signals["low_52w"], "pct_from_high": signals["pct_from_high"],
+                "pct_from_low": signals["pct_from_low"], "trend_score": signals["trend_score"],
+                "ma_aligned": signals["ma_aligned"], "ma200_up": signals["ma200_up"],
+                "near_high": signals["near_high"], "above_low": signals["above_low"],
+                "ma_updated": now,
+                "operating_margins": signals.get("operating_margins"),
+                "revenue_growth": signals.get("revenue_growth"),
+                "forward_pe": signals.get("forward_pe"),
+                "market_cap": signals.get("market_cap"),
             }
-            # Remove None values
-            clean_vals = {k: v for k, v in expr_vals.items() if v is not None}
-            remove_keys = [k for k, v in expr_vals.items() if v is None]
-            if remove_keys:
-                remove_expr = " REMOVE " + ", ".join(k.replace(":", "") for k in remove_keys)
-                update_expr += remove_expr
+            set_parts = []
+            remove_parts = []
+            expr_vals = {}
+            for attr, val in field_map.items():
+                key = f":{attr.replace('_', '')}"
+                if val is not None:
+                    set_parts.append(f"{attr}={key}")
+                    if isinstance(val, bool):
+                        expr_vals[key] = val
+                    elif isinstance(val, (int, float)):
+                        expr_vals[key] = Decimal(str(val))
+                    else:
+                        expr_vals[key] = val
+                else:
+                    remove_parts.append(attr)
+
+            update_expr = "SET " + ", ".join(set_parts)
+            if remove_parts:
+                update_expr += " REMOVE " + ", ".join(remove_parts)
 
             table.update_item(
                 Key={"market": market, "symbol": sym},
                 UpdateExpression=update_expr,
-                ExpressionAttributeValues=clean_vals,
+                ExpressionAttributeValues=expr_vals,
             )
         else:
             item = {
