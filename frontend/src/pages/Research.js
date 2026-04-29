@@ -376,18 +376,20 @@ function PullbackBuySection() {
           <thead><tr style={{ background: "#e8f5e9" }}>
             <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
             <th style={{ padding: 6, textAlign: "left" }}>Name</th>
+            <th style={{ padding: 6, textAlign: "center" }}>Score</th>
+            <th style={{ padding: 6, textAlign: "center" }}>Tech</th>
+            <th style={{ padding: 6, textAlign: "center" }}>Fund</th>
+            <th style={{ padding: 6, textAlign: "center" }}>Earn</th>
             <th style={{ padding: 6, textAlign: "left" }}>Sector</th>
             <th style={{ padding: 6, textAlign: "right" }}>Price</th>
             <th style={{ padding: 6, textAlign: "right" }}>50MA</th>
             <th style={{ padding: 6, textAlign: "right" }}>From 50MA</th>
             <th style={{ padding: 6, textAlign: "right" }}>150MA</th>
             <th style={{ padding: 6, textAlign: "right" }}>200MA</th>
-            <th style={{ padding: 6, textAlign: "right" }}>200MA Slope</th>
             <th style={{ padding: 6, textAlign: "right" }}>Op Margin</th>
             <th style={{ padding: 6, textAlign: "right" }}>Rev Growth</th>
             <th style={{ padding: 6, textAlign: "right" }}>Fwd P/E</th>
             <th style={{ padding: 6, textAlign: "right" }}>Mkt Cap</th>
-            <th style={{ padding: 6, textAlign: "center" }}>Fund</th>
             <th style={{ padding: 6, textAlign: "left" }}>Earnings</th>
           </tr></thead>
           <tbody>
@@ -395,21 +397,23 @@ function PullbackBuySection() {
               const fromMA = r.pct_from_50ma || 0;
               const maColor = fromMA <= -3 ? "#c62828" : fromMA <= 0 ? "#e65100" : "#2e7d32";
               return (
-                <tr key={r.symbol} style={{ background: i % 2 ? "#f1f8e9" : "#fff" }}>
+                <tr key={r.symbol} style={{ background: r.total_score >= 6 ? "#c8e6c9" : r.total_score >= 4 ? "#f1f8e9" : i % 2 ? "#fafafa" : "#fff" }}>
                   <td style={{ padding: 6, fontWeight: "bold" }}>{r.symbol}</td>
                   <td style={{ padding: 6, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</td>
+                  <td style={{ padding: 6, textAlign: "center", fontWeight: "bold", fontSize: 14 }}>{r.total_score}/8</td>
+                  <td style={{ padding: 6, textAlign: "center" }}>{[0,1,2].map(j => <span key={j} style={{ color: j < r.tech_score ? "#1565c0" : "#ddd" }}>●</span>)}</td>
+                  <td style={{ padding: 6, textAlign: "center" }}>{[0,1,2].map(j => <span key={j} style={{ color: j < r.fund_score ? "#2e7d32" : "#ddd" }}>●</span>)}</td>
+                  <td style={{ padding: 6, textAlign: "center" }}>{[0,1].map(j => <span key={j} style={{ color: j < r.earn_score ? "#ff9800" : "#ddd" }}>●</span>)}</td>
                   <td style={{ padding: 6, fontSize: 11, color: "#666" }}>{r.sector}</td>
                   <td style={{ padding: 6, textAlign: "right", fontWeight: "bold" }}>{curSym}{r.current_price?.toLocaleString()}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.ma50?.toLocaleString()}</td>
                   <td style={{ padding: 6, textAlign: "right", color: maColor, fontWeight: "bold" }}>{fromMA.toFixed(1)}%</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.ma150?.toLocaleString()}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.ma200?.toLocaleString()}</td>
-                  <td style={{ padding: 6, textAlign: "right", color: "#2e7d32" }}>+{r.ma200_slope?.toFixed(1)}%</td>
                   <td style={{ padding: 6, textAlign: "right", color: r.operating_margins > 0 ? "#2e7d32" : "#c62828" }}>{r.operating_margins != null ? `${r.operating_margins.toFixed(1)}%` : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right", color: r.revenue_growth > 0 ? "#2e7d32" : "#c62828" }}>{r.revenue_growth != null ? `${r.revenue_growth.toFixed(1)}%` : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{r.forward_pe != null ? `${r.forward_pe.toFixed(1)}x` : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{curSym}{fmtLarge(r.market_cap)}</td>
-                  <td style={{ padding: 6, textAlign: "center" }}>{["●","●","●"].map((d,j) => <span key={j} style={{ color: j < r.fund_score ? "#2e7d32" : "#ddd" }}>{d}</span>)}</td>
                   <td style={{ padding: 6, fontSize: 11 }}>{r.report_date ? `📅 ${r.report_date}` : "—"}</td>
                 </tr>
               );

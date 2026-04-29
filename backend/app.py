@@ -2258,7 +2258,8 @@ async def get_buy_candidates(market: str):
 @app.get("/research/pullback-buy/{market}")
 async def get_pullback_buys(market: str):
     """Get stocks in uptrend pulling back to 50MA — high-probability buy zone.
-    Criteria: price > 150MA > 200MA, price within +3% to -8% of 50MA, 200MA trending up."""
+    Criteria: price > 150MA > 200MA, price within +3% to -8% of 50MA, 200MA trending up,
+    op margin positive, revenue growth positive."""
     table = ddb.Table(SCREENER_TABLE)
     resp = table.query(KeyConditionExpression=Key("market").eq(market.upper()))
     items = resp.get("Items", [])
@@ -2290,22 +2291,40 @@ async def get_pullback_buys(market: str):
         if pct_from_50ma > 3 or pct_from_50ma < -8:
             continue
 
-        # Fundamental score
+        # Fundamental filters (mandatory)
+        op_margins = row.get("operating_margins")
+        rev_growth = row.get("revenue_growth")
+        if not op_margins or op_margins <= 0:
+            continue
+        if rev_growth is not None and rev_growth <= 0:
+            continue
+
+        # Scores
+        tech_score = int(row.get("trend_score", 0))
         fund_score = 0
-        if row.get("operating_margins") and row["operating_margins"] > 0:
+        if op_margins and op_margins > 0:
             fund_score += 1
-        if row.get("revenue_growth") and row["revenue_growth"] > 0:
+        if rev_growth and rev_growth > 0:
             fund_score += 1
         fwd_pe = row.get("forward_pe")
         if fwd_pe and 0 < fwd_pe < 30:
             fund_score += 1
+        earn_score = 0
+        if row.get("report_date"):
+            earn_score += 1
+            if row.get("cumulative_drop") is not None and row["cumulative_drop"] <= -6:
+                earn_score += 1
+        total_score = tech_score + fund_score + earn_score
 
         row["pct_from_50ma"] = pct_from_50ma
+        row["tech_score"] = tech_score
         row["fund_score"] = fund_score
+        row["earn_score"] = earn_score
+        row["total_score"] = total_score
         row["has_earnings"] = bool(row.get("report_date"))
         results.append(row)
 
-    results.sort(key=lambda x: (-x["fund_score"], -(x.get("market_cap") or 0)))
+    results.sort(key=lambda x: (-x["total_score"], -(x.get("market_cap") or 0)))
     return results
 
 
