@@ -234,6 +234,11 @@ export async function fetchBuyCandidates(market) {
   if (!res.ok) throw new Error("Failed to fetch buy candidates");
   return res.json();
 }
+export async function fetchPullbackBuys(market) {
+  const res = await fetch(`${API_BASE}/research/pullback-buy/${market}`);
+  if (!res.ok) throw new Error("Failed to fetch pullback buys");
+  return res.json();
+}
 export async function refreshIndexes(market) {
   const res = await fetch(`${API_BASE}/research/refresh-indexes/${market}`, { method: "POST" });
   if (!res.ok) throw new Error("Index refresh failed");

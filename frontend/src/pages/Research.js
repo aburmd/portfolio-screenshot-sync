@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell } from "recharts";
-import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, refreshIndexes } from "../services/api";
+import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, fetchPullbackBuys, refreshIndexes } from "../services/api";
 
 const card = { border: "1px solid #e0e0e0", borderRadius: 8, padding: 16, marginBottom: 16, background: "#fafafa" };
 const btn = { padding: "6px 16px", cursor: "pointer", borderRadius: 4, fontSize: 13 };
@@ -14,10 +14,12 @@ export default function Research() {
       <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
         <button style={{ ...btn, background: tab === "screener" ? "#1976d2" : "#fff", color: tab === "screener" ? "#fff" : "#333", border: tab === "screener" ? "none" : "1px solid #ccc" }} onClick={() => setTab("screener")}>Earnings Screener</button>
         <button style={{ ...btn, background: tab === "candidates" ? "#1976d2" : "#fff", color: tab === "candidates" ? "#fff" : "#333", border: tab === "candidates" ? "none" : "1px solid #ccc" }} onClick={() => setTab("candidates")}>Buy Candidates</button>
+        <button style={{ ...btn, background: tab === "pullback" ? "#2e7d32" : "#fff", color: tab === "pullback" ? "#fff" : "#333", border: tab === "pullback" ? "none" : "1px solid #ccc" }} onClick={() => setTab("pullback")}>🎯 Pullback Buy</button>
         <button style={{ ...btn, background: tab === "fundamentals" ? "#1976d2" : "#fff", color: tab === "fundamentals" ? "#fff" : "#333", border: tab === "fundamentals" ? "none" : "1px solid #ccc" }} onClick={() => setTab("fundamentals")}>Fundamentals</button>
       </div>
       {tab === "screener" && <ScreenerSection />}
       {tab === "candidates" && <BuyCandidatesSection />}
+      {tab === "pullback" && <PullbackBuySection />}
       {tab === "fundamentals" && <FundamentalsSection />}
     </div>
   );
@@ -315,6 +317,106 @@ function BuyCandidatesSection() {
           </tbody>
         </table>
       ) : !loading && <p style={{ color: "#999" }}>No candidates found. Run "📈 MA Scanner" first (takes ~3 min), then "🔄 Reload".</p>}
+    </div>
+  );
+}
+
+function PullbackBuySection() {
+  const [market, setMarket] = useState("US");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [peFilter, setPeFilter] = useState(false);
+  const [peThreshold, setPeThreshold] = useState(30);
+
+  const loadResults = useCallback(async () => {
+    setLoading(true); setError(null);
+    try { setResults(await fetchPullbackBuys(market)); } catch (e) { setError(e.message); }
+    setLoading(false);
+  }, [market]);
+
+  useEffect(() => { loadResults(); }, [loadResults]);
+
+  let filtered = results;
+  if (peFilter) filtered = filtered.filter(r => r.forward_pe && r.forward_pe < peThreshold);
+
+  const curSym = market === "IN" ? "₹" : "$";
+  const fmtLarge = (v) => { if (v == null) return "—"; const abs = Math.abs(v); if (abs >= 1e12) return `${(v/1e12).toFixed(1)}T`; if (abs >= 1e9) return `${(v/1e9).toFixed(1)}B`; if (abs >= 1e6) return `${(v/1e6).toFixed(0)}M`; return v.toLocaleString(); };
+
+  return (
+    <div>
+      {/* Explanation */}
+      <div style={{ ...card, background: "#e8f5e9", border: "1px solid #66bb6a" }}>
+        <div style={{ fontSize: 14, fontWeight: "bold", marginBottom: 4 }}>🎯 Pullback Buy — Strong Uptrend + 50MA Pullback</div>
+        <div style={{ fontSize: 12, color: "#333" }}>
+          These stocks are in a confirmed uptrend (price &gt; 150MA &gt; 200MA, 200MA rising) but have pulled back to the 50MA zone (+3% to -8%).
+          The 50MA acts as dynamic support — institutional buyers often step in here. This is a high-probability buy setup.
+        </div>
+      </div>
+
+      <div style={{ ...card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ fontSize: 12 }}>Market<br />
+          <select value={market} onChange={e => setMarket(e.target.value)} style={{ padding: 6 }}>
+            <option value="US">US</option><option value="IN">India</option>
+          </select>
+        </label>
+        <button style={{ ...btn, border: "1px solid #ccc" }} onClick={loadResults}>🔄 Reload</button>
+        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+          <input type="checkbox" checked={peFilter} onChange={e => setPeFilter(e.target.checked)} />
+          Fwd P/E &lt; <input type="number" value={peThreshold} onChange={e => setPeThreshold(parseFloat(e.target.value) || 0)}
+            style={{ width: 40, padding: 2, marginLeft: 2 }} disabled={!peFilter} />
+        </label>
+        <span style={{ fontSize: 11, color: "#999" }}>{filtered.length} stocks in pullback zone</span>
+      </div>
+
+      {error && <div style={{ ...card, background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
+
+      {loading ? <p>Loading...</p> : filtered.length > 0 ? (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead><tr style={{ background: "#e8f5e9" }}>
+            <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
+            <th style={{ padding: 6, textAlign: "left" }}>Name</th>
+            <th style={{ padding: 6, textAlign: "left" }}>Sector</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Price</th>
+            <th style={{ padding: 6, textAlign: "right" }}>50MA</th>
+            <th style={{ padding: 6, textAlign: "right" }}>From 50MA</th>
+            <th style={{ padding: 6, textAlign: "right" }}>150MA</th>
+            <th style={{ padding: 6, textAlign: "right" }}>200MA</th>
+            <th style={{ padding: 6, textAlign: "right" }}>200MA Slope</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Op Margin</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Rev Growth</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Fwd P/E</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Mkt Cap</th>
+            <th style={{ padding: 6, textAlign: "center" }}>Fund</th>
+            <th style={{ padding: 6, textAlign: "left" }}>Earnings</th>
+          </tr></thead>
+          <tbody>
+            {filtered.map((r, i) => {
+              const fromMA = r.pct_from_50ma || 0;
+              const maColor = fromMA <= -3 ? "#c62828" : fromMA <= 0 ? "#e65100" : "#2e7d32";
+              return (
+                <tr key={r.symbol} style={{ background: i % 2 ? "#f1f8e9" : "#fff" }}>
+                  <td style={{ padding: 6, fontWeight: "bold" }}>{r.symbol}</td>
+                  <td style={{ padding: 6, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</td>
+                  <td style={{ padding: 6, fontSize: 11, color: "#666" }}>{r.sector}</td>
+                  <td style={{ padding: 6, textAlign: "right", fontWeight: "bold" }}>{curSym}{r.current_price?.toLocaleString()}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.ma50?.toLocaleString()}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: maColor, fontWeight: "bold" }}>{fromMA.toFixed(1)}%</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.ma150?.toLocaleString()}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.ma200?.toLocaleString()}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: "#2e7d32" }}>+{r.ma200_slope?.toFixed(1)}%</td>
+                  <td style={{ padding: 6, textAlign: "right", color: r.operating_margins > 0 ? "#2e7d32" : "#c62828" }}>{r.operating_margins != null ? `${r.operating_margins.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: r.revenue_growth > 0 ? "#2e7d32" : "#c62828" }}>{r.revenue_growth != null ? `${r.revenue_growth.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{r.forward_pe != null ? `${r.forward_pe.toFixed(1)}x` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{fmtLarge(r.market_cap)}</td>
+                  <td style={{ padding: 6, textAlign: "center" }}>{["●","●","●"].map((d,j) => <span key={j} style={{ color: j < r.fund_score ? "#2e7d32" : "#ddd" }}>{d}</span>)}</td>
+                  <td style={{ padding: 6, fontSize: 11 }}>{r.report_date ? `📅 ${r.report_date}` : "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : !loading && <p style={{ color: "#999" }}>No stocks in pullback zone right now. Run MA Scanner from Buy Candidates tab first.</p>}
     </div>
   );
 }

@@ -2255,6 +2255,60 @@ async def get_buy_candidates(market: str):
     return results
 
 
+@app.get("/research/pullback-buy/{market}")
+async def get_pullback_buys(market: str):
+    """Get stocks in uptrend pulling back to 50MA — high-probability buy zone.
+    Criteria: price > 150MA > 200MA, price within +3% to -8% of 50MA, 200MA trending up."""
+    table = ddb.Table(SCREENER_TABLE)
+    resp = table.query(KeyConditionExpression=Key("market").eq(market.upper()))
+    items = resp.get("Items", [])
+
+    results = []
+    for item in items:
+        row = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
+
+        ma50 = row.get("ma50")
+        ma150 = row.get("ma150")
+        ma200 = row.get("ma200")
+        price = row.get("current_price", 0)
+        ma200_slope = row.get("ma200_slope")
+
+        if not all([ma50, ma150, ma200, price]):
+            continue
+        if ma50 <= 0:
+            continue
+
+        pct_from_50ma = round((price - ma50) / ma50 * 100, 2)
+
+        # Uptrend: price > 150MA > 200MA, 200MA trending up
+        if not (price > ma150 > ma200):
+            continue
+        if ma200_slope is None or ma200_slope <= 0:
+            continue
+
+        # Pullback zone: price within +3% to -8% of 50MA
+        if pct_from_50ma > 3 or pct_from_50ma < -8:
+            continue
+
+        # Fundamental score
+        fund_score = 0
+        if row.get("operating_margins") and row["operating_margins"] > 0:
+            fund_score += 1
+        if row.get("revenue_growth") and row["revenue_growth"] > 0:
+            fund_score += 1
+        fwd_pe = row.get("forward_pe")
+        if fwd_pe and 0 < fwd_pe < 30:
+            fund_score += 1
+
+        row["pct_from_50ma"] = pct_from_50ma
+        row["fund_score"] = fund_score
+        row["has_earnings"] = bool(row.get("report_date"))
+        results.append(row)
+
+    results.sort(key=lambda x: (-x["fund_score"], -(x.get("market_cap") or 0)))
+    return results
+
+
 @app.post("/research/refresh-indexes/{market}")
 async def refresh_indexes(market: str):
     """Refresh index constituent lists from FMP."""
