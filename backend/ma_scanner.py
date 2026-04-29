@@ -116,6 +116,10 @@ def compute_ma_signals(sym, market):
             "ma200_up": ma200_up,
             "near_high": near_high,
             "above_low": above_low,
+            "operating_margins": round(info.get("operatingMargins", 0) * 100, 2) if info.get("operatingMargins") else None,
+            "revenue_growth": round(info.get("revenueGrowth", 0) * 100, 2) if info.get("revenueGrowth") else None,
+            "forward_pe": round(info["forwardPE"], 2) if info.get("forwardPE") else None,
+            "market_cap": info.get("marketCap", 0),
         }
     except Exception as e:
         return None
@@ -154,7 +158,8 @@ def handler(event, context):
             update_expr = "SET ma50=:m50, ma150=:m150, ma200=:m200, ma200_slope=:slope, " \
                           "high_52w=:h52, low_52w=:l52, pct_from_high=:pfh, pct_from_low=:pfl, " \
                           "trend_score=:ts, ma_aligned=:maa, ma200_up=:mau, near_high=:nh, " \
-                          "above_low=:al, ma_updated=:mu"
+                          "above_low=:al, ma_updated=:mu, " \
+                          "operating_margins=:om, revenue_growth=:rg, forward_pe=:fpe, market_cap=:mc"
             expr_vals = {
                 ":m50": Decimal(str(signals["ma50"])) if signals["ma50"] else None,
                 ":m150": Decimal(str(signals["ma150"])) if signals["ma150"] else None,
@@ -170,6 +175,10 @@ def handler(event, context):
                 ":nh": signals["near_high"],
                 ":al": signals["above_low"],
                 ":mu": now,
+                ":om": Decimal(str(signals["operating_margins"])) if signals.get("operating_margins") is not None else None,
+                ":rg": Decimal(str(signals["revenue_growth"])) if signals.get("revenue_growth") is not None else None,
+                ":fpe": Decimal(str(signals["forward_pe"])) if signals.get("forward_pe") is not None else None,
+                ":mc": Decimal(str(signals["market_cap"])) if signals.get("market_cap") else None,
             }
             # Remove None values
             clean_vals = {k: v for k, v in expr_vals.items() if v is not None}

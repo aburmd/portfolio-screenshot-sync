@@ -2399,20 +2399,6 @@ async def get_position_monitor(user_id: str, platform: str = None):
         rev_growth = cached.get("revenue_growth")
         fwd_pe = cached.get("forward_pe")
 
-        # Fallback: fetch fundamentals from yfinance if not in cache
-        if op_margins is None or fwd_pe is None:
-            try:
-                yf_sym = f"{sym}.NS" if currency == "INR" else sym
-                info = yf.Ticker(yf_sym).info or {}
-                if op_margins is None and info.get("operatingMargins"):
-                    op_margins = round(info["operatingMargins"] * 100, 2)
-                if rev_growth is None and info.get("revenueGrowth"):
-                    rev_growth = round(info["revenueGrowth"] * 100, 2)
-                if fwd_pe is None and info.get("forwardPE"):
-                    fwd_pe = round(info["forwardPE"], 2)
-            except Exception:
-                pass
-
         # Determine signal
         signal = "HOLD"
         reason = ""
