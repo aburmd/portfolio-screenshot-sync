@@ -26,6 +26,7 @@ echo "Copying backend code..."
 cp "$BACKEND_DIR/app.py" "$BUILD_DIR/backend-package/"
 cp "$BACKEND_DIR/daily_price.py" "$BUILD_DIR/backend-package/"
 cp "$BACKEND_DIR/screener.py" "$BUILD_DIR/backend-package/"
+cp "$BACKEND_DIR/ma_scanner.py" "$BUILD_DIR/backend-package/"
 
 echo "Creating zip..."
 cd "$BUILD_DIR/backend-package"

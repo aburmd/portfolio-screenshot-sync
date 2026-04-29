@@ -224,6 +224,16 @@ export async function runScreener(market) {
   if (!res.ok) throw new Error("Screener run failed");
   return res.json();
 }
+export async function runMaScanner(market) {
+  const res = await fetch(`${API_BASE}/research/ma-scanner/run/${market}`, { method: "POST" });
+  if (!res.ok) throw new Error("MA scanner run failed");
+  return res.json();
+}
+export async function fetchBuyCandidates(market) {
+  const res = await fetch(`${API_BASE}/research/buy-candidates/${market}`);
+  if (!res.ok) throw new Error("Failed to fetch buy candidates");
+  return res.json();
+}
 export async function refreshIndexes(market) {
   const res = await fetch(`${API_BASE}/research/refresh-indexes/${market}`, { method: "POST" });
   if (!res.ok) throw new Error("Index refresh failed");

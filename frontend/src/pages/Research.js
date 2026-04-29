@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell } from "recharts";
-import { fetchFundamentals, fetchScreenerResults, runScreener, refreshIndexes } from "../services/api";
+import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, refreshIndexes } from "../services/api";
 
 const card = { border: "1px solid #e0e0e0", borderRadius: 8, padding: 16, marginBottom: 16, background: "#fafafa" };
 const btn = { padding: "6px 16px", cursor: "pointer", borderRadius: 4, fontSize: 13 };
@@ -13,9 +13,11 @@ export default function Research() {
       <h2 style={{ marginBottom: 16 }}>📊 Research</h2>
       <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
         <button style={{ ...btn, background: tab === "screener" ? "#1976d2" : "#fff", color: tab === "screener" ? "#fff" : "#333", border: tab === "screener" ? "none" : "1px solid #ccc" }} onClick={() => setTab("screener")}>Earnings Screener</button>
+        <button style={{ ...btn, background: tab === "candidates" ? "#1976d2" : "#fff", color: tab === "candidates" ? "#fff" : "#333", border: tab === "candidates" ? "none" : "1px solid #ccc" }} onClick={() => setTab("candidates")}>Buy Candidates</button>
         <button style={{ ...btn, background: tab === "fundamentals" ? "#1976d2" : "#fff", color: tab === "fundamentals" ? "#fff" : "#333", border: tab === "fundamentals" ? "none" : "1px solid #ccc" }} onClick={() => setTab("fundamentals")}>Fundamentals</button>
       </div>
       {tab === "screener" && <ScreenerSection />}
+      {tab === "candidates" && <BuyCandidatesSection />}
       {tab === "fundamentals" && <FundamentalsSection />}
     </div>
   );
@@ -198,6 +200,121 @@ function ScreenerSection() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function BuyCandidatesSection() {
+  const [market, setMarket] = useState("US");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [error, setError] = useState(null);
+  const [minScore, setMinScore] = useState(4);
+  const [maOnly, setMaOnly] = useState(false);
+  const [earnOnly, setEarnOnly] = useState(false);
+
+  const loadResults = useCallback(async () => {
+    setLoading(true); setError(null);
+    try { setResults(await fetchBuyCandidates(market)); } catch (e) { setError(e.message); }
+    setLoading(false);
+  }, [market]);
+
+  useEffect(() => { loadResults(); }, [loadResults]);
+
+  const handleRunMA = async () => {
+    setScanning(true);
+    try { await runMaScanner(market); alert("MA Scanner triggered! Takes ~2-3 min. Click 🔄 Reload after."); } catch (e) { setError(e.message); }
+    setScanning(false);
+  };
+
+  let filtered = results.filter(r => r.total_score >= minScore);
+  if (maOnly) filtered = filtered.filter(r => r.ma_aligned);
+  if (earnOnly) filtered = filtered.filter(r => r.report_date);
+
+  const curSym = market === "IN" ? "₹" : "$";
+  const fmtLarge = (v) => { if (v == null) return "—"; const abs = Math.abs(v); if (abs >= 1e12) return `${(v/1e12).toFixed(1)}T`; if (abs >= 1e9) return `${(v/1e9).toFixed(1)}B`; if (abs >= 1e6) return `${(v/1e6).toFixed(0)}M`; return v.toLocaleString(); };
+  const scoreBar = (score, max, color) => (
+    <span>{Array.from({length: max}, (_, i) => <span key={i} style={{ color: i < score ? color : "#ddd" }}>●</span>)}</span>
+  );
+
+  return (
+    <div>
+      <div style={{ ...card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ fontSize: 12 }}>Market<br />
+          <select value={market} onChange={e => setMarket(e.target.value)} style={{ padding: 6 }}>
+            <option value="US">US</option><option value="IN">India</option>
+          </select>
+        </label>
+        <button style={btnPrimary} onClick={handleRunMA} disabled={scanning}>{scanning ? "Triggering..." : "📈 Run MA Scanner"}</button>
+        <button style={{ ...btn, border: "1px solid #ccc" }} onClick={loadResults}>🔄 Reload</button>
+        <label style={{ fontSize: 12 }}>Min Score<br />
+          <select value={minScore} onChange={e => setMinScore(parseInt(e.target.value))} style={{ padding: 6 }}>
+            {[0,1,2,3,4,5,6,7,8].map(n => <option key={n} value={n}>{n}/8</option>)}
+          </select>
+        </label>
+        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+          <input type="checkbox" checked={maOnly} onChange={e => setMaOnly(e.target.checked)} /> MA Aligned Only
+        </label>
+        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+          <input type="checkbox" checked={earnOnly} onChange={e => setEarnOnly(e.target.checked)} /> With Earnings Only
+        </label>
+        <span style={{ fontSize: 11, color: "#999" }}>{filtered.length} of {results.length} stocks</span>
+      </div>
+
+      {/* Score legend */}
+      <div style={{ ...card, padding: 8, fontSize: 11, display: "flex", gap: 16 }}>
+        <span><b>Score = Tech + Fund + Earn (0-8)</b></span>
+        <span style={{ color: "#1565c0" }}>●●● Tech (0-3): MA aligned, 200MA up, near 52w high</span>
+        <span style={{ color: "#2e7d32" }}>●●● Fund (0-3): Op margin +ve, Rev growth +ve, P/E &lt; 30</span>
+        <span style={{ color: "#ff9800" }}>●● Earn (0-2): Recent earnings + dip ≥ 6%</span>
+      </div>
+
+      {error && <div style={{ ...card, background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
+
+      {loading ? <p>Loading...</p> : filtered.length > 0 ? (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead><tr style={{ background: "#f5f5f5" }}>
+            <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
+            <th style={{ padding: 6, textAlign: "left" }}>Name</th>
+            <th style={{ padding: 6, textAlign: "center" }}>Score</th>
+            <th style={{ padding: 6, textAlign: "center" }}>Tech</th>
+            <th style={{ padding: 6, textAlign: "center" }}>Fund</th>
+            <th style={{ padding: 6, textAlign: "center" }}>Earn</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Price</th>
+            <th style={{ padding: 6, textAlign: "right" }}>50MA</th>
+            <th style={{ padding: 6, textAlign: "right" }}>150MA</th>
+            <th style={{ padding: 6, textAlign: "right" }}>200MA</th>
+            <th style={{ padding: 6, textAlign: "right" }}>From 52wH</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Fwd P/E</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Drop</th>
+            <th style={{ padding: 6, textAlign: "left" }}>Earnings</th>
+          </tr></thead>
+          <tbody>
+            {filtered.map((r, i) => {
+              const bg = r.total_score >= 6 ? "#e8f5e9" : r.total_score >= 4 ? "#fff8e1" : i % 2 ? "#fafafa" : "#fff";
+              return (
+                <tr key={r.symbol} style={{ background: bg }}>
+                  <td style={{ padding: 6, fontWeight: "bold" }}>{r.symbol}</td>
+                  <td style={{ padding: 6, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</td>
+                  <td style={{ padding: 6, textAlign: "center", fontWeight: "bold", fontSize: 14 }}>{r.total_score}/8</td>
+                  <td style={{ padding: 6, textAlign: "center" }}>{scoreBar(r.tech_score, 3, "#1565c0")}</td>
+                  <td style={{ padding: 6, textAlign: "center" }}>{scoreBar(r.fund_score, 3, "#2e7d32")}</td>
+                  <td style={{ padding: 6, textAlign: "center" }}>{scoreBar(r.earn_score, 2, "#ff9800")}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.current_price?.toLocaleString()}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: r.current_price > (r.ma50 || 0) ? "#2e7d32" : "#c62828" }}>{r.ma50 ? curSym + r.ma50.toLocaleString() : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{r.ma150 ? curSym + r.ma150.toLocaleString() : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{r.ma200 ? curSym + r.ma200.toLocaleString() : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: (r.pct_from_high || 0) >= -10 ? "#2e7d32" : "#c62828" }}>{r.pct_from_high != null ? `${r.pct_from_high.toFixed(0)}%` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{r.forward_pe != null ? `${r.forward_pe.toFixed(1)}x` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: (r.cumulative_drop || 0) < -6 ? "#c62828" : "#666" }}>{r.cumulative_drop != null ? `${r.cumulative_drop.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: 6, fontSize: 11 }}>{r.report_date || "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : !loading && <p style={{ color: "#999" }}>No candidates found. Run "📈 MA Scanner" first (takes ~3 min), then "🔄 Reload".</p>}
     </div>
   );
 }

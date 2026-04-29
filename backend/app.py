@@ -2201,6 +2201,60 @@ async def run_screener(market: str):
     return {"status": "triggered", "market": market.upper()}
 
 
+@app.post("/research/ma-scanner/run/{market}")
+async def run_ma_scanner(market: str):
+    """Trigger MA scanner Lambda asynchronously."""
+    lambda_client = boto3.client("lambda", region_name=REGION)
+    lambda_client.invoke(
+        FunctionName=f"portfolio-ma-scanner-{os.environ.get('ENV', 'dev')}",
+        InvocationType="Event",
+        Payload=json.dumps({"market": market.upper()}),
+    )
+    return {"status": "triggered", "market": market.upper()}
+
+
+@app.get("/research/buy-candidates/{market}")
+async def get_buy_candidates(market: str):
+    """Get stocks with combined technical + fundamental + earnings score."""
+    table = ddb.Table(SCREENER_TABLE)
+    resp = table.query(KeyConditionExpression=Key("market").eq(market.upper()))
+    items = resp.get("Items", [])
+
+    results = []
+    for item in items:
+        row = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
+
+        # Technical score (0-3)
+        tech_score = int(row.get("trend_score", 0))
+
+        # Fundamental score (0-3)
+        fund_score = 0
+        if row.get("operating_margins") and row["operating_margins"] > 0:
+            fund_score += 1
+        if row.get("revenue_growth") and row["revenue_growth"] > 0:
+            fund_score += 1
+        fwd_pe = row.get("forward_pe")
+        if fwd_pe and 0 < fwd_pe < 30:
+            fund_score += 1
+
+        # Earnings score (0-2)
+        earn_score = 0
+        if row.get("report_date"):
+            earn_score += 1
+            if row.get("cumulative_drop") is not None and row["cumulative_drop"] <= -6:
+                earn_score += 1
+
+        total_score = tech_score + fund_score + earn_score
+        row["tech_score"] = tech_score
+        row["fund_score"] = fund_score
+        row["earn_score"] = earn_score
+        row["total_score"] = total_score
+        results.append(row)
+
+    results.sort(key=lambda x: (-x["total_score"], -(x.get("market_cap") or 0)))
+    return results
+
+
 @app.post("/research/refresh-indexes/{market}")
 async def refresh_indexes(market: str):
     """Refresh index constituent lists from FMP."""
