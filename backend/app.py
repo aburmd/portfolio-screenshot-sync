@@ -2469,5 +2469,106 @@ async def get_position_monitor(user_id: str, platform: str = None):
     return results
 
 
+@app.get("/research/stock-check/{symbol}")
+async def check_stock(symbol: str, market: str = "US"):
+    """Check any symbol for buy/hold/sell signal. Works for stocks not in portfolio."""
+    yf_sym = f"{symbol}.NS" if market == "IN" else symbol
+    screener_table = ddb.Table(SCREENER_TABLE)
+    mkt = market.upper()
+
+    # Get cached MA data
+    cached_resp = screener_table.get_item(Key={"market": mkt, "symbol": symbol.upper()})
+    cached = {k: float(v) if hasattr(v, "is_finite") else v for k, v in cached_resp.get("Item", {}).items()} if cached_resp.get("Item") else {}
+
+    # Fetch live data from yfinance
+    try:
+        t = yf.Ticker(yf_sym)
+        info = t.info or {}
+    except Exception as e:
+        return {"error": str(e)}
+
+    price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+    if price <= 0:
+        return {"error": f"No price data for {yf_sym}"}
+
+    ma50 = cached.get("ma50")
+    ma150 = cached.get("ma150")
+    ma200 = cached.get("ma200")
+    ma200_slope = cached.get("ma200_slope")
+    op_margins = cached.get("operating_margins") or (round(info["operatingMargins"] * 100, 2) if info.get("operatingMargins") else None)
+    rev_growth = cached.get("revenue_growth") or (round(info["revenueGrowth"] * 100, 2) if info.get("revenueGrowth") else None)
+    fwd_pe = cached.get("forward_pe") or (round(info["forwardPE"], 2) if info.get("forwardPE") else None)
+
+    # If no MA data cached, compute on the fly
+    if ma50 is None:
+        try:
+            hist = t.history(period="1y")
+            if hist is not None and len(hist) >= 50:
+                close = hist["Close"]
+                ma50 = round(float(close.rolling(50).mean().iloc[-1]), 2)
+                if len(close) >= 150:
+                    ma150 = round(float(close.rolling(150).mean().iloc[-1]), 2)
+                if len(close) >= 200:
+                    ma200 = round(float(close.rolling(200).mean().iloc[-1]), 2)
+                    if len(close) >= 222:
+                        ma200_prev = float(close.rolling(200).mean().iloc[-22])
+                        if ma200_prev > 0:
+                            ma200_slope = round((ma200 - ma200_prev) / ma200_prev * 100, 2)
+        except Exception:
+            pass
+
+    is_quality = (op_margins and op_margins > 5 and fwd_pe and 0 < fwd_pe < 35)
+
+    # Signal for non-portfolio stock
+    signal = "NEUTRAL"
+    reason = ""
+    if ma50 and ma150 and ma200:
+        pct_from_50ma = round((price - ma50) / ma50 * 100, 2) if ma50 > 0 else None
+        if price > ma50 > ma150 > ma200 and ma200_slope and ma200_slope > 0:
+            if pct_from_50ma is not None and pct_from_50ma <= 3:
+                signal = "BUY"
+                reason = "Strong uptrend + near 50MA support"
+            else:
+                signal = "WATCH"
+                reason = "Strong uptrend but extended above 50MA \u2014 wait for pullback"
+        elif price > ma150 > ma200 and ma200_slope and ma200_slope > 0:
+            if pct_from_50ma is not None and -8 <= pct_from_50ma <= 3:
+                signal = "BUY"
+                reason = "Uptrend + pullback to 50MA zone"
+            else:
+                signal = "WATCH"
+                reason = "Uptrend but below 50MA \u2014 wait for stabilization"
+        elif price < ma200:
+            if is_quality:
+                signal = "WATCH"
+                reason = f"Below 200MA but quality (OpMgn {op_margins:.0f}%, PE {fwd_pe:.0f}x) \u2014 wait for 200MA recovery"
+            else:
+                signal = "AVOID"
+                reason = "Below 200MA + weak fundamentals"
+        else:
+            signal = "NEUTRAL"
+            reason = "No clear trend"
+    elif is_quality:
+        signal = "WATCH"
+        reason = "Quality stock but no MA data \u2014 run MA Scanner first"
+
+    if not is_quality and signal == "BUY":
+        signal = "WATCH"
+        reason += " (weak fundamentals \u2014 caution)"
+
+    return {
+        "symbol": symbol.upper(), "yf_symbol": yf_sym, "market": mkt,
+        "name": info.get("longName") or info.get("shortName", symbol),
+        "sector": info.get("sector", ""),
+        "current_price": round(price, 2),
+        "ma50": ma50, "ma150": ma150, "ma200": ma200, "ma200_slope": ma200_slope,
+        "operating_margins": op_margins, "revenue_growth": rev_growth, "forward_pe": fwd_pe,
+        "market_cap": info.get("marketCap", 0),
+        "signal": signal, "reason": reason,
+        "is_quality": is_quality,
+        "in_index": bool(cached),
+    }
+
+
 # Lambda handler via Mangum
 handler = Mangum(app)

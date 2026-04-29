@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell } from "recharts";
-import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, fetchPullbackBuys, fetchPositionMonitor, refreshIndexes } from "../services/api";
+import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, fetchPullbackBuys, fetchPositionMonitor, checkStock, refreshIndexes } from "../services/api";
 
 const card = { border: "1px solid #e0e0e0", borderRadius: 8, padding: 16, marginBottom: 16, background: "#fafafa" };
 const btn = { padding: "6px 16px", cursor: "pointer", borderRadius: 4, fontSize: 13 };
@@ -434,6 +434,10 @@ function PositionMonitorSection({ userId }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [signalFilter, setSignalFilter] = useState("all");
+  const [searchSymbol, setSearchSymbol] = useState("");
+  const [searchMarket, setSearchMarket] = useState("US");
+  const [searchResult, setSearchResult] = useState(null);
+  const [searching, setSearching] = useState(false);
 
   const loadResults = useCallback(async () => {
     if (!userId) return;
@@ -444,13 +448,21 @@ function PositionMonitorSection({ userId }) {
 
   useEffect(() => { loadResults(); }, [loadResults]);
 
+  const handleSearch = async () => {
+    if (!searchSymbol.trim()) return;
+    setSearching(true); setSearchResult(null);
+    try { setSearchResult(await checkStock(searchSymbol.trim().toUpperCase(), searchMarket)); } catch (e) { setSearchResult({ error: e.message }); }
+    setSearching(false);
+  };
+
   let filtered = results;
   if (signalFilter !== "all") filtered = filtered.filter(r => r.signal === signalFilter);
 
   const signalStyle = (s) => {
-    if (s === "SELL") return { background: "#ffcdd2", color: "#b71c1c", padding: "2px 6px", borderRadius: 4, fontWeight: "bold", fontSize: 11 };
-    if (s === "TAKE_PROFIT") return { background: "#c8e6c9", color: "#1b5e20", padding: "2px 6px", borderRadius: 4, fontWeight: "bold", fontSize: 11 };
+    if (s === "SELL" || s === "AVOID") return { background: "#ffcdd2", color: "#b71c1c", padding: "2px 6px", borderRadius: 4, fontWeight: "bold", fontSize: 11 };
+    if (s === "TAKE_PROFIT" || s === "BUY") return { background: "#c8e6c9", color: "#1b5e20", padding: "2px 6px", borderRadius: 4, fontWeight: "bold", fontSize: 11 };
     if (s === "AVERAGE") return { background: "#fff9c4", color: "#f57f17", padding: "2px 6px", borderRadius: 4, fontWeight: "bold", fontSize: 11 };
+    if (s === "WATCH") return { background: "#e3f2fd", color: "#0d47a1", padding: "2px 6px", borderRadius: 4, fontWeight: "bold", fontSize: 11 };
     return { background: "#e3f2fd", color: "#1565c0", padding: "2px 6px", borderRadius: 4, fontSize: 11 };
   };
 
@@ -461,6 +473,37 @@ function PositionMonitorSection({ userId }) {
 
   return (
     <div>
+      {/* Stock Checker */}
+      <div style={{ ...card, background: "#f3e5f5", border: "1px solid #ce93d8" }}>
+        <div style={{ fontSize: 13, fontWeight: "bold", marginBottom: 8 }}>🔍 Check Any Stock</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <label style={{ fontSize: 12 }}>Symbol<br />
+            <input value={searchSymbol} onChange={e => setSearchSymbol(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleSearch()}
+              placeholder="e.g. AAPL, INFY" style={{ padding: 6, width: 120 }} />
+          </label>
+          <label style={{ fontSize: 12 }}>Market<br />
+            <select value={searchMarket} onChange={e => setSearchMarket(e.target.value)} style={{ padding: 6 }}>
+              <option value="US">US</option><option value="IN">India</option>
+            </select>
+          </label>
+          <button style={btnPrimary} onClick={handleSearch} disabled={searching}>{searching ? "..." : "Check"}</button>
+        </div>
+        {searchResult && !searchResult.error && (
+          <div style={{ marginTop: 8, padding: 8, background: "#fff", borderRadius: 4, fontSize: 12 }}>
+            <span style={{ fontWeight: "bold", fontSize: 14 }}>{searchResult.symbol}</span>
+            <span style={{ color: "#666", marginLeft: 8 }}>{searchResult.name}</span>
+            <span style={Object.assign({}, signalStyle(searchResult.signal), { marginLeft: 8 })}>{searchResult.signal}</span>
+            <div style={{ marginTop: 4, color: "#333" }}>{searchResult.reason}</div>
+            <div style={{ marginTop: 4, color: "#666", fontSize: 11 }}>
+              Price: {searchResult.current_price} | 50MA: {searchResult.ma50 || "—"} | 150MA: {searchResult.ma150 || "—"} | 200MA: {searchResult.ma200 || "—"} | OpMgn: {searchResult.operating_margins != null ? searchResult.operating_margins + "%" : "—"} | FwdPE: {searchResult.forward_pe != null ? searchResult.forward_pe + "x" : "—"}
+            </div>
+          </div>
+        )}
+        {searchResult?.error && <div style={{ marginTop: 8, color: "#c62828" }}>❌ {searchResult.error}</div>}
+      </div>
+
+      {/* Portfolio Monitor */}
       <div style={{ ...card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <label style={{ fontSize: 12 }}>Platform<br />
           <input value={platform} onChange={e => setPlatform(e.target.value)} placeholder="all (or prostocks, Fid-...)" style={{ padding: 6, width: 140 }} />
@@ -478,7 +521,6 @@ function PositionMonitorSection({ userId }) {
         <span style={{ fontSize: 11, color: "#999" }}>{filtered.length} of {results.length} positions</span>
       </div>
 
-      {/* Summary */}
       {results.length > 0 && (
         <div style={{ ...card, display: "flex", gap: 16, flexWrap: "wrap", padding: 10 }}>
           <span style={{ fontSize: 12 }}><b>{results.length}</b> positions</span>
@@ -491,7 +533,7 @@ function PositionMonitorSection({ userId }) {
 
       {error && <div style={{ ...card, background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
 
-      {loading ? <p>Loading (fetching live prices for all holdings)...</p> : filtered.length > 0 ? (
+      {loading ? <p>Loading (fetching live prices)...</p> : filtered.length > 0 ? (
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead><tr style={{ background: "#f5f5f5" }}>
             <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
@@ -504,7 +546,7 @@ function PositionMonitorSection({ userId }) {
             <th style={{ padding: 6, textAlign: "right" }}>50MA</th>
             <th style={{ padding: 6, textAlign: "right" }}>200MA</th>
             <th style={{ padding: 6, textAlign: "right" }}>Op Mgn</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Rev Gr</th>
+            <th style={{ padding: 6, textAlign: "right" }}>Fwd PE</th>
             <th style={{ padding: 6, textAlign: "left" }}>Reason</th>
           </tr></thead>
           <tbody>
@@ -523,14 +565,14 @@ function PositionMonitorSection({ userId }) {
                   <td style={{ padding: 6, textAlign: "right", color: r.above_50ma ? "#2e7d32" : "#c62828" }}>{r.ma50 ? cur + r.ma50.toLocaleString() : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right", color: r.above_200ma ? "#2e7d32" : "#c62828" }}>{r.ma200 ? cur + r.ma200.toLocaleString() : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{r.operating_margins != null ? `${r.operating_margins.toFixed(1)}%` : "—"}</td>
-                  <td style={{ padding: 6, textAlign: "right" }}>{r.revenue_growth != null ? `${r.revenue_growth.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{r.forward_pe != null ? `${r.forward_pe.toFixed(1)}x` : "—"}</td>
                   <td style={{ padding: 6, fontSize: 11, maxWidth: 200 }}>{r.reason}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-      ) : !loading && <p style={{ color: "#999" }}>No positions found. Enter a platform name or leave blank for all.</p>}
+      ) : !loading && results.length === 0 && <p style={{ color: "#999" }}>No positions found. Use the stock checker above to analyze any symbol.</p>}
     </div>
   );
 }
