@@ -2470,11 +2470,26 @@ async def get_position_monitor(user_id: str, platform: str = None):
 
 
 @app.get("/research/stock-check/{symbol}")
-async def check_stock(symbol: str, market: str = "US"):
-    """Check any symbol for buy/hold/sell signal. Works for stocks not in portfolio."""
+async def check_stock(symbol: str, market: str = "US", user_id: str = None):
+    """Check any symbol for buy/hold/sell signal. Optionally checks if in user's portfolio."""
     yf_sym = f"{symbol}.NS" if market == "IN" else symbol
     screener_table = ddb.Table(SCREENER_TABLE)
     mkt = market.upper()
+    sym_upper = symbol.upper()
+
+    # Check if in portfolio
+    in_portfolio = False
+    portfolio_qty = 0
+    portfolio_avg = 0
+    if user_id:
+        holdings_table = ddb.Table(PORTFOLIO_TABLE)
+        h_resp = holdings_table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+        for h in _decimal_to_float(h_resp.get("Items", [])):
+            if h.get("symbol") == sym_upper:
+                in_portfolio = True
+                portfolio_qty = h.get("quantity", 0)
+                portfolio_avg = h.get("avg_buy_price", 0)
+                break
 
     # Get cached MA data
     cached_resp = screener_table.get_item(Key={"market": mkt, "symbol": symbol.upper()})
@@ -2567,6 +2582,9 @@ async def check_stock(symbol: str, market: str = "US"):
         "signal": signal, "reason": reason,
         "is_quality": is_quality,
         "in_index": bool(cached),
+        "in_portfolio": in_portfolio,
+        "portfolio_qty": portfolio_qty,
+        "portfolio_avg": portfolio_avg,
     }
 
 

@@ -429,7 +429,8 @@ function PullbackBuySection() {
 }
 
 function PositionMonitorSection({ userId }) {
-  const [platform, setPlatform] = useState("");
+  const [platform, setPlatform] = useState("all");
+  const [platforms, setPlatforms] = useState([]);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -438,20 +439,27 @@ function PositionMonitorSection({ userId }) {
   const [searchMarket, setSearchMarket] = useState("US");
   const [searchResult, setSearchResult] = useState(null);
   const [searching, setSearching] = useState(false);
+  const [inPortfolioOnly, setInPortfolioOnly] = useState(true);
 
   const loadResults = useCallback(async () => {
     if (!userId) return;
     setLoading(true); setError(null);
-    try { setResults(await fetchPositionMonitor(userId, platform || null)); } catch (e) { setError(e.message); }
+    try {
+      const plat = platform === "all" ? null : platform;
+      const data = await fetchPositionMonitor(userId, plat);
+      setResults(data);
+      const plats = [...new Set(data.map(r => r.platform).filter(Boolean))];
+      if (plats.length > 0 && platforms.length === 0) setPlatforms(plats);
+    } catch (e) { setError(e.message); }
     setLoading(false);
-  }, [userId, platform]);
+  }, [userId, platform, platforms.length]);
 
   useEffect(() => { loadResults(); }, [loadResults]);
 
   const handleSearch = async () => {
     if (!searchSymbol.trim()) return;
     setSearching(true); setSearchResult(null);
-    try { setSearchResult(await checkStock(searchSymbol.trim().toUpperCase(), searchMarket)); } catch (e) { setSearchResult({ error: e.message }); }
+    try { setSearchResult(await checkStock(searchSymbol.trim().toUpperCase(), searchMarket, userId)); } catch (e) { setSearchResult({ error: e.message }); }
     setSearching(false);
   };
 
@@ -494,6 +502,8 @@ function PositionMonitorSection({ userId }) {
             <span style={{ fontWeight: "bold", fontSize: 14 }}>{searchResult.symbol}</span>
             <span style={{ color: "#666", marginLeft: 8 }}>{searchResult.name}</span>
             <span style={Object.assign({}, signalStyle(searchResult.signal), { marginLeft: 8 })}>{searchResult.signal}</span>
+            {searchResult.in_portfolio && <span style={{ marginLeft: 8, background: "#e8f5e9", color: "#2e7d32", padding: "2px 6px", borderRadius: 4, fontSize: 10 }}>✅ IN PORTFOLIO (qty: {searchResult.portfolio_qty}, avg: {searchResult.portfolio_avg})</span>}
+            {!searchResult.in_portfolio && <span style={{ marginLeft: 8, background: "#fafafa", color: "#999", padding: "2px 6px", borderRadius: 4, fontSize: 10 }}>Not in portfolio</span>}
             <div style={{ marginTop: 4, color: "#333" }}>{searchResult.reason}</div>
             <div style={{ marginTop: 4, color: "#666", fontSize: 11 }}>
               Price: {searchResult.current_price} | 50MA: {searchResult.ma50 || "—"} | 150MA: {searchResult.ma150 || "—"} | 200MA: {searchResult.ma200 || "—"} | OpMgn: {searchResult.operating_margins != null ? searchResult.operating_margins + "%" : "—"} | FwdPE: {searchResult.forward_pe != null ? searchResult.forward_pe + "x" : "—"}
@@ -506,7 +516,10 @@ function PositionMonitorSection({ userId }) {
       {/* Portfolio Monitor */}
       <div style={{ ...card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <label style={{ fontSize: 12 }}>Platform<br />
-          <input value={platform} onChange={e => setPlatform(e.target.value)} placeholder="all (or prostocks, Fid-...)" style={{ padding: 6, width: 140 }} />
+          <select value={platform} onChange={e => setPlatform(e.target.value)} style={{ padding: 6 }}>
+            <option value="all">All Platforms</option>
+            {platforms.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
         </label>
         <button style={{ ...btn, border: "1px solid #ccc" }} onClick={loadResults}>🔄 Reload</button>
         <label style={{ fontSize: 12 }}>Signal<br />
@@ -517,6 +530,10 @@ function PositionMonitorSection({ userId }) {
             <option value="AVERAGE">🟡 Average Down</option>
             <option value="HOLD">🔵 Hold</option>
           </select>
+        </label>
+        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+          <input type="checkbox" checked={inPortfolioOnly} onChange={e => setInPortfolioOnly(e.target.checked)} />
+          In Portfolio Only
         </label>
         <span style={{ fontSize: 11, color: "#999" }}>{filtered.length} of {results.length} positions</span>
       </div>

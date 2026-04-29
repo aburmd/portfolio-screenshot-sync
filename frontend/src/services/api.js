@@ -246,8 +246,10 @@ export async function fetchPositionMonitor(userId, platform) {
   if (!res.ok) throw new Error("Failed to fetch position monitor");
   return res.json();
 }
-export async function checkStock(symbol, market = "US") {
-  const res = await fetch(`${API_BASE}/research/stock-check/${encodeURIComponent(symbol)}?market=${market}`);
+export async function checkStock(symbol, market = "US", userId = "") {
+  let url = `${API_BASE}/research/stock-check/${encodeURIComponent(symbol)}?market=${market}`;
+  if (userId) url += `&user_id=${userId}`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error("Failed to check stock");
   return res.json();
 }
