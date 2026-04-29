@@ -2372,6 +2372,21 @@ async def get_position_monitor(user_id: str, platform: str = None):
     inr_syms = list(set(h["symbol"] for h in items if h.get("currency") == "INR" and h["symbol"] not in ("UNKNOWN", "WALLETBALANCE")))
     live_prices = _fetch_live_prices(usd_syms, inr_syms)
 
+    # Compute sector median PE from screener data for quality assessment
+    sector_pes = {}
+    for market_key in markets:
+        sc_resp = screener_table.query(KeyConditionExpression=Key("market").eq(market_key))
+        from collections import defaultdict
+        by_sector = defaultdict(list)
+        for item in sc_resp.get("Items", []):
+            sector = item.get("sector", "")
+            pe = float(item["forward_pe"]) if item.get("forward_pe") else None
+            if sector and pe and 0 < pe < 200:
+                by_sector[sector].append(pe)
+        for sector, pes in by_sector.items():
+            pes.sort()
+            sector_pes[sector] = pes[len(pes)//2]
+
     results = []
     for h in items:
         sym = h.get("symbol", "")
@@ -2402,7 +2417,12 @@ async def get_position_monitor(user_id: str, platform: str = None):
         # Determine signal
         signal = "HOLD"
         reason = ""
-        is_quality = (op_margins and op_margins > 5 and fwd_pe and 0 < fwd_pe < 35)
+        stock_sector = cached.get("sector", "")
+        sector_median_pe = sector_pes.get(stock_sector, 25)
+        pe_limit = sector_median_pe * 2  # quality = PE below 2x sector median
+        if op_margins and op_margins > 40:
+            pe_limit = sector_median_pe * 3  # moat/monopoly gets 3x sector median
+        is_quality = (op_margins and op_margins > 5 and fwd_pe and 0 < fwd_pe < pe_limit)
 
         if ma200 and price < ma200:
             if is_quality:
@@ -2518,7 +2538,18 @@ async def check_stock(symbol: str, market: str = "US", user_id: str = None):
         except Exception:
             pass
 
-    is_quality = (op_margins and op_margins > 5 and fwd_pe and 0 < fwd_pe < 35)
+    # Sector-relative PE for quality check
+    stock_sector = cached.get("sector") or info.get("sector", "")
+    sector_median_pe = 25  # default
+    if stock_sector:
+        sc_resp = screener_table.query(KeyConditionExpression=Key("market").eq(mkt))
+        sector_pes_list = [float(i["forward_pe"]) for i in sc_resp.get("Items", [])
+                          if i.get("sector") == stock_sector and i.get("forward_pe") and 0 < float(i["forward_pe"]) < 200]
+        if sector_pes_list:
+            sector_pes_list.sort()
+            sector_median_pe = sector_pes_list[len(sector_pes_list)//2]
+    pe_limit = sector_median_pe * 2
+    is_quality = (op_margins and op_margins > 5 and fwd_pe and 0 < fwd_pe < pe_limit)
 
     # Signal for non-portfolio stock
     signal = "NEUTRAL"
