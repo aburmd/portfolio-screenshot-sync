@@ -520,7 +520,7 @@ function PositionMonitorSection({ userId }) {
       <div style={{ ...card, padding: 8, fontSize: 11, lineHeight: 1.6, background: "#fff3e0", border: "1px solid #ffb74d" }}>
         <div style={{ fontWeight: "bold", fontSize: 12, marginBottom: 2 }}>🚦 Signal Logic</div>
         <div><b>Quality Check:</b> OpMgn &gt; 5% AND Fwd PE &lt; peer limit (industry median × 2, or × 3 for moat stocks with OpMgn &gt; 40%)</div>
-        <div>🔴 <b>SELL:</b> Below 200MA + NOT quality | Down &gt;20% + NOT quality</div>
+        <div>🔴 <b>SELL:</b> Below 200MA + NOT quality | Below 200MA + down &gt;20% + NOT quality</div>
         <div>🟡 <b>AVERAGE:</b> Below 200MA + quality + P/L ≤ -15% — average down</div>
         <div>🔵 <b>HOLD:</b> Below 200MA + quality | Pullback in uptrend | Moderate gain (5-20%)</div>
         <div>🟢 <b>TAKE PROFIT:</b> In uptrend + P/L ≥ 20% — sell half, trail rest</div>
