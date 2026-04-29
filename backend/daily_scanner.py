@@ -138,6 +138,7 @@ def scan_stock(sym, market, index_info):
         return {
             "name": index_info.get("name") or info.get("longName") or info.get("shortName", sym),
             "sector": index_info.get("sector") or info.get("sector", ""),
+            "industry": info.get("industry", ""),
             "currency": "INR" if market == "IN" else "USD",
             "current_price": round(price, 2),
             "previous_close": round(info["previousClose"], 2) if info.get("previousClose") else None,

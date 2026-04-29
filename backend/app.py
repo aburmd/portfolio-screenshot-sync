@@ -2372,20 +2372,30 @@ async def get_position_monitor(user_id: str, platform: str = None):
     inr_syms = list(set(h["symbol"] for h in items if h.get("currency") == "INR" and h["symbol"] not in ("UNKNOWN", "WALLETBALANCE")))
     live_prices = _fetch_live_prices(usd_syms, inr_syms)
 
-    # Compute sector median PE from screener data for quality assessment
+    # Compute sector + industry median PE from screener data
     sector_pes = {}
+    industry_pes = {}
     for market_key in markets:
         sc_resp = screener_table.query(KeyConditionExpression=Key("market").eq(market_key))
         from collections import defaultdict
         by_sector = defaultdict(list)
+        by_industry = defaultdict(list)
         for item in sc_resp.get("Items", []):
-            sector = item.get("sector", "")
             pe = float(item["forward_pe"]) if item.get("forward_pe") else None
-            if sector and pe and 0 < pe < 200:
-                by_sector[sector].append(pe)
-        for sector, pes in by_sector.items():
+            if pe and 0 < pe < 200:
+                sector = item.get("sector", "")
+                industry = item.get("industry", "")
+                if sector:
+                    by_sector[sector].append(pe)
+                if industry:
+                    by_industry[industry].append(pe)
+        for s, pes in by_sector.items():
             pes.sort()
-            sector_pes[sector] = pes[len(pes)//2]
+            sector_pes[s] = pes[len(pes)//2]
+        for s, pes in by_industry.items():
+            if len(pes) >= 3:  # need at least 3 peers for meaningful median
+                pes.sort()
+                industry_pes[s] = pes[len(pes)//2]
 
     results = []
     for h in items:
@@ -2418,10 +2428,12 @@ async def get_position_monitor(user_id: str, platform: str = None):
         signal = "HOLD"
         reason = ""
         stock_sector = cached.get("sector", "")
-        sector_median_pe = sector_pes.get(stock_sector, 25)
-        pe_limit = sector_median_pe * 2  # quality = PE below 2x sector median
+        stock_industry = cached.get("industry", "")
+        # Prefer industry (sub-sector) median, fallback to sector median
+        sector_median_pe = industry_pes.get(stock_industry) or sector_pes.get(stock_sector, 25)
+        pe_limit = sector_median_pe * 2  # quality = PE below 2x peer median
         if op_margins and op_margins > 40:
-            pe_limit = sector_median_pe * 3  # moat/monopoly gets 3x sector median
+            pe_limit = sector_median_pe * 3  # moat gets 3x peer median
         is_quality = (op_margins and op_margins > 5 and fwd_pe and 0 < fwd_pe < pe_limit)
 
         if ma200 and price < ma200:
@@ -2466,6 +2478,7 @@ async def get_position_monitor(user_id: str, platform: str = None):
             "above_50ma": price > ma50 if ma50 else None,
             "above_200ma": price > ma200 if ma200 else None,
             "signal": signal, "reason": reason,
+            "sector": stock_sector, "industry": stock_industry,
             "operating_margins": op_margins,
             "revenue_growth": rev_growth,
             "forward_pe": fwd_pe,
