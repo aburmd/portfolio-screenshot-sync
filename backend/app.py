@@ -2203,10 +2203,10 @@ async def run_screener(market: str):
 
 @app.post("/research/ma-scanner/run/{market}")
 async def run_ma_scanner(market: str):
-    """Trigger MA scanner Lambda asynchronously."""
+    """Trigger Daily Stock Scanner Lambda asynchronously."""
     lambda_client = boto3.client("lambda", region_name=REGION)
     lambda_client.invoke(
-        FunctionName=f"portfolio-ma-scanner-{os.environ.get('ENV', 'dev')}",
+        FunctionName=f"portfolio-daily-scanner-{os.environ.get('ENV', 'dev')}",
         InvocationType="Event",
         Payload=json.dumps({"market": market.upper()}),
     )
