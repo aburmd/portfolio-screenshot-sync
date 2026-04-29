@@ -268,11 +268,12 @@ function BuyCandidatesSection() {
       </div>
 
       {/* Score legend */}
-      <div style={{ ...card, padding: 8, fontSize: 11, display: "flex", gap: 16 }}>
-        <span><b>Score = Tech + Fund + Earn (0-8)</b></span>
-        <span style={{ color: "#1565c0" }}>●●● Tech (0-3): MA aligned, 200MA up, near 52w high</span>
-        <span style={{ color: "#2e7d32" }}>●●● Fund (0-3): Op margin +ve, Rev growth +ve, P/E &lt; 30</span>
-        <span style={{ color: "#ff9800" }}>●● Earn (0-2): Recent earnings + dip ≥ 6%</span>
+      <div style={{ ...card, padding: 8, fontSize: 11, lineHeight: 1.6 }}>
+        <div><b>Score = Tech (0-3) + Fund (0-3) + Earn (0-2) = 0-8</b></div>
+        <div style={{ color: "#1565c0" }}>●●● <b>Tech:</b> MA aligned (P&gt;50MA&gt;150MA&gt;200MA) +1 | 200MA trending up +1 | Near 52w high &amp; above 52w low +1</div>
+        <div style={{ color: "#2e7d32" }}>●●● <b>Fund:</b> Op Margin &gt; 0 +1 | Rev Growth &gt; 0 +1 | Fwd PE &lt; peer limit +1</div>
+        <div style={{ color: "#ff9800" }}>●● <b>Earn:</b> Reported earnings last 7 days +1 | Post-earnings dip ≥ 6% +1</div>
+        <div style={{ color: "#666" }}><b>PE Limit:</b> Quality (OpMgn &gt;5%) = 2× industry median PE | Moat (OpMgn &gt;40%) = 3× industry median PE</div>
       </div>
 
       {error && <div style={{ ...card, background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
@@ -351,9 +352,11 @@ function PullbackBuySection() {
       {/* Explanation */}
       <div style={{ ...card, background: "#e8f5e9", border: "1px solid #66bb6a" }}>
         <div style={{ fontSize: 14, fontWeight: "bold", marginBottom: 4 }}>🎯 Pullback Buy — Strong Uptrend + 50MA Pullback</div>
-        <div style={{ fontSize: 12, color: "#333" }}>
-          These stocks are in a confirmed uptrend (price &gt; 150MA &gt; 200MA, 200MA rising) but have pulled back to the 50MA zone (+3% to -8%).
-          The 50MA acts as dynamic support — institutional buyers often step in here. This is a high-probability buy setup.
+        <div style={{ fontSize: 12, color: "#333", lineHeight: 1.6 }}>
+          <b>Filters (all mandatory):</b> Price &gt; 150MA &gt; 200MA | 200MA rising | Price within +3% to -8% of 50MA | Op Margin &gt; 0 | Rev Growth ≥ 0<br/>
+          <b>Scoring:</b> Tech (0-3) + Fund (0-3) + Earn (0-2) = 0-8<br/>
+          <b>PE Check:</b> Quality (OpMgn &gt;5%) = PE &lt; 2× industry median | Moat (OpMgn &gt;40%) = PE &lt; 3× industry median<br/>
+          <b>Why it works:</b> 50MA acts as dynamic support in uptrends — institutional buyers step in here.
         </div>
       </div>
 
@@ -514,6 +517,14 @@ function PositionMonitorSection({ userId }) {
       </div>
 
       {/* Portfolio Monitor */}
+      <div style={{ ...card, padding: 8, fontSize: 11, lineHeight: 1.6, background: "#fff3e0", border: "1px solid #ffb74d" }}>
+        <div style={{ fontWeight: "bold", fontSize: 12, marginBottom: 2 }}>🚦 Signal Logic</div>
+        <div><b>Quality Check:</b> OpMgn &gt; 5% AND Fwd PE &lt; peer limit (industry median × 2, or × 3 for moat stocks with OpMgn &gt; 40%)</div>
+        <div>🔴 <b>SELL:</b> Below 200MA + NOT quality | Down &gt;20% + NOT quality</div>
+        <div>🟡 <b>AVERAGE:</b> Below 200MA + quality + P/L ≤ -15% — average down</div>
+        <div>🔵 <b>HOLD:</b> Below 200MA + quality | Pullback in uptrend | Moderate gain (5-20%)</div>
+        <div>🟢 <b>TAKE PROFIT:</b> In uptrend + P/L ≥ 20% — sell half, trail rest</div>
+      </div>
       <div style={{ ...card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <label style={{ fontSize: 12 }}>Platform<br />
           <select value={platform} onChange={e => setPlatform(e.target.value)} style={{ padding: 6 }}>
@@ -583,7 +594,14 @@ function PositionMonitorSection({ userId }) {
                   <td style={{ padding: 6, textAlign: "right", color: r.above_200ma ? "#2e7d32" : "#c62828" }}>{r.ma200 ? cur + r.ma200.toLocaleString() : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{r.operating_margins != null ? `${r.operating_margins.toFixed(1)}%` : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{r.forward_pe != null ? `${r.forward_pe.toFixed(1)}x` : "—"}</td>
-                  <td style={{ padding: 6, fontSize: 11, maxWidth: 200 }}>{r.reason}</td>
+                  <td style={{ padding: 6, fontSize: 11, maxWidth: 200 }}>
+                    {r.reason}
+                    {r.quality_tier && r.forward_pe && <div style={{ fontSize: 10, color: "#999", marginTop: 2 }}>
+                      {r.quality_tier === "moat" ? "🛡️ Moat" : r.quality_tier === "quality" ? "✅ Quality" : "⚠️ Weak"}
+                      {r.peer_median_pe ? ` | Peer PE: ${r.peer_median_pe}x | Limit: ${r.pe_limit}x` : ""}
+                      {r.industry ? ` | ${r.industry}` : ""}
+                    </div>}
+                  </td>
                 </tr>
               );
             })}

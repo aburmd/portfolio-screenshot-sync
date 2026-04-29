@@ -2220,24 +2220,37 @@ async def get_buy_candidates(market: str):
     resp = table.query(KeyConditionExpression=Key("market").eq(market.upper()))
     items = resp.get("Items", [])
 
+    # Compute industry + sector median PE
+    from collections import defaultdict
+    by_industry = defaultdict(list)
+    by_sector = defaultdict(list)
+    for item in items:
+        pe = float(item["forward_pe"]) if item.get("forward_pe") else None
+        if pe and 0 < pe < 200:
+            if item.get("industry"): by_industry[item["industry"]].append(pe)
+            if item.get("sector"): by_sector[item["sector"]].append(pe)
+    ind_medians = {k: sorted(v)[len(v)//2] for k, v in by_industry.items() if len(v) >= 3}
+    sec_medians = {k: sorted(v)[len(v)//2] for k, v in by_sector.items()}
+
     results = []
     for item in items:
         row = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
 
-        # Technical score (0-3)
         tech_score = int(row.get("trend_score", 0))
 
-        # Fundamental score (0-3)
+        # Fundamental score (0-3) with industry-relative PE
         fund_score = 0
-        if row.get("operating_margins") and row["operating_margins"] > 0:
+        op_margins = row.get("operating_margins")
+        if op_margins and op_margins > 0:
             fund_score += 1
         if row.get("revenue_growth") and row["revenue_growth"] > 0:
             fund_score += 1
         fwd_pe = row.get("forward_pe")
-        if fwd_pe and 0 < fwd_pe < 30:
+        peer_median = ind_medians.get(row.get("industry", "")) or sec_medians.get(row.get("sector", ""), 25)
+        pe_limit = peer_median * 3 if (op_margins and op_margins > 40) else peer_median * 2
+        if fwd_pe and 0 < fwd_pe < pe_limit:
             fund_score += 1
 
-        # Earnings score (0-2)
         earn_score = 0
         if row.get("report_date"):
             earn_score += 1
@@ -2249,6 +2262,9 @@ async def get_buy_candidates(market: str):
         row["fund_score"] = fund_score
         row["earn_score"] = earn_score
         row["total_score"] = total_score
+        row["peer_median_pe"] = round(peer_median, 1)
+        row["pe_limit"] = round(pe_limit, 1)
+        row["quality_tier"] = "moat" if (op_margins and op_margins > 40) else "quality" if (op_margins and op_margins > 5) else "weak"
         results.append(row)
 
     results.sort(key=lambda x: (-x["total_score"], -(x.get("market_cap") or 0)))
@@ -2263,6 +2279,18 @@ async def get_pullback_buys(market: str):
     table = ddb.Table(SCREENER_TABLE)
     resp = table.query(KeyConditionExpression=Key("market").eq(market.upper()))
     items = resp.get("Items", [])
+
+    # Compute industry + sector median PE
+    from collections import defaultdict
+    by_industry = defaultdict(list)
+    by_sector = defaultdict(list)
+    for item in items:
+        pe = float(item["forward_pe"]) if item.get("forward_pe") else None
+        if pe and 0 < pe < 200:
+            if item.get("industry"): by_industry[item["industry"]].append(pe)
+            if item.get("sector"): by_sector[item["sector"]].append(pe)
+    ind_medians = {k: sorted(v)[len(v)//2] for k, v in by_industry.items() if len(v) >= 3}
+    sec_medians = {k: sorted(v)[len(v)//2] for k, v in by_sector.items()}
 
     results = []
     for item in items:
@@ -2300,7 +2328,7 @@ async def get_pullback_buys(market: str):
         if rev_growth is not None and rev_growth <= 0:
             continue
 
-        # Scores
+        # Scores with industry-relative PE
         tech_score = int(row.get("trend_score", 0))
         fund_score = 0
         if op_margins and op_margins > 0:
@@ -2308,7 +2336,9 @@ async def get_pullback_buys(market: str):
         if rev_growth and rev_growth > 0:
             fund_score += 1
         fwd_pe = row.get("forward_pe")
-        if fwd_pe and 0 < fwd_pe < 30:
+        peer_median = ind_medians.get(row.get("industry", "")) or sec_medians.get(row.get("sector", ""), 25)
+        pe_limit = peer_median * 3 if (op_margins and op_margins > 40) else peer_median * 2
+        if fwd_pe and 0 < fwd_pe < pe_limit:
             fund_score += 1
         # Earnings score (0-2) - not filtered, just scored
         earn_score = 0
@@ -2324,6 +2354,9 @@ async def get_pullback_buys(market: str):
         row["earn_score"] = earn_score
         row["total_score"] = total_score
         row["has_earnings"] = bool(row.get("report_date"))
+        row["peer_median_pe"] = round(peer_median, 1)
+        row["pe_limit"] = round(pe_limit, 1)
+        row["quality_tier"] = "moat" if (op_margins and op_margins > 40) else "quality" if (op_margins and op_margins > 5) else "weak"
         results.append(row)
 
     results.sort(key=lambda x: (-x["total_score"], -(x.get("market_cap") or 0)))
@@ -2479,6 +2512,9 @@ async def get_position_monitor(user_id: str, platform: str = None):
             "above_200ma": price > ma200 if ma200 else None,
             "signal": signal, "reason": reason,
             "sector": stock_sector, "industry": stock_industry,
+            "peer_median_pe": round(sector_median_pe, 1),
+            "pe_limit": round(pe_limit, 1),
+            "quality_tier": "moat" if (op_margins and op_margins > 40) else "quality" if (op_margins and op_margins > 5) else "weak",
             "operating_margins": op_margins,
             "revenue_growth": rev_growth,
             "forward_pe": fwd_pe,
