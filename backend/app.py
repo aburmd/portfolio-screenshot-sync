@@ -2426,10 +2426,66 @@ async def refresh_indexes(market: str):
     refresh_index_constituents(market.upper())
     table = ddb.Table(INDEX_CONSTITUENTS_TABLE)
     counts = {}
-    for idx in (["SP500", "NASDAQ100"] if market.upper() == "US" else ["NIFTY500"]):
+    for idx in (["SP500", "NASDAQ100", "CUSTOM_US"] if market.upper() == "US" else ["NIFTY500", "CUSTOM_IN"]):
         resp = table.query(KeyConditionExpression=Key("index_name").eq(idx), Select="COUNT")
         counts[idx] = resp.get("Count", 0)
     return {"market": market.upper(), "indexes": counts}
+
+
+@app.get("/research/custom-symbols/{market}")
+async def get_custom_symbols(market: str):
+    """Get custom symbols added by user."""
+    table = ddb.Table(INDEX_CONSTITUENTS_TABLE)
+    index_name = f"CUSTOM_{market.upper()}"
+    resp = table.query(KeyConditionExpression=Key("index_name").eq(index_name))
+    return [{"symbol": i["symbol"], "name": i.get("name", "")} for i in resp.get("Items", [])]
+
+
+@app.post("/research/custom-symbols/{market}")
+async def add_custom_symbol(market: str, data: dict):
+    """Add a custom symbol to be scanned daily."""
+    from datetime import datetime, timezone as tz
+    table = ddb.Table(INDEX_CONSTITUENTS_TABLE)
+    symbol = data.get("symbol", "").upper().strip()
+    if not symbol:
+        return {"error": "Symbol required"}
+    index_name = f"CUSTOM_{market.upper()}"
+    table.put_item(Item={
+        "index_name": index_name, "symbol": symbol,
+        "name": data.get("name", ""), "sector": data.get("sector", ""),
+        "updated_at": datetime.now(tz.utc).isoformat(),
+    })
+    return {"added": symbol, "index": index_name}
+
+
+@app.delete("/research/custom-symbols/{market}/{symbol}")
+async def delete_custom_symbol(market: str, symbol: str):
+    """Remove a custom symbol."""
+    from urllib.parse import unquote
+    table = ddb.Table(INDEX_CONSTITUENTS_TABLE)
+    table.delete_item(Key={"index_name": f"CUSTOM_{market.upper()}", "symbol": unquote(symbol).upper()})
+    # Also remove from screener table
+    ddb.Table(SCREENER_TABLE).delete_item(Key={"market": market.upper(), "symbol": unquote(symbol).upper()})
+    return {"deleted": symbol}
+
+
+@app.get("/research/missing-symbols/{user_id}")
+async def get_missing_symbols(user_id: str):
+    """Find portfolio symbols not in any index (need to be added as custom)."""
+    holdings = ddb.Table(PORTFOLIO_TABLE).query(KeyConditionExpression=Key("user_id").eq(user_id))
+    screener = ddb.Table(SCREENER_TABLE)
+    missing = {"US": [], "IN": []}
+    seen = set()
+    for h in holdings.get("Items", []):
+        sym = h.get("symbol", "")
+        if sym in ("UNKNOWN", "WALLETBALANCE", "") or sym in seen:
+            continue
+        seen.add(sym)
+        market = "IN" if h.get("currency") == "INR" else "US"
+        resp = screener.get_item(Key={"market": market, "symbol": sym})
+        if not resp.get("Item") or not resp["Item"].get("current_price"):
+            missing[market].append({"symbol": sym, "stock_name": h.get("stock_name", ""), "platform": h.get("platform_name", "")})
+    return missing
 
 
 @app.get("/research/position-monitor/{user_id}")

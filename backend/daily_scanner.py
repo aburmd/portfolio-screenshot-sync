@@ -38,7 +38,7 @@ def get_api_key(provider):
 def get_index_symbols(market):
     table = ddb.Table(INDEX_TABLE)
     symbols = {}
-    indexes = ["SP500", "NASDAQ100"] if market == "US" else ["NIFTY500"]
+    indexes = ["SP500", "NASDAQ100", "CUSTOM_US"] if market == "US" else ["NIFTY500", "CUSTOM_IN"]
     for index_name in indexes:
         resp = table.query(KeyConditionExpression=Key("index_name").eq(index_name))
         for item in resp.get("Items", []):
