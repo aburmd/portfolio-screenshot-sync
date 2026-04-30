@@ -95,6 +95,17 @@ def scan_stock(sym, market, index_info):
         if price < min_price:
             return None
 
+        # Earnings date from calendar
+        earnings_date = None
+        try:
+            cal = t.calendar
+            if cal and "Earnings Date" in cal:
+                ed = cal["Earnings Date"]
+                if isinstance(ed, list) and ed:
+                    earnings_date = ed[0].isoformat() if hasattr(ed[0], "isoformat") else str(ed[0])
+        except Exception:
+            pass
+
         # MAs from history
         hist = t.history(period="1y")
         ma50 = ma150 = ma200 = ma200_slope = high_52w = low_52w = None
@@ -155,25 +166,48 @@ def scan_stock(sym, market, index_info):
             "forward_eps": round(info["forwardEps"], 4) if info.get("forwardEps") else None,
             "trailing_eps": round(info["trailingEps"], 4) if info.get("trailingEps") else None,
             "market_cap": info.get("marketCap", 0),
+            "earnings_date": earnings_date,
         }
     except Exception:
         return None
 
 
 def store_stock(table, market, sym, data, now):
-    """Store complete stock record. Preserves earnings data from earnings screener."""
+    """Store complete stock record. Computes earnings drop if earnings in last 7 days."""
     item = {"market": market, "symbol": sym, "last_updated": now}
 
-    # Preserve earnings fields if they exist
-    try:
-        existing = table.get_item(Key={"market": market, "symbol": sym}).get("Item")
-        if existing:
-            for field in ["report_date", "pre_earnings_price", "day_drop",
-                          "cumulative_drop", "estimate", "first_seen"]:
-                if field in existing:
-                    item[field] = existing[field]
-    except Exception:
-        pass
+    # Check if earnings date is within last 7 days
+    earnings_date = data.get("earnings_date")
+    today = date.today()
+    week_ago = today - timedelta(days=7)
+    if earnings_date:
+        try:
+            ed = date.fromisoformat(earnings_date)
+            if week_ago <= ed <= today:
+                item["report_date"] = earnings_date
+                # Preserve pre_earnings_price from existing record if available
+                try:
+                    existing = table.get_item(Key={"market": market, "symbol": sym}).get("Item")
+                    if existing and existing.get("pre_earnings_price"):
+                        pre = float(existing["pre_earnings_price"])
+                        item["pre_earnings_price"] = existing["pre_earnings_price"]
+                        if pre > 0:
+                            price = data.get("current_price", 0)
+                            item["cumulative_drop"] = Decimal(str(round((price - pre) / pre * 100, 2)))
+                            item["day_drop"] = item["cumulative_drop"]
+                    else:
+                        # First time seeing this earnings — use previous_close as pre-earnings price
+                        pre = data.get("previous_close") or data.get("current_price", 0)
+                        if pre > 0:
+                            item["pre_earnings_price"] = Decimal(str(round(pre, 2)))
+                            price = data.get("current_price", 0)
+                            item["cumulative_drop"] = Decimal(str(round((price - pre) / pre * 100, 2)))
+                            item["day_drop"] = item["cumulative_drop"]
+                except Exception:
+                    pass
+                item["first_seen"] = item.get("first_seen") or now[:10]
+        except ValueError:
+            pass
 
     for k, v in data.items():
         if v is None:
