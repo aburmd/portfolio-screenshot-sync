@@ -620,6 +620,7 @@ function SettingsSection({ userId }) {
   const [missing, setMissing] = useState({ US: [], IN: [] });
   const [newSymbol, setNewSymbol] = useState("");
   const [loading, setLoading] = useState(false);
+  const [scanRunning, setScanRunning] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -652,10 +653,42 @@ function SettingsSection({ userId }) {
     load();
   };
 
+  const handleRunScanner = async (target) => {
+    setScanRunning(true);
+    try {
+      if (target === "US" || target === "BOTH") {
+        await runMaScanner("US");
+      }
+      if (target === "IN" || target === "BOTH") {
+        await runMaScanner("IN");
+      }
+      alert(`Daily Scanner triggered for ${target}. Takes ~3 min per market. Reload data after.`);
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
+    setScanRunning(false);
+  };
+
   const missingList = missing[market] || [];
 
   return (
     <div>
+      {/* Daily Scanner Trigger */}
+      <div style={{ ...card, background: "#e8eaf6", border: "1px solid #7986cb" }}>
+        <h4 style={{ margin: "0 0 8px" }}>🚀 Run Daily Scanner</h4>
+        <div style={{ fontSize: 12, color: "#333", marginBottom: 8 }}>Manually trigger the daily stock scanner to refresh all data (prices, MAs, fundamentals, earnings). Use after adding custom symbols.</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={btnPrimary} onClick={() => handleRunScanner("US")} disabled={scanRunning}>
+            {scanRunning ? "Running..." : "🇺🇸 US Only"}
+          </button>
+          <button style={btnPrimary} onClick={() => handleRunScanner("IN")} disabled={scanRunning}>
+            {scanRunning ? "Running..." : "🇮🇳 India Only"}
+          </button>
+          <button style={{ ...btnPrimary, background: "#2e7d32" }} onClick={() => handleRunScanner("BOTH")} disabled={scanRunning}>
+            {scanRunning ? "Running..." : "🌍 Both Markets"}
+          </button>
+        </div>
+      </div>
       <div style={{ ...card }}>
         <h4 style={{ margin: "0 0 8px" }}>⚙️ Custom Symbols — Stocks scanned daily alongside index stocks</h4>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
