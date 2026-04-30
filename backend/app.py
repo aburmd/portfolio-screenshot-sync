@@ -90,6 +90,21 @@ def _fetch_live_prices_smart(usd_symbols, inr_symbols, screener_cache=None):
     return prices
 
 
+def _get_screener_prices(symbols, markets=None):
+    """Get prices from DDB screener table. Fast, no yfinance calls."""
+    if not markets:
+        markets = ["US", "IN"]
+    screener_table = ddb.Table(SCREENER_TABLE)
+    cache = {}
+    for market in markets:
+        resp = screener_table.query(KeyConditionExpression=Key("market").eq(market))
+        for item in resp.get("Items", []):
+            sym = item["symbol"]
+            if sym in symbols:
+                cache[sym] = float(item["current_price"]) if item.get("current_price") else None
+    return {k: v for k, v in cache.items() if v is not None}
+
+
 # --- User endpoints ---
 
 @app.post("/upload")
@@ -132,14 +147,21 @@ async def get_portfolio(user_id: str):
 
 @app.post("/prices")
 async def get_prices(data: dict):
-    """Fetch current prices. USD symbols as-is, INR symbols with .NS suffix."""
+    """Fetch current prices. Supports live=true for yfinance, default uses DDB screener cache."""
     usd_symbols = [s for s in data.get("symbols", []) if s and s != "UNKNOWN"]
     inr_symbols = [s for s in data.get("inr_symbols", []) if s and s != "UNKNOWN"]
+    live = data.get("live", False)
 
-    all_yf_symbols = usd_symbols + [f"{s}.NS" for s in inr_symbols]
-    if not all_yf_symbols:
+    all_symbols = set(usd_symbols + inr_symbols)
+    if not all_symbols:
         return {}
 
+    # Static mode: use DDB screener prices
+    if not live:
+        return _get_screener_prices(all_symbols)
+
+    # Live mode: fetch from yfinance
+    all_yf_symbols = usd_symbols + [f"{s}.NS" for s in inr_symbols]
     try:
         tickers = yf.Tickers(" ".join(all_yf_symbols))
         prices = {}
@@ -1049,10 +1071,9 @@ async def get_positions(user_id: str, platform: str = None):
     all_items = _decimal_to_float(resp.get("Items", []))
     open_items = all_items if not platform else [i for i in all_items if _platform_matches(i.get("platform_name", ""), platform)]
 
-    # Fetch live prices only for filtered stocks
-    usd_syms = list(set(h["symbol"] for h in open_items if h.get("currency", "USD") == "USD" and h["symbol"] != "UNKNOWN" and h["symbol"] != "WALLETBALANCE"))
-    inr_syms = list(set(h["symbol"] for h in open_items if h.get("currency") == "INR" and h["symbol"] != "UNKNOWN" and h["symbol"] != "WALLETBALANCE"))
-    live_prices = _fetch_live_prices(usd_syms, inr_syms)
+    # Use DDB screener prices (static, fast) instead of live yfinance
+    all_syms = set(h["symbol"] for h in open_items if h["symbol"] not in ("UNKNOWN", "WALLETBALANCE"))
+    live_prices = _get_screener_prices(all_syms)
 
     total_invested = 0
     total_current = 0
@@ -1133,14 +1154,12 @@ async def calculate_xirr(user_id: str, platform: str = None):
             proceeds = float(txn["quantity"]) * float(txn["avg_sold_price"])
             platform_cfs.setdefault(plat, []).append((proceeds, d))
 
-    # Current value per platform — fetch live prices for accurate XIRR
+    # Current value per platform — use DDB screener prices (static, fast)
     today = date.today()
     hold_by_plat = {}
 
-    # Collect symbols by currency for price fetch
-    usd_syms = list(set(h["symbol"] for h in holdings if h.get("currency", "USD") == "USD" and h["symbol"] != "UNKNOWN" and h["symbol"] != "WALLETBALANCE"))
-    inr_syms = list(set(h["symbol"] for h in holdings if h.get("currency") == "INR" and h["symbol"] != "UNKNOWN" and h["symbol"] != "WALLETBALANCE"))
-    live_prices = _fetch_live_prices(usd_syms, inr_syms)
+    all_syms = set(h["symbol"] for h in holdings if h["symbol"] not in ("UNKNOWN", "WALLETBALANCE"))
+    live_prices = _get_screener_prices(all_syms)
 
     for h in holdings:
         p = h.get("platform_name", "unknown")
@@ -2437,10 +2456,9 @@ async def get_position_monitor(user_id: str, platform: str = None):
             row = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
             ma_cache[item["symbol"]] = row
 
-    # Fetch prices: live during market hours, DDB cache otherwise
-    usd_syms = list(set(h["symbol"] for h in items if h.get("currency", "USD") == "USD" and h["symbol"] not in ("UNKNOWN", "WALLETBALANCE")))
-    inr_syms = list(set(h["symbol"] for h in items if h.get("currency") == "INR" and h["symbol"] not in ("UNKNOWN", "WALLETBALANCE")))
-    live_prices = _fetch_live_prices_smart(usd_syms, inr_syms, ma_cache)
+    # Use DDB screener prices (static, fast) — no yfinance calls
+    all_syms = set(h["symbol"] for h in items if h["symbol"] not in ("UNKNOWN", "WALLETBALANCE"))
+    live_prices = _get_screener_prices(all_syms)
 
     # Compute sector + industry median PE from screener data
     sector_pes = {}
@@ -2587,14 +2605,16 @@ async def check_stock(symbol: str, market: str = "US", user_id: str = None):
     cached_resp = screener_table.get_item(Key={"market": mkt, "symbol": symbol.upper()})
     cached = {k: float(v) if hasattr(v, "is_finite") else v for k, v in cached_resp.get("Item", {}).items()} if cached_resp.get("Item") else {}
 
-    # Fetch live data from yfinance
-    try:
-        t = yf.Ticker(yf_sym)
-        info = t.info or {}
-    except Exception as e:
-        return {"error": str(e)}
-
-    price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+    # Use DDB price if available, yfinance only for non-index stocks
+    price = cached.get("current_price", 0)
+    info = {}
+    if not price:
+        try:
+            t = yf.Ticker(yf_sym)
+            info = t.info or {}
+            price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+        except Exception as e:
+            return {"error": str(e)}
     if price <= 0:
         return {"error": f"No price data for {yf_sym}"}
 

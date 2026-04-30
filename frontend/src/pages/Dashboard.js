@@ -53,6 +53,7 @@ function Dashboard({ user }) {
   const [showStatus, setShowStatus] = useState(false);
   const [displayCurrency, setDisplayCurrency] = useState("default");
   const [exchangeRate, setExchangeRate] = useState(null);
+  const [livePrice, setLivePrice] = useState(false);
   const pollRef = useRef(null);
 
   const userId = user?.userId || user?.username;
@@ -65,7 +66,7 @@ function Dashboard({ user }) {
       setPortfolio(data);
       const usdSymbols = [...new Set(data.filter((d) => (!d.currency || d.currency === "USD") && d.symbol && d.symbol !== "UNKNOWN").map((d) => d.symbol))];
       const inrSymbols = [...new Set(data.filter((d) => d.currency === "INR" && d.symbol && d.symbol !== "UNKNOWN").map((d) => d.symbol))];
-      if (usdSymbols.length > 0 || inrSymbols.length > 0) setPrices(await fetchPrices(usdSymbols, inrSymbols));
+      if (usdSymbols.length > 0 || inrSymbols.length > 0) setPrices(await fetchPrices(usdSymbols, inrSymbols, livePrice));
       // Always fetch exchange rate
       if (!exchangeRate) {
         const rate = await fetchExchangeRate("USD", "INR");
@@ -73,7 +74,7 @@ function Dashboard({ user }) {
       }
     } catch (e) { setMessage("Failed to load portfolio"); }
     setLoading(false);
-  }, [userId, exchangeRate]);
+  }, [userId, exchangeRate, livePrice]);
 
   const loadShares = useCallback(async () => {
     if (!userId) return;
@@ -223,6 +224,13 @@ function Dashboard({ user }) {
             }}>{c === "default" ? "Default" : c}</button>
           ))}
           <span style={{ color: "#999", marginLeft: 4 }}>1 USD = ₹{exchangeRate?.toFixed(2)}</span>
+          <span style={{ marginLeft: 12 }}>|</span>
+          <button onClick={() => { setLivePrice(!livePrice); }} style={{
+            padding: "3px 10px", border: livePrice ? "2px solid #2e7d32" : "1px solid #ccc",
+            borderRadius: 3, background: livePrice ? "#e8f5e9" : "#fff",
+            cursor: "pointer", fontWeight: livePrice ? "bold" : "normal", fontSize: 12,
+          }}>{livePrice ? "🟢 Live" : "⚪ Static"}</button>
+          <span style={{ color: "#999", fontSize: 11 }}>{livePrice ? "(yfinance real-time)" : "(DDB daily close)"}</span>
         </div>
       )}
 
