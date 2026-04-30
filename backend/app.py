@@ -53,6 +53,43 @@ def _decimal_to_float(items):
     return items
 
 
+def _is_market_open(currency="USD"):
+    """Check if market is currently open. USD=US market, INR=India market."""
+    from datetime import datetime, timezone, timedelta
+    now_utc = datetime.now(timezone.utc)
+    if currency == "INR":
+        ist = now_utc + timedelta(hours=5, minutes=30)
+        return 9 * 60 + 15 <= ist.hour * 60 + ist.minute <= 15 * 60 + 30 and ist.weekday() < 5
+    else:
+        est = now_utc - timedelta(hours=5)
+        return 9 * 60 + 30 <= est.hour * 60 + est.minute <= 16 * 60 and est.weekday() < 5
+
+
+def _fetch_live_prices_smart(usd_symbols, inr_symbols, screener_cache=None):
+    """Fetch prices: live from yfinance during market hours, DDB cache otherwise."""
+    prices = {}
+    us_open = _is_market_open("USD")
+    in_open = _is_market_open("INR")
+
+    # US stocks
+    if us_open and usd_symbols:
+        prices.update(_fetch_live_prices(usd_symbols, []))
+    elif screener_cache and usd_symbols:
+        for sym in usd_symbols:
+            if sym in screener_cache and screener_cache[sym].get("current_price"):
+                prices[sym] = screener_cache[sym]["current_price"]
+
+    # India stocks
+    if in_open and inr_symbols:
+        prices.update(_fetch_live_prices([], inr_symbols))
+    elif screener_cache and inr_symbols:
+        for sym in inr_symbols:
+            if sym in screener_cache and screener_cache[sym].get("current_price"):
+                prices[sym] = screener_cache[sym]["current_price"]
+
+    return prices
+
+
 # --- User endpoints ---
 
 @app.post("/upload")
@@ -2191,10 +2228,10 @@ async def get_earnings_calendar(market: str):
 
 @app.post("/research/screener/run/{market}")
 async def run_screener(market: str):
-    """Trigger earnings dip screener Lambda asynchronously."""
+    """Trigger Daily Stock Scanner Lambda (handles everything: prices, MAs, fundamentals, earnings)."""
     lambda_client = boto3.client("lambda", region_name=REGION)
     lambda_client.invoke(
-        FunctionName=f"portfolio-screener-{os.environ.get('ENV', 'dev')}",
+        FunctionName=f"portfolio-daily-scanner-{os.environ.get('ENV', 'dev')}",
         InvocationType="Event",
         Payload=json.dumps({"market": market.upper()}),
     )
@@ -2203,7 +2240,7 @@ async def run_screener(market: str):
 
 @app.post("/research/ma-scanner/run/{market}")
 async def run_ma_scanner(market: str):
-    """Trigger Daily Stock Scanner Lambda asynchronously."""
+    """Trigger Daily Stock Scanner Lambda (same as screener/run)."""
     lambda_client = boto3.client("lambda", region_name=REGION)
     lambda_client.invoke(
         FunctionName=f"portfolio-daily-scanner-{os.environ.get('ENV', 'dev')}",
@@ -2400,10 +2437,10 @@ async def get_position_monitor(user_id: str, platform: str = None):
             row = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
             ma_cache[item["symbol"]] = row
 
-    # Fetch live prices in batch
+    # Fetch prices: live during market hours, DDB cache otherwise
     usd_syms = list(set(h["symbol"] for h in items if h.get("currency", "USD") == "USD" and h["symbol"] not in ("UNKNOWN", "WALLETBALANCE")))
     inr_syms = list(set(h["symbol"] for h in items if h.get("currency") == "INR" and h["symbol"] not in ("UNKNOWN", "WALLETBALANCE")))
-    live_prices = _fetch_live_prices(usd_syms, inr_syms)
+    live_prices = _fetch_live_prices_smart(usd_syms, inr_syms, ma_cache)
 
     # Compute sector + industry median PE from screener data
     sector_pes = {}
