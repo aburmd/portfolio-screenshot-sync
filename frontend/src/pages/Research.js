@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell } from "recharts";
-import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, fetchPullbackBuys, fetchPositionMonitor, checkStock, refreshIndexes } from "../services/api";
+import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, fetchPullbackBuys, fetchPositionMonitor, checkStock, refreshIndexes, fetchCustomSymbols, addCustomSymbol, deleteCustomSymbol, fetchMissingSymbols } from "../services/api";
 
 const card = { border: "1px solid #e0e0e0", borderRadius: 8, padding: 16, marginBottom: 16, background: "#fafafa" };
 const btn = { padding: "6px 16px", cursor: "pointer", borderRadius: 4, fontSize: 13 };
@@ -18,12 +18,14 @@ export default function Research({ user }) {
         <button style={{ ...btn, background: tab === "pullback" ? "#2e7d32" : "#fff", color: tab === "pullback" ? "#fff" : "#333", border: tab === "pullback" ? "none" : "1px solid #ccc" }} onClick={() => setTab("pullback")}>🎯 Pullback Buy</button>
         <button style={{ ...btn, background: tab === "monitor" ? "#c62828" : "#fff", color: tab === "monitor" ? "#fff" : "#333", border: tab === "monitor" ? "none" : "1px solid #ccc" }} onClick={() => setTab("monitor")}>🚦 Position Monitor</button>
         <button style={{ ...btn, background: tab === "fundamentals" ? "#1976d2" : "#fff", color: tab === "fundamentals" ? "#fff" : "#333", border: tab === "fundamentals" ? "none" : "1px solid #ccc" }} onClick={() => setTab("fundamentals")}>Fundamentals</button>
+        <button style={{ ...btn, background: tab === "settings" ? "#616161" : "#fff", color: tab === "settings" ? "#fff" : "#333", border: tab === "settings" ? "none" : "1px solid #ccc" }} onClick={() => setTab("settings")}>⚙️ Settings</button>
       </div>
       {tab === "screener" && <ScreenerSection />}
       {tab === "candidates" && <BuyCandidatesSection />}
       {tab === "pullback" && <PullbackBuySection />}
       {tab === "monitor" && <PositionMonitorSection userId={userId} />}
       {tab === "fundamentals" && <FundamentalsSection />}
+      {tab === "settings" && <SettingsSection userId={userId} />}
     </div>
   );
 }
@@ -608,6 +610,117 @@ function PositionMonitorSection({ userId }) {
           </tbody>
         </table>
       ) : !loading && results.length === 0 && <p style={{ color: "#999" }}>No positions found. Use the stock checker above to analyze any symbol.</p>}
+    </div>
+  );
+}
+
+function SettingsSection({ userId }) {
+  const [market, setMarket] = useState("US");
+  const [customs, setCustoms] = useState([]);
+  const [missing, setMissing] = useState({ US: [], IN: [] });
+  const [newSymbol, setNewSymbol] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [c, m] = await Promise.all([fetchCustomSymbols(market), userId ? fetchMissingSymbols(userId) : { US: [], IN: [] }]);
+    setCustoms(c);
+    setMissing(m);
+    setLoading(false);
+  }, [market, userId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleAdd = async (sym) => {
+    await addCustomSymbol(market, sym);
+    setNewSymbol("");
+    load();
+  };
+
+  const handleDelete = async (sym) => {
+    if (window.confirm(`Remove ${sym} from custom list?`)) {
+      await deleteCustomSymbol(market, sym);
+      load();
+    }
+  };
+
+  const handleAddAll = async () => {
+    const syms = missing[market] || [];
+    for (const s of syms) {
+      await addCustomSymbol(market, s.symbol, s.stock_name);
+    }
+    load();
+  };
+
+  const missingList = missing[market] || [];
+
+  return (
+    <div>
+      <div style={{ ...card }}>
+        <h4 style={{ margin: "0 0 8px" }}>⚙️ Custom Symbols — Stocks scanned daily alongside index stocks</h4>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+          <label style={{ fontSize: 12 }}>Market<br />
+            <select value={market} onChange={e => setMarket(e.target.value)} style={{ padding: 6 }}>
+              <option value="US">US</option><option value="IN">India</option>
+            </select>
+          </label>
+          <label style={{ fontSize: 12 }}>Add Symbol<br />
+            <input value={newSymbol} onChange={e => setNewSymbol(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && newSymbol.trim() && handleAdd(newSymbol.trim().toUpperCase())}
+              placeholder="e.g. ACHR" style={{ padding: 6, width: 100 }} />
+          </label>
+          <button style={btnPrimary} onClick={() => newSymbol.trim() && handleAdd(newSymbol.trim().toUpperCase())}>+ Add</button>
+          <button style={{ ...btn, border: "1px solid #ccc" }} onClick={load}>🔄 Reload</button>
+        </div>
+
+        {loading ? <p>Loading...</p> : (
+          <>
+            {customs.length > 0 ? (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: "bold", marginBottom: 4 }}>Custom {market} Symbols ({customs.length}):</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  {customs.map(c => (
+                    <span key={c.symbol} style={{ background: "#e3f2fd", padding: "3px 8px", borderRadius: 4, fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+                      <b>{c.symbol}</b>
+                      {c.name && <span style={{ color: "#666", fontSize: 10 }}>{c.name.substring(0, 15)}</span>}
+                      <button onClick={() => handleDelete(c.symbol)} style={{ background: "none", border: "none", color: "#c62828", cursor: "pointer", fontSize: 14, padding: 0 }}>×</button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : <p style={{ color: "#999", fontSize: 12 }}>No custom symbols for {market}.</p>}
+          </>
+        )}
+      </div>
+
+      {/* Missing symbols from portfolio */}
+      {missingList.length > 0 && (
+        <div style={{ ...card, background: "#fff3e0", border: "1px solid #ffb74d" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <h4 style={{ margin: 0 }}>⚠️ Missing from Daily Scan ({missingList.length} {market} stocks)</h4>
+            <button style={{ ...btnPrimary, background: "#e65100" }} onClick={handleAddAll}>Add All</button>
+          </div>
+          <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>These portfolio stocks are not in S&P 500 / Nasdaq 100 / Nifty 500. Add them to get daily price updates.</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead><tr style={{ background: "#ffe0b2" }}>
+              <th style={{ padding: 4, textAlign: "left" }}>Symbol</th>
+              <th style={{ padding: 4, textAlign: "left" }}>Name</th>
+              <th style={{ padding: 4, textAlign: "left" }}>Platform</th>
+              <th style={{ padding: 4 }}></th>
+            </tr></thead>
+            <tbody>
+              {missingList.map(s => (
+                <tr key={s.symbol}>
+                  <td style={{ padding: 4, fontWeight: "bold" }}>{s.symbol}</td>
+                  <td style={{ padding: 4 }}>{s.stock_name}</td>
+                  <td style={{ padding: 4, color: "#666" }}>{s.platform}</td>
+                  <td style={{ padding: 4 }}><button style={btnPrimary} onClick={() => handleAdd(s.symbol)}>+ Add</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

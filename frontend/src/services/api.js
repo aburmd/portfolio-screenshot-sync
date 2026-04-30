@@ -258,3 +258,24 @@ export async function refreshIndexes(market) {
   if (!res.ok) throw new Error("Index refresh failed");
   return res.json();
 }
+export async function fetchCustomSymbols(market) {
+  const res = await fetch(`${API_BASE}/research/custom-symbols/${market}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+export async function addCustomSymbol(market, symbol, name = "") {
+  const res = await fetch(`${API_BASE}/research/custom-symbols/${market}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ symbol, name }),
+  });
+  return res.json();
+}
+export async function deleteCustomSymbol(market, symbol) {
+  const res = await fetch(`${API_BASE}/research/custom-symbols/${market}/${encodeURIComponent(symbol)}`, { method: "DELETE" });
+  return res.json();
+}
+export async function fetchMissingSymbols(userId) {
+  const res = await fetch(`${API_BASE}/research/missing-symbols/${userId}`);
+  if (!res.ok) return { US: [], IN: [] };
+  return res.json();
+}
