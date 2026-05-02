@@ -24,6 +24,7 @@ import requests
 REGION = os.environ.get("AWS_REGION", "us-west-1")
 SCREENER_TABLE = os.environ.get("SCREENER_TABLE", "portfolio-screener-dev")
 INDEX_TABLE = os.environ.get("INDEX_CONSTITUENTS_TABLE", "portfolio-index-constituents-dev")
+HISTORY_TABLE = os.environ.get("STOCK_HISTORY_TABLE", "portfolio-stock-history-dev")
 
 ddb = boto3.resource("dynamodb", region_name=REGION)
 
@@ -166,9 +167,9 @@ def scan_stock(sym, market, index_info):
             "trailing_eps": round(info["trailingEps"], 4) if info.get("trailingEps") else None,
             "market_cap": info.get("marketCap", 0),
             "earnings_date": earnings_date,
-        }
+        }, hist
     except Exception:
-        return None
+        return None, None
 
 
 def store_stock(table, market, sym, data, now):
@@ -223,6 +224,42 @@ def store_stock(table, market, sym, data, now):
     table.put_item(Item=item)
 
 
+def store_history(market, sym, hist):
+    """Store today's OHLC + compute AGG reference prices from history."""
+    if hist is None or hist.empty:
+        return
+    history_table = ddb.Table(HISTORY_TABLE)
+    pk = f"{market}#{sym}"
+    close = hist["Close"]
+    today_idx = hist.index[-1]
+    ttl_90 = int((datetime.now(timezone.utc) + timedelta(days=90)).timestamp())
+
+    # Store today's OHLC
+    try:
+        today_date = today_idx.strftime("%Y-%m-%d")
+        history_table.put_item(Item={
+            "market_symbol": pk, "date": today_date,
+            "open": Decimal(str(round(float(hist["Open"].iloc[-1]), 2))),
+            "high": Decimal(str(round(float(hist["High"].iloc[-1]), 2))),
+            "low": Decimal(str(round(float(hist["Low"].iloc[-1]), 2))),
+            "close": Decimal(str(round(float(close.iloc[-1]), 2))),
+            "ttl": ttl_90,
+        })
+    except Exception:
+        return
+
+    # Compute AGG reference close prices
+    n = len(close)
+    agg = {"market_symbol": pk, "date": "AGG", "last_updated": datetime.now(timezone.utc).isoformat()}
+    lookbacks = {"close_1d": 1, "close_3d": 3, "close_1w": 5, "close_3w": 15, "close_1m": 22, "close_3m": 66}
+    for key, days in lookbacks.items():
+        if n > days:
+            val = float(close.iloc[-(days + 1)])
+            agg[key] = Decimal(str(round(val, 2)))
+
+    history_table.put_item(Item=agg)
+
+
 def handler(event, context):
     market = event.get("market", "US")
     print(f"=== Daily Stock Scanner: {market} ===")
@@ -243,9 +280,10 @@ def handler(event, context):
         if (i + 1) % 100 == 0:
             print(f"  [{i+1}/{total}] scanned={scanned}")
 
-        data = scan_stock(sym, market, info)
+        data, hist = scan_stock(sym, market, info)
         if data:
             store_stock(table, market, sym, data, now)
+            store_history(market, sym, hist)
             scanned += 1
 
     print(f"Daily Stock Scanner complete: {scanned}/{total} updated")

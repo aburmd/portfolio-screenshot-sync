@@ -38,6 +38,7 @@ BUY_LOTS_TABLE = os.environ.get("BUY_LOTS_TABLE", "portfolio-buy-lots-dev")
 
 SCREENER_TABLE = os.environ.get("SCREENER_TABLE", "portfolio-screener-dev")
 INDEX_CONSTITUENTS_TABLE = os.environ.get("INDEX_CONSTITUENTS_TABLE", "portfolio-index-constituents-dev")
+STOCK_HISTORY_TABLE = os.environ.get("STOCK_HISTORY_TABLE", "portfolio-stock-history-dev")
 FUNDAMENTALS_TABLE = os.environ.get("FUNDAMENTALS_TABLE", "portfolio-fundamentals-dev")
 
 s3 = boto3.client("s3", region_name=REGION)
@@ -180,6 +181,28 @@ async def get_prices(data: dict):
         return prices
     except Exception:
         return {}
+
+
+@app.post("/price-changes")
+async def get_price_changes(data: dict):
+    """Get AGG reference prices for computing 1D/3D/1W/3W/1M/3M % changes."""
+    symbols = data.get("symbols", [])
+    inr_symbols = data.get("inr_symbols", [])
+    if not symbols and not inr_symbols:
+        return {}
+    history_table = ddb.Table(STOCK_HISTORY_TABLE)
+    result = {}
+    for sym in symbols:
+        resp = history_table.get_item(Key={"market_symbol": f"US#{sym}", "date": "AGG"})
+        item = resp.get("Item")
+        if item:
+            result[sym] = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items() if k != "market_symbol"}
+    for sym in inr_symbols:
+        resp = history_table.get_item(Key={"market_symbol": f"IN#{sym}", "date": "AGG"})
+        item = resp.get("Item")
+        if item:
+            result[sym] = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items() if k != "market_symbol"}
+    return result
 
 
 @app.get("/exchange-rate/{from_currency}/{to_currency}")
