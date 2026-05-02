@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
+import "../styles/dashboard.css";
 
-const tableStyle = { width: "100%", borderCollapse: "collapse", marginTop: 12, fontSize: 13 };
-const tdStyle = { padding: "6px 8px", borderBottom: "1px solid #eee" };
 const inputStyle = { width: 70, padding: 3, border: "1px solid #ccc", borderRadius: 3 };
 const btnStyle = { padding: "2px 8px", marginRight: 3, cursor: "pointer", fontSize: 11 };
 
@@ -244,18 +243,14 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
     }
   };
 
-  const thStyle = (isDragging) => ({
-    textAlign: "left", padding: "6px 8px", borderBottom: "2px solid #ddd",
-    background: isDragging ? "#e3f2fd" : "#f5f5f5", whiteSpace: "nowrap",
-    cursor: "grab", userSelect: "none",
-  });
+  const thDragStyle = (isDragging) => isDragging ? { background: "#e3f2fd" } : {};
 
   const totalColSpan = visibleColumns.filter((c) => !["invested", "currentAmt", "pnl", "pnlPct", "invPct", "curPct", "serial"].includes(c.key)).length;
 
   return (
-    <div style={{ overflowX: "auto" }}>
+    <div className="ptable-wrap">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
-        <span style={{ fontSize: 10, color: "#999" }}>💡 Drag column headers to reorder</span>
+        <span className="ptable-drag-hint" style={{ fontSize: 10, color: "#999" }}>💡 Drag column headers to reorder</span>
         {!readOnly && selected.size > 0 && (
           <button style={{ ...btnStyle, border: "1px solid #d32f2f", color: "#d32f2f", padding: "4px 12px" }} onClick={handleDeleteSelected}>
             🗑 Delete Selected ({selected.size})
@@ -267,38 +262,38 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
           </button>
         )}
       </div>
-      <table style={tableStyle}>
+      <table className="ptable">
         <thead>
           <tr>
             {!readOnly && (
-              <th style={{ ...thStyle(false), cursor: "pointer", width: 30 }} onClick={toggleSelectAll}>
+              <th  onClick={toggleSelectAll}>
                 <input type="checkbox" checked={sortedRows.length > 0 && selected.size === sortedRows.length} onChange={toggleSelectAll} />
               </th>
             )}
             {visibleColumns.map((col, i) => (
-              <th key={col.key} style={thStyle(dragIdx === i)}
+              <th key={col.key} style={thDragStyle(dragIdx === i)}
                 draggable onDragStart={() => handleDragStart(i)}
                 onDragOver={handleDragOver} onDrop={() => handleDrop(i)}
                 onClick={() => col.sortable && handleSort(col.key)}>
                 {col.label}{col.sortable && <span style={{ fontSize: 10, color: "#999" }}>{sortArrow(col.key)}</span>}
               </th>
             ))}
-            {!readOnly && <th style={{ ...thStyle(false), cursor: "default" }}>Actions</th>}
+            {!readOnly && <th >Actions</th>}
           </tr>
         </thead>
         <tbody>
           {sortedRows.map((row, idx) => (
             <tr key={row.stock_name} style={selected.has(row.stock_name) ? { background: "#fff3e0" } : {}}>
               {!readOnly && (
-                <td style={tdStyle}>
+                <td >
                   <input type="checkbox" checked={selected.has(row.stock_name)} onChange={() => toggleSelect(row.stock_name)} />
                 </td>
               )}
               {visibleColumns.map((col) => (
-                <td key={col.key} style={tdStyle}>{renderCell(col, row, idx)}</td>
+                <td key={col.key} >{renderCell(col, row, idx)}</td>
               ))}
               {!readOnly && (
-                <td style={tdStyle}>
+                <td >
                   {editingRow === row.stock_name ? (
                     <>
                       <button style={{ ...btnStyle, background: "#4CAF50", color: "#fff", border: "none" }} onClick={() => saveEdit(row.stock_name)}>Save</button>
@@ -317,40 +312,40 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
 
           {rows.length > 0 && (
             <tr style={{ background: "#f5f5f5", fontWeight: "bold" }}>
-              {!readOnly && <td style={tdStyle}></td>}
+              {!readOnly && <td ></td>}
               {visibleColumns.map((col, i) => {
                 const val = renderTotalCell(col);
-                if (col.key === "symbol") return <td key={col.key} style={tdStyle}>TOTAL</td>;
-                return <td key={col.key} style={tdStyle}>{val}</td>;
+                if (col.key === "symbol") return <td key={col.key} >TOTAL</td>;
+                return <td key={col.key} >{val}</td>;
               })}
-              {!readOnly && <td style={tdStyle}></td>}
+              {!readOnly && <td ></td>}
             </tr>
           )}
 
           {!readOnly && (adding ? (
             <tr style={{ background: "#e8f5e9" }}>
-              <td style={tdStyle}></td>
+              <td ></td>
               {visibleColumns.map((col) => {
-                if (col.key === "serial") return <td key={col.key} style={tdStyle}>—</td>;
-                if (col.key === "stock_name") return <td key={col.key} style={tdStyle}><input type="text" placeholder="Stock name" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ ...inputStyle, width: 140 }} /></td>;
-                if (col.key === "quantity") return <td key={col.key} style={tdStyle}><input type="number" step="any" placeholder="Qty" value={newQty} onChange={(e) => setNewQty(e.target.value)} style={inputStyle} /></td>;
-                if (col.key === "avg_buy_price") return <td key={col.key} style={tdStyle}><input type="number" step="any" placeholder="Avg" value={newAvg} onChange={(e) => setNewAvg(e.target.value)} style={inputStyle} /></td>;
-                if (col.key === "platform_name") return <td key={col.key} style={tdStyle}>
+                if (col.key === "serial") return <td key={col.key} >—</td>;
+                if (col.key === "stock_name") return <td key={col.key} ><input type="text" placeholder="Stock name" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ ...inputStyle, width: 140 }} /></td>;
+                if (col.key === "quantity") return <td key={col.key} ><input type="number" step="any" placeholder="Qty" value={newQty} onChange={(e) => setNewQty(e.target.value)} style={inputStyle} /></td>;
+                if (col.key === "avg_buy_price") return <td key={col.key} ><input type="number" step="any" placeholder="Avg" value={newAvg} onChange={(e) => setNewAvg(e.target.value)} style={inputStyle} /></td>;
+                if (col.key === "platform_name") return <td key={col.key} >
                   <select value={newPlatform} onChange={(e) => { setNewPlatform(e.target.value); setNewCurrency(e.target.value === "prostocks" ? "INR" : "USD"); }} style={{ ...inputStyle, width: 90 }}>
                     <option value="manual">manual</option><option value="prostocks">prostocks</option><option value="INDmoney">INDmoney</option><option value="Webull">Webull</option><option value="Robinhood">Robinhood</option>
                   </select>
                 </td>;
-                if (col.key === "symbol") return <td key={col.key} style={tdStyle}>
+                if (col.key === "symbol") return <td key={col.key} >
                   <button style={{ ...btnStyle, background: "#4CAF50", color: "#fff", border: "none" }} onClick={handleAdd} disabled={!newName.trim() || !newQty || !newAvg}>Save</button>
                   <button style={{ ...btnStyle, border: "1px solid #ccc" }} onClick={() => setAdding(false)}>✕</button>
                 </td>;
-                return <td key={col.key} style={tdStyle}></td>;
+                return <td key={col.key} ></td>;
               })}
-              {!readOnly && <td style={tdStyle}></td>}
+              {!readOnly && <td ></td>}
             </tr>
           ) : (
             <tr>
-              <td colSpan={visibleColumns.length + (readOnly ? 0 : 2)} style={{ ...tdStyle, textAlign: "center" }}>
+              <td colSpan={visibleColumns.length + (readOnly ? 0 : 2)} style={{ textAlign: "center" }}>
                 <button style={{ ...btnStyle, border: "1px solid #4CAF50", color: "#4CAF50", padding: "5px 14px" }} onClick={() => setAdding(true)}>+ Add Stock Manually</button>
               </td>
             </tr>

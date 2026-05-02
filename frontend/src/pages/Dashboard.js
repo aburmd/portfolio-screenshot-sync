@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import UploadArea from "../components/UploadArea";
 import PortfolioTable from "../components/PortfolioTable";
 import { fetchPortfolio, uploadScreenshots, uploadCsv, downloadCsv, deleteStock, bulkDeleteStocks, updateStock, addStock, fetchPrices, fetchPriceChanges, fetchExchangeRate, fetchUploadStatus, requestShare, getMyShares, revokeShare } from "../services/api";
+import "../styles/dashboard.css";
 
 const tabStyle = (active) => ({
   padding: "5px 14px", cursor: "pointer", border: "1px solid #ddd",
@@ -18,8 +19,8 @@ function ProcessingStatus({ items }) {
   const totalStocks = completed.reduce((s, i) => s + (i.extracted_stocks || 0), 0);
 
   return (
-    <div style={{ background: "#f5f5f5", border: "1px solid #ddd", borderRadius: 4, padding: "8px 12px", marginTop: 8, fontSize: 12 }}>
-      <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+    <div className="dash-status">
+      <div className="dash-status-row">
         <span>📊 <strong>{completed.length}/{items.length}</strong> files processed</span>
         <span>📈 <strong>{totalStocks}</strong> stocks extracted</span>
         {processing.length > 0 && <span style={{ color: "#f57c00" }}>⏳ {processing.length} processing...</span>}
@@ -195,7 +196,7 @@ function Dashboard({ user }) {
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 30 }}>
         <h3 style={{ margin: 0 }}>My Portfolio <span style={{ fontSize: 13, color: "#999", fontWeight: "normal" }}>({portfolio.length} stocks)</span></h3>
-        <div>
+        <div className="dash-actions">
           <button onClick={() => setShowShare(!showShare)} style={{ marginRight: 8 }}>🔗 Share</button>
           <button onClick={loadPortfolio} disabled={loading} style={{ marginRight: 8 }}>{loading ? "Loading..." : "Refresh"}</button>
           <button onClick={handleDownloadCsv} disabled={portfolio.length === 0}>Download CSV</button>
@@ -203,7 +204,7 @@ function Dashboard({ user }) {
       </div>
 
       {showShare && (
-        <div style={{ background: "#e3f2fd", padding: 12, borderRadius: 4, marginTop: 8 }}>
+        <div className="dash-share-panel">
           <input type="email" placeholder="Viewer's email" value={shareEmail} onChange={(e) => setShareEmail(e.target.value)}
             style={{ padding: 6, width: 220, marginRight: 8 }} />
           <button onClick={handleShare} disabled={!shareEmail.trim()}>Send Request</button>
@@ -212,21 +213,19 @@ function Dashboard({ user }) {
       )}
 
       {platforms.length > 1 && (
-        <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8 }}>
-          <div>
+        <div className="dash-platform-tabs">
             <button style={tabStyle(platformFilter === "all")} onClick={() => setPlatformFilter("all")}>All ({portfolio.length})</button>
             {platforms.map((p) => (
               <button key={p} style={tabStyle(platformFilter === p)} onClick={() => setPlatformFilter(p)}>
                 {p} ({portfolio.filter((s) => s.platform_name === p).length})
               </button>
             ))}
-          </div>
         </div>
       )}
 
       {/* Currency toggle - always visible */}
       {exchangeRate && (
-        <div style={{ marginTop: 8, fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+        <div className="dash-toggles">
           <span>Currency:</span>
           {["default", "USD", "INR"].map((c) => (
             <button key={c} onClick={() => setDisplayCurrency(c)} style={{
@@ -264,14 +263,14 @@ function Dashboard({ user }) {
       {myShares.length > 0 && (
         <div style={{ marginTop: 30 }}>
           <h4>My Shared Dashboards</h4>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr><th style={th}>Shared With</th><th style={th}>Status</th><th style={th}>Action</th></tr></thead>
+          <table className="dash-shares-table">
+            <thead><tr><th>Shared With</th><th>Status</th><th>Action</th></tr></thead>
             <tbody>
               {myShares.map((s) => (
                 <tr key={s.viewer_id}>
-                  <td style={td}>{s.viewer_email}</td>
-                  <td style={td}>{statusLabel(s.status)}</td>
-                  <td style={td}><button onClick={() => handleRevoke(s.viewer_id)} style={{ fontSize: 12 }}>Revoke</button></td>
+                  <td>{s.viewer_email}</td>
+                  <td>{statusLabel(s.status)}</td>
+                  <td><button onClick={() => handleRevoke(s.viewer_id)} style={{ fontSize: 12 }}>Revoke</button></td>
                 </tr>
               ))}
             </tbody>
@@ -281,8 +280,5 @@ function Dashboard({ user }) {
     </div>
   );
 }
-
-const th = { textAlign: "left", padding: "6px 8px", borderBottom: "2px solid #ddd", background: "#f5f5f5" };
-const td = { padding: "6px 8px", borderBottom: "1px solid #eee" };
 
 export default Dashboard;

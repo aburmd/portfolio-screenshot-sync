@@ -1,0 +1,180 @@
+/* Dashboard + PortfolioTable — responsive layout */
+
+/* Dashboard header row */
+.dash-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 30px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dash-header h3 { margin: 0; }
+.dash-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* Platform tabs */
+.dash-platform-tabs {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+/* Currency / Live / Extended % toggle bar */
+.dash-toggles {
+  margin-top: 8px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Share panel */
+.dash-share-panel {
+  background: #e3f2fd;
+  padding: 12px;
+  border-radius: 4px;
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Processing status */
+.dash-status {
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.dash-status-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Portfolio table wrapper */
+.ptable-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.ptable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  font-size: 13px;
+}
+.ptable th {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 2px solid #ddd;
+  background: #f5f5f5;
+  white-space: nowrap;
+  cursor: grab;
+  user-select: none;
+}
+.ptable td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #eee;
+  white-space: nowrap;
+}
+.ptable .total-row {
+  background: #f5f5f5;
+  font-weight: bold;
+}
+
+/* Shared dashboards table */
+.dash-shares-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.dash-shares-table th {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 2px solid #ddd;
+  background: #f5f5f5;
+}
+.dash-shares-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #eee;
+}
+
+/* ===== TABLET (≤ 900px) ===== */
+@media (max-width: 900px) {
+  .dash-header {
+    margin-top: 20px;
+  }
+  .ptable {
+    font-size: 12px;
+  }
+  .ptable th, .ptable td {
+    padding: 4px 6px;
+  }
+  .dash-toggles {
+    font-size: 11px;
+  }
+}
+
+/* ===== MOBILE (≤ 600px) ===== */
+@media (max-width: 600px) {
+  .dash-header {
+    margin-top: 16px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .dash-actions {
+    width: 100%;
+  }
+  .dash-actions button {
+    flex: 1;
+    font-size: 11px;
+    padding: 5px 6px;
+  }
+  .dash-platform-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+  }
+  .dash-platform-tabs button {
+    font-size: 11px;
+    padding: 4px 8px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .dash-toggles {
+    font-size: 10px;
+    gap: 4px;
+  }
+  .dash-toggles button {
+    padding: 2px 6px !important;
+    font-size: 10px !important;
+  }
+  .dash-share-panel {
+    padding: 8px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .dash-share-panel input {
+    width: 100% !important;
+  }
+  .dash-status-row {
+    gap: 8px;
+    font-size: 11px;
+  }
+  .ptable {
+    font-size: 11px;
+  }
+  .ptable th, .ptable td {
+    padding: 3px 4px;
+  }
+  /* Hide drag hint on mobile */
+  .ptable-drag-hint {
+    display: none;
+  }
+}
