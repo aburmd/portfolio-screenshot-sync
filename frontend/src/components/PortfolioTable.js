@@ -33,7 +33,7 @@ const DEFAULT_COLUMNS = [
 
 const STORAGE_KEY = "portfolio_column_order";
 
-function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdate, onAdd, readOnly, displayCurrency, exchangeRate, priceChanges, showExtendedPct, livePrice }) {
+function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdate, onAdd, readOnly, displayCurrency, exchangeRate, priceChanges, showExtendedPct, livePrice, lastClosePrices }) {
   const [editingRow, setEditingRow] = useState(null);
   const [editQty, setEditQty] = useState("");
   const [editAvg, setEditAvg] = useState("");
@@ -108,7 +108,18 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
     }
 
     return { ...row, curPrice, invested, currentAmt, pnl, pnlPct, convRate, dispSymbol, rowCurrency,
-      pct1d: curPrice && priceChanges?.[row.symbol]?.close_1d ? ((curPrice - priceChanges[row.symbol].close_1d) / priceChanges[row.symbol].close_1d * 100) : null,
+      pct1d: (() => {
+        if (!curPrice) return null;
+        if (livePrice) {
+          // Live: intraday change = (live_price - last_close) / last_close
+          const lastClose = lastClosePrices?.[row.symbol];
+          return lastClose ? ((curPrice - lastClose) / lastClose * 100) : null;
+        } else {
+          // Static: last trading day move = (today_close - yesterday_close) / yesterday_close
+          const close1d = priceChanges?.[row.symbol]?.close_1d;
+          return close1d ? ((curPrice - close1d) / close1d * 100) : null;
+        }
+      })(),
       pct3d: curPrice && priceChanges?.[row.symbol]?.close_3d ? ((curPrice - priceChanges[row.symbol].close_3d) / priceChanges[row.symbol].close_3d * 100) : null,
       pct1w: curPrice && priceChanges?.[row.symbol]?.close_1w ? ((curPrice - priceChanges[row.symbol].close_1w) / priceChanges[row.symbol].close_1w * 100) : null,
       pct3w: curPrice && priceChanges?.[row.symbol]?.close_3w ? ((curPrice - priceChanges[row.symbol].close_3w) / priceChanges[row.symbol].close_3w * 100) : null,

@@ -55,6 +55,7 @@ function Dashboard({ user }) {
   const [exchangeRate, setExchangeRate] = useState(null);
   const [livePrice, setLivePrice] = useState(false);
   const [priceChanges, setPriceChanges] = useState({});
+  const [lastClosePrices, setLastClosePrices] = useState({});
   const [showExtendedPct, setShowExtendedPct] = useState(false);
   const pollRef = useRef(null);
 
@@ -69,7 +70,13 @@ function Dashboard({ user }) {
       const usdSymbols = [...new Set(data.filter((d) => (!d.currency || d.currency === "USD") && d.symbol && d.symbol !== "UNKNOWN").map((d) => d.symbol))];
       const inrSymbols = [...new Set(data.filter((d) => d.currency === "INR" && d.symbol && d.symbol !== "UNKNOWN").map((d) => d.symbol))];
       if (usdSymbols.length > 0 || inrSymbols.length > 0) {
-        setPrices(await fetchPrices(usdSymbols, inrSymbols, livePrice));
+        const screenerPrices = await fetchPrices(usdSymbols, inrSymbols, false);
+        setLastClosePrices(screenerPrices);
+        if (livePrice) {
+          setPrices(await fetchPrices(usdSymbols, inrSymbols, true));
+        } else {
+          setPrices(screenerPrices);
+        }
         setPriceChanges(await fetchPriceChanges(usdSymbols, inrSymbols));
       }
       // Always fetch exchange rate
@@ -251,7 +258,8 @@ function Dashboard({ user }) {
         exchangeRate={exchangeRate}
         priceChanges={priceChanges}
         showExtendedPct={showExtendedPct}
-        livePrice={livePrice} />
+        livePrice={livePrice}
+        lastClosePrices={lastClosePrices} />
 
       {myShares.length > 0 && (
         <div style={{ marginTop: 30 }}>
