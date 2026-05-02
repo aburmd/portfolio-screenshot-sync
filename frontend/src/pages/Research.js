@@ -1,10 +1,10 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell } from "recharts";
 import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, fetchPullbackBuys, fetchPositionMonitor, checkStock, refreshIndexes, fetchCustomSymbols, addCustomSymbol, deleteCustomSymbol, scanSymbol, fetchMissingSymbols } from "../services/api";
+import "../styles/research.css";
 
-const card = { border: "1px solid #e0e0e0", borderRadius: 8, padding: 16, marginBottom: 16, background: "#fafafa" };
-const btn = { padding: "6px 16px", cursor: "pointer", borderRadius: 4, fontSize: 13 };
-const btnPrimary = { ...btn, background: "#1976d2", color: "#fff", border: "none" };
+const btnPrimary = { padding: "6px 16px", cursor: "pointer", borderRadius: 4, fontSize: 13, background: "#1976d2", color: "#fff", border: "none" };
+const btnSecondary = { padding: "6px 16px", cursor: "pointer", borderRadius: 4, fontSize: 13, border: "1px solid #ccc", background: "#fff" };
 
 const pctCell = (val) => {
   if (val == null) return <span style={{ color: "#999" }}>—</span>;
@@ -15,7 +15,7 @@ const computePct = (curPrice, refPrice) => (curPrice && refPrice) ? ((curPrice -
 const fmtLarge = (v) => { if (v == null) return "—"; const abs = Math.abs(v); if (abs >= 1e12) return `${(v/1e12).toFixed(1)}T`; if (abs >= 1e9) return `${(v/1e9).toFixed(1)}B`; if (abs >= 1e6) return `${(v/1e6).toFixed(0)}M`; return v.toLocaleString(); };
 const SortHeader = ({ label, sortKey, sortConfig, onSort, align }) => {
   const arrow = sortConfig?.key === sortKey ? (sortConfig.dir === "asc" ? " ↑" : " ↓") : " ↕";
-  return <th style={{ padding: 6, textAlign: align || "right", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }} onClick={() => onSort(sortKey)}>{label}{arrow}</th>;
+  return <th style={{ textAlign: align || "right", cursor: "pointer", userSelect: "none" }} onClick={() => onSort(sortKey)}>{label}{arrow}</th>;
 };
 const applySortAndPct = (rows, sortConfig) => {
   const sorted = [...rows].sort((a, b) => {
@@ -37,19 +37,24 @@ const enrichPct = (rows) => rows.map(r => ({
   pct3m: computePct(r.current_price, r.close_3m),
 }));
 
+const tabBtn = (active, color = "#1976d2") => ({
+  background: active ? color : "#fff", color: active ? "#fff" : "#333",
+  border: active ? "none" : "1px solid #ccc",
+});
+
 export default function Research({ user }) {
   const [tab, setTab] = useState("screener");
   const userId = user?.username || user?.userId || "";
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
+    <div className="research-page">
       <h2 style={{ marginBottom: 16 }}>📊 Research</h2>
-      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-        <button style={{ ...btn, background: tab === "screener" ? "#1976d2" : "#fff", color: tab === "screener" ? "#fff" : "#333", border: tab === "screener" ? "none" : "1px solid #ccc" }} onClick={() => setTab("screener")}>Earnings Screener</button>
-        <button style={{ ...btn, background: tab === "candidates" ? "#1976d2" : "#fff", color: tab === "candidates" ? "#fff" : "#333", border: tab === "candidates" ? "none" : "1px solid #ccc" }} onClick={() => setTab("candidates")}>Buy Candidates</button>
-        <button style={{ ...btn, background: tab === "pullback" ? "#2e7d32" : "#fff", color: tab === "pullback" ? "#fff" : "#333", border: tab === "pullback" ? "none" : "1px solid #ccc" }} onClick={() => setTab("pullback")}>🎯 Pullback Buy</button>
-        <button style={{ ...btn, background: tab === "monitor" ? "#c62828" : "#fff", color: tab === "monitor" ? "#fff" : "#333", border: tab === "monitor" ? "none" : "1px solid #ccc" }} onClick={() => setTab("monitor")}>🚦 Position Monitor</button>
-        <button style={{ ...btn, background: tab === "fundamentals" ? "#1976d2" : "#fff", color: tab === "fundamentals" ? "#fff" : "#333", border: tab === "fundamentals" ? "none" : "1px solid #ccc" }} onClick={() => setTab("fundamentals")}>Fundamentals</button>
-        <button style={{ ...btn, background: tab === "settings" ? "#616161" : "#fff", color: tab === "settings" ? "#fff" : "#333", border: tab === "settings" ? "none" : "1px solid #ccc" }} onClick={() => setTab("settings")}>⚙️ Settings</button>
+      <div className="research-tabs">
+        <button style={tabBtn(tab === "screener")} onClick={() => setTab("screener")}>Earnings Screener</button>
+        <button style={tabBtn(tab === "candidates")} onClick={() => setTab("candidates")}>Buy Candidates</button>
+        <button style={tabBtn(tab === "pullback", "#2e7d32")} onClick={() => setTab("pullback")}>🎯 Pullback Buy</button>
+        <button style={tabBtn(tab === "monitor", "#c62828")} onClick={() => setTab("monitor")}>🚦 Position Monitor</button>
+        <button style={tabBtn(tab === "fundamentals")} onClick={() => setTab("fundamentals")}>Fundamentals</button>
+        <button style={tabBtn(tab === "settings", "#616161")} onClick={() => setTab("settings")}>⚙️ Settings</button>
       </div>
       {tab === "screener" && <ScreenerSection />}
       {tab === "candidates" && <BuyCandidatesSection />}
@@ -104,7 +109,7 @@ function ScreenerSection() {
 
   return (
     <div>
-      <div style={{ ...card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div className="r-card r-controls">
         <label style={{ fontSize: 12 }}>Market<br />
           <select value={market} onChange={e => setMarket(e.target.value)} style={{ padding: 6 }}>
             <option value="US">US (S&P 500 + Nasdaq 100)</option>
@@ -112,11 +117,11 @@ function ScreenerSection() {
           </select>
         </label>
         <button style={btnPrimary} onClick={handleRun} disabled={running}>{running ? "Triggering..." : "🔍 Run Screener"}</button>
-        <button style={{ ...btn, border: "1px solid #ccc" }} onClick={() => refreshIndexes(market).then(r => alert(`Indexes refreshed: ${JSON.stringify(r.indexes)}`)).catch(e => alert(e.message))}>↻ Refresh Indexes</button>
-        <button style={{ ...btn, border: "1px solid #ccc" }} onClick={loadResults}>🔄 Reload</button>
+        <button style={btnSecondary} onClick={() => refreshIndexes(market).then(r => alert(`Indexes refreshed: ${JSON.stringify(r.indexes)}`)).catch(e => alert(e.message))}>↻ Refresh Indexes</button>
+        <button style={btnSecondary} onClick={loadResults}>🔄 Reload</button>
       </div>
 
-      <div style={{ ...card, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", padding: 10 }}>
+      <div className="r-card r-filters">
         <span style={{ fontSize: 12, fontWeight: "bold" }}>Filters:</span>
         <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
           <input type="checkbox" checked={peFilter} onChange={e => setPeFilter(e.target.checked)} />
@@ -134,11 +139,11 @@ function ScreenerSection() {
         <span style={{ fontSize: 11, color: "#999" }}>{filtered.length} of {results.length} stocks</span>
       </div>
 
-      {error && <div style={{ ...card, background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
+      {error && <div className="r-card" style={{ background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
 
       {loading ? <p>Loading...</p> : filtered.length > 0 ? (
-        <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <div className="r-table-wrap">
+        <table className="r-table">
           <thead><tr style={{ background: "#f5f5f5" }}>
             <SortHeader label="Symbol" sortKey="symbol" sortConfig={sortConfig} onSort={onSort} align="left" />
             <SortHeader label="Name" sortKey="name" sortConfig={sortConfig} onSort={onSort} align="left" />
@@ -184,7 +189,7 @@ function ScreenerSection() {
       ) : !loading && <p style={{ color: "#999" }}>No results. Click "🔍 Run Screener" to scan (takes ~2 min), then "🔄 Reload".</p>}
 
       {Object.keys(byDate).length > 0 && (
-        <div style={{ ...card, marginTop: 16 }}>
+        <div className="r-card" style={{ marginTop: 16 }}>
           <h4 style={{ margin: "0 0 8px" }}>📅 Earnings This Week — {results.length} stocks from {market === "US" ? "S&P 500 + Nasdaq 100" : "Nifty 500"}</h4>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {Object.entries(byDate).sort((a, b) => b[0].localeCompare(a[0])).map(([dt, stocks]) => (
@@ -246,14 +251,14 @@ function BuyCandidatesSection() {
 
   return (
     <div>
-      <div style={{ ...card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div className="r-card r-controls">
         <label style={{ fontSize: 12 }}>Market<br />
           <select value={market} onChange={e => setMarket(e.target.value)} style={{ padding: 6 }}>
             <option value="US">US</option><option value="IN">India</option>
           </select>
         </label>
         <button style={btnPrimary} onClick={handleRunMA} disabled={scanning}>{scanning ? "Triggering..." : "📈 Run MA Scanner"}</button>
-        <button style={{ ...btn, border: "1px solid #ccc" }} onClick={loadResults}>🔄 Reload</button>
+        <button style={btnSecondary} onClick={loadResults}>🔄 Reload</button>
         <label style={{ fontSize: 12 }}>Min Score<br />
           <select value={minScore} onChange={e => setMinScore(parseInt(e.target.value))} style={{ padding: 6 }}>
             {[0,1,2,3,4,5,6,7,8].map(n => <option key={n} value={n}>{n}/8</option>)}
@@ -271,7 +276,7 @@ function BuyCandidatesSection() {
         <span style={{ fontSize: 11, color: "#999" }}>{filtered.length} of {results.length} stocks</span>
       </div>
 
-      <div style={{ ...card, padding: 8, fontSize: 11, lineHeight: 1.6 }}>
+      <div className="r-card r-legend">
         <div><b>Score = Tech (0-3) + Fund (0-3) + Earn (0-2) = 0-8</b></div>
         <div style={{ color: "#1565c0" }}>●●● <b>Tech:</b> MA aligned (P&gt;50MA&gt;150MA&gt;200MA) +1 | 200MA trending up +1 | Near 52w high &amp; above 52w low +1</div>
         <div style={{ color: "#2e7d32" }}>●●● <b>Fund:</b> Op Margin &gt; 0 +1 | Rev Growth &gt; 0 +1 | Fwd PE &lt; peer limit +1</div>
@@ -279,11 +284,11 @@ function BuyCandidatesSection() {
         <div style={{ color: "#666" }}><b>PE Limit:</b> Quality (OpMgn &gt;5%) = 2× industry median PE | Moat (OpMgn &gt;40%) = 3× industry median PE</div>
       </div>
 
-      {error && <div style={{ ...card, background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
+      {error && <div className="r-card" style={{ background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
 
       {loading ? <p>Loading...</p> : filtered.length > 0 ? (
-        <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <div className="r-table-wrap">
+        <table className="r-table">
           <thead><tr style={{ background: "#f5f5f5" }}>
             <SortHeader label="Symbol" sortKey="symbol" sortConfig={sortConfig} onSort={onSort} align="left" />
             <SortHeader label="Name" sortKey="name" sortConfig={sortConfig} onSort={onSort} align="left" />
@@ -370,7 +375,7 @@ function PullbackBuySection() {
 
   return (
     <div>
-      <div style={{ ...card, background: "#e8f5e9", border: "1px solid #66bb6a" }}>
+      <div className="r-card" style={{ background: "#e8f5e9", border: "1px solid #66bb6a" }}>
         <div style={{ fontSize: 14, fontWeight: "bold", marginBottom: 4 }}>🎯 Pullback Buy — Strong Uptrend + 50MA Pullback</div>
         <div style={{ fontSize: 12, color: "#333", lineHeight: 1.6 }}>
           <b>Filters (all mandatory):</b> Price &gt; 150MA &gt; 200MA | 200MA rising | Price within +3% to -8% of 50MA | Op Margin &gt; 0 | Rev Growth ≥ 0<br/>
@@ -380,13 +385,13 @@ function PullbackBuySection() {
         </div>
       </div>
 
-      <div style={{ ...card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div className="r-card r-controls">
         <label style={{ fontSize: 12 }}>Market<br />
           <select value={market} onChange={e => setMarket(e.target.value)} style={{ padding: 6 }}>
             <option value="US">US</option><option value="IN">India</option>
           </select>
         </label>
-        <button style={{ ...btn, border: "1px solid #ccc" }} onClick={loadResults}>🔄 Reload</button>
+        <button style={btnSecondary} onClick={loadResults}>🔄 Reload</button>
         <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
           <input type="checkbox" checked={peFilter} onChange={e => setPeFilter(e.target.checked)} />
           Fwd P/E &lt; <input type="number" value={peThreshold} onChange={e => setPeThreshold(parseFloat(e.target.value) || 0)} style={{ width: 40, padding: 2, marginLeft: 2 }} disabled={!peFilter} />
@@ -397,11 +402,11 @@ function PullbackBuySection() {
         <span style={{ fontSize: 11, color: "#999" }}>{filtered.length} stocks in pullback zone</span>
       </div>
 
-      {error && <div style={{ ...card, background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
+      {error && <div className="r-card" style={{ background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
 
       {loading ? <p>Loading...</p> : filtered.length > 0 ? (
-        <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <div className="r-table-wrap">
+        <table className="r-table">
           <thead><tr style={{ background: "#e8f5e9" }}>
             <SortHeader label="Symbol" sortKey="symbol" sortConfig={sortConfig} onSort={onSort} align="left" />
             <SortHeader label="Name" sortKey="name" sortConfig={sortConfig} onSort={onSort} align="left" />
@@ -524,7 +529,7 @@ function PositionMonitorSection({ userId }) {
   return (
     <div>
       {/* Stock Checker */}
-      <div style={{ ...card, background: "#f3e5f5", border: "1px solid #ce93d8" }}>
+      <div className="r-card" style={{ background: "#f3e5f5", border: "1px solid #ce93d8" }}>
         <div style={{ fontSize: 13, fontWeight: "bold", marginBottom: 8 }}>🔍 Check Any Stock</div>
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
           <label style={{ fontSize: 12 }}>Symbol<br />
@@ -556,7 +561,7 @@ function PositionMonitorSection({ userId }) {
       </div>
 
       {/* Portfolio Monitor */}
-      <div style={{ ...card, padding: 8, fontSize: 11, lineHeight: 1.6, background: "#fff3e0", border: "1px solid #ffb74d" }}>
+      <div className="r-card r-legend" style={{ background: "#fff3e0", border: "1px solid #ffb74d" }}>
         <div style={{ fontWeight: "bold", fontSize: 12, marginBottom: 2 }}>🚦 Signal Logic</div>
         <div><b>Quality Check:</b> OpMgn &gt; 5% AND PE &lt; peer limit. PE = Forward PE (F), fallback to Trailing PE (T) if no analyst coverage.</div>
         <div>🔴 <b>SELL:</b> Below 200MA + NOT quality | Below 200MA + down &gt;20% + NOT quality</div>
@@ -564,14 +569,14 @@ function PositionMonitorSection({ userId }) {
         <div>🔵 <b>HOLD:</b> Below 200MA + quality | Pullback in uptrend | Moderate gain (5-20%)</div>
         <div>🟢 <b>TAKE PROFIT:</b> In uptrend + P/L ≥ 20% — sell half, trail rest</div>
       </div>
-      <div style={{ ...card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div className="r-card r-controls">
         <label style={{ fontSize: 12 }}>Platform<br />
           <select value={platform} onChange={e => setPlatform(e.target.value)} style={{ padding: 6 }}>
             <option value="all">All Platforms</option>
             {platforms.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         </label>
-        <button style={{ ...btn, border: "1px solid #ccc" }} onClick={loadResults}>🔄 Reload</button>
+        <button style={btnSecondary} onClick={loadResults}>🔄 Reload</button>
         <label style={{ fontSize: 12 }}>Signal<br />
           <select value={signalFilter} onChange={e => setSignalFilter(e.target.value)} style={{ padding: 6 }}>
             <option value="all">All</option>
@@ -589,7 +594,7 @@ function PositionMonitorSection({ userId }) {
       </div>
 
       {results.length > 0 && (
-        <div style={{ ...card, display: "flex", gap: 16, flexWrap: "wrap", padding: 10 }}>
+        <div className="r-card r-filters">
           <span style={{ fontSize: 12 }}><b>{results.length}</b> positions</span>
           {sellCount > 0 && <span style={{ fontSize: 12, color: "#c62828" }}>🔴 {sellCount} SELL</span>}
           {profitCount > 0 && <span style={{ fontSize: 12, color: "#2e7d32" }}>🟢 {profitCount} TAKE PROFIT</span>}
@@ -598,10 +603,10 @@ function PositionMonitorSection({ userId }) {
         </div>
       )}
 
-      {error && <div style={{ ...card, background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
+      {error && <div className="r-card" style={{ background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
 
       {loading ? <p>Loading (fetching live prices)...</p> : filtered.length > 0 ? (
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <table className="r-table">
           <thead><tr style={{ background: "#f5f5f5" }}>
             <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
             <th style={{ padding: 6, textAlign: "center" }}>Signal</th>
@@ -725,7 +730,7 @@ function SettingsSection({ userId }) {
   return (
     <div>
       {/* Daily Scanner Trigger */}
-      <div style={{ ...card, background: "#e8eaf6", border: "1px solid #7986cb" }}>
+      <div className="r-card" style={{ background: "#e8eaf6", border: "1px solid #7986cb" }}>
         <h4 style={{ margin: "0 0 8px" }}>🚀 Run Daily Scanner</h4>
         <div style={{ fontSize: 12, color: "#333", marginBottom: 8 }}>Manually trigger the daily stock scanner to refresh all data (prices, MAs, fundamentals, earnings). Use after adding custom symbols.</div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -740,7 +745,7 @@ function SettingsSection({ userId }) {
           </button>
         </div>
       </div>
-      <div style={{ ...card }}>
+      <div className="r-card">
         <h4 style={{ margin: "0 0 8px" }}>⚙️ Custom Symbols — Stocks scanned daily alongside index stocks</h4>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
           <label style={{ fontSize: 12 }}>Market<br />
@@ -754,7 +759,7 @@ function SettingsSection({ userId }) {
               placeholder="e.g. ACHR" style={{ padding: 6, width: 100 }} />
           </label>
           <button style={btnPrimary} onClick={() => newSymbol.trim() && handleAdd(newSymbol.trim().toUpperCase())}>+ Add</button>
-          <button style={{ ...btn, border: "1px solid #ccc" }} onClick={load}>🔄 Reload</button>
+          <button style={btnSecondary} onClick={load}>🔄 Reload</button>
         </div>
 
         {loading ? <p>Loading...</p> : (
@@ -779,13 +784,13 @@ function SettingsSection({ userId }) {
 
       {/* Missing symbols from portfolio */}
       {missingList.length > 0 && (
-        <div style={{ ...card, background: "#fff3e0", border: "1px solid #ffb74d" }}>
+        <div className="r-card" style={{ background: "#fff3e0", border: "1px solid #ffb74d" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <h4 style={{ margin: 0 }}>⚠️ Missing from Daily Scan ({missingList.length} {market} stocks)</h4>
             <button style={{ ...btnPrimary, background: "#e65100" }} onClick={handleAddAll}>Add All</button>
           </div>
           <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>These portfolio stocks are not in S&P 500 / Nasdaq 100 / Nifty 500. Add them to get daily price updates.</div>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <table className="r-table">
             <thead><tr style={{ background: "#ffe0b2" }}>
               <th style={{ padding: 4, textAlign: "left" }}>Symbol</th>
               <th style={{ padding: 4, textAlign: "left" }}>Name</th>
@@ -855,7 +860,7 @@ function FundamentalsSection() {
 
   return (
     <div>
-      <div style={{ ...card, display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+      <div className="r-card r-controls">
         <label style={{ fontSize: 12 }}>Symbol<br /><input value={symbol} onChange={e => setSymbol(e.target.value)} onKeyDown={handleKeyDown} placeholder="e.g. AAPL, RELIANCE" style={{ padding: 6, width: 160, fontSize: 14 }} /></label>
         <label style={{ fontSize: 12 }}>Market<br /><select value={market} onChange={e => setMarket(e.target.value)} style={{ padding: 6 }}><option value="US">US</option><option value="IN">India (NSE)</option></select></label>
         <label style={{ fontSize: 12 }}>Period<br /><select value={period} onChange={e => setPeriod(e.target.value)} style={{ padding: 6 }}><option value="annual">Annual</option><option value="quarterly">Quarterly</option></select></label>
@@ -863,10 +868,10 @@ function FundamentalsSection() {
         {data?.cached && <span style={{ fontSize: 11, color: "#999" }}>📦 cached</span>}
       </div>
 
-      {error && <div style={{ ...card, background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
+      {error && <div className="r-card" style={{ background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
 
       {data && !error && (<>
-        <div style={{ ...card, background: "#e3f2fd" }}>
+        <div className="r-card" style={{ background: "#e3f2fd" }}>
           <div style={{ fontSize: 20, fontWeight: "bold" }}>{data.company_name}</div>
           <div style={{ fontSize: 14, color: "#666", marginTop: 4 }}>
             {data.display_symbol || data.symbol} · {data.currency} · Price: {curSym}{data.current_price?.toLocaleString()}
@@ -877,7 +882,7 @@ function FundamentalsSection() {
         </div>
 
         {chartData.length > 0 && (
-          <div style={card}>
+          <div className="r-card">
             <h4 style={{ margin: "0 0 12px" }}>Operating Income ({opUnit}) & P/E Ratio</h4>
             <ResponsiveContainer width="100%" height={400}>
               <ComposedChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 20 }}>
@@ -918,9 +923,9 @@ function FundamentalsSection() {
           </div>
         )}
 
-        <div style={card}>
+        <div className="r-card">
           <h4 style={{ margin: "0 0 8px" }}>Financials Detail</h4>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table className="r-table">
             <thead><tr style={{ background: "#f5f5f5" }}>
               <th style={{ padding: 6, textAlign: "left" }}>Year</th>
               <th style={{ padding: 6, textAlign: "right" }}>Revenue</th>

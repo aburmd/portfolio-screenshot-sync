@@ -1,0 +1,235 @@
+/* Research page — responsive layout */
+
+.research-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+/* Tab bar */
+.research-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.research-tabs button {
+  padding: 6px 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* Cards */
+.r-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  background: #fafafa;
+}
+
+/* Control bars (market selector, buttons, filters) */
+.r-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.r-filters {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px;
+}
+.r-filters label,
+.r-controls label {
+  font-size: 12px;
+}
+.r-filter-item {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Tables */
+.r-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.r-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.r-table th {
+  padding: 6px;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  background: inherit;
+}
+.r-table td {
+  padding: 6px;
+  white-space: nowrap;
+}
+.r-table .col-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Earnings calendar */
+.r-calendar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.r-calendar-day {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 8px;
+  min-width: 200px;
+  flex: 1;
+}
+
+/* Score legend */
+.r-legend {
+  padding: 8px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* Signal badges */
+.r-signal {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: bold;
+  font-size: 11px;
+}
+
+/* Stock checker result */
+.r-check-result {
+  margin-top: 8px;
+  padding: 8px;
+  background: #fff;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* Fundamentals chart area */
+.r-chart-controls {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 8px 0;
+  border-top: 1px solid #eee;
+}
+
+/* Custom symbol chips */
+.r-chip {
+  background: #e3f2fd;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ===== TABLET (≤ 900px) ===== */
+@media (max-width: 900px) {
+  .research-page {
+    padding: 12px 8px;
+  }
+  .research-tabs button {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+  .r-card {
+    padding: 12px;
+  }
+  .r-table {
+    font-size: 11px;
+  }
+  .r-table td, .r-table th {
+    padding: 4px;
+  }
+  .r-table .col-name {
+    max-width: 100px;
+  }
+  .r-legend {
+    font-size: 10px;
+  }
+}
+
+/* ===== MOBILE (≤ 600px) ===== */
+@media (max-width: 600px) {
+  .research-page {
+    padding: 8px 4px;
+  }
+  .research-page h2 {
+    font-size: 18px;
+    margin-bottom: 8px;
+  }
+  .research-tabs {
+    gap: 3px;
+    margin-bottom: 10px;
+  }
+  .research-tabs button {
+    padding: 4px 8px;
+    font-size: 11px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .r-card {
+    padding: 8px;
+    margin-bottom: 10px;
+    border-radius: 6px;
+  }
+  .r-controls {
+    gap: 6px;
+  }
+  .r-filters {
+    gap: 8px;
+    padding: 6px;
+  }
+  .r-table {
+    font-size: 10px;
+  }
+  .r-table td, .r-table th {
+    padding: 3px;
+  }
+  .r-table .col-name {
+    max-width: 80px;
+  }
+  .r-calendar-day {
+    min-width: 150px;
+  }
+  .r-legend {
+    font-size: 9px;
+    padding: 6px;
+  }
+  .r-check-result {
+    font-size: 11px;
+  }
+  .r-chart-controls {
+    gap: 8px;
+  }
+  .r-chart-controls input {
+    width: 70px !important;
+  }
+
+  /* Fundamentals company header */
+  .r-company-header {
+    font-size: 16px !important;
+  }
+  .r-company-meta {
+    font-size: 12px !important;
+  }
+}
