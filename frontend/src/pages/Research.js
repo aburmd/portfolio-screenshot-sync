@@ -6,6 +6,37 @@ const card = { border: "1px solid #e0e0e0", borderRadius: 8, padding: 16, margin
 const btn = { padding: "6px 16px", cursor: "pointer", borderRadius: 4, fontSize: 13 };
 const btnPrimary = { ...btn, background: "#1976d2", color: "#fff", border: "none" };
 
+const pctCell = (val) => {
+  if (val == null) return <span style={{ color: "#999" }}>—</span>;
+  const color = val > 0 ? "#2e7d32" : val < 0 ? "#c62828" : "#666";
+  return <span style={{ color, fontWeight: "bold" }}>{val > 0 ? "+" : ""}{val.toFixed(1)}%</span>;
+};
+const computePct = (curPrice, refPrice) => (curPrice && refPrice) ? ((curPrice - refPrice) / refPrice * 100) : null;
+const fmtLarge = (v) => { if (v == null) return "—"; const abs = Math.abs(v); if (abs >= 1e12) return `${(v/1e12).toFixed(1)}T`; if (abs >= 1e9) return `${(v/1e9).toFixed(1)}B`; if (abs >= 1e6) return `${(v/1e6).toFixed(0)}M`; return v.toLocaleString(); };
+const SortHeader = ({ label, sortKey, sortConfig, onSort, align }) => {
+  const arrow = sortConfig?.key === sortKey ? (sortConfig.dir === "asc" ? " ↑" : " ↓") : " ↕";
+  return <th style={{ padding: 6, textAlign: align || "right", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }} onClick={() => onSort(sortKey)}>{label}{arrow}</th>;
+};
+const applySortAndPct = (rows, sortConfig) => {
+  const sorted = [...rows].sort((a, b) => {
+    const av = a[sortConfig.key], bv = b[sortConfig.key];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return sortConfig.dir === "asc" ? (av < bv ? -1 : av > bv ? 1 : 0) : (av > bv ? -1 : av < bv ? 1 : 0);
+  });
+  return sorted;
+};
+const enrichPct = (rows) => rows.map(r => ({
+  ...r,
+  pct1d: computePct(r.current_price, r.close_1d),
+  pct3d: computePct(r.current_price, r.close_3d),
+  pct1w: computePct(r.current_price, r.close_1w),
+  pct3w: computePct(r.current_price, r.close_3w),
+  pct1m: computePct(r.current_price, r.close_1m),
+  pct3m: computePct(r.current_price, r.close_3m),
+}));
+
 export default function Research({ user }) {
   const [tab, setTab] = useState("screener");
   const userId = user?.username || user?.userId || "";
@@ -36,74 +67,43 @@ function ScreenerSection() {
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
-  const [dropFilter, setDropFilter] = useState(false);
-  const [dropThreshold, setDropThreshold] = useState(6);
   const [peFilter, setPeFilter] = useState(false);
   const [peThreshold, setPeThreshold] = useState(30);
   const [opFilter, setOpFilter] = useState(false);
   const [revFilter, setRevFilter] = useState(false);
+  const [sortConfig, setSortConfig] = useState({ key: "market_cap", dir: "desc" });
+  const [showExtPct, setShowExtPct] = useState(false);
 
   const loadResults = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setResults(await fetchScreenerResults(market));
-    } catch (e) {
-      setError(e.message);
-    }
+    setLoading(true); setError(null);
+    try { setResults(enrichPct(await fetchScreenerResults(market))); } catch (e) { setError(e.message); }
     setLoading(false);
   }, [market]);
 
   useEffect(() => { loadResults(); }, [loadResults]);
 
   const handleRun = async () => {
-    setRunning(true);
-    setError(null);
-    try {
-      await runScreener(market);
-      alert("Screener triggered! Results will appear in ~2 minutes. Click 🔄 Reload after.");
-    } catch (e) {
-      setError(e.message);
-    }
+    setRunning(true); setError(null);
+    try { await runScreener(market); alert("Screener triggered! Results will appear in ~2 minutes. Click 🔄 Reload after."); } catch (e) { setError(e.message); }
     setRunning(false);
   };
 
-  const handleRefreshIndexes = async () => {
-    try {
-      const r = await refreshIndexes(market);
-      alert(`Indexes refreshed: ${JSON.stringify(r.indexes)}`);
-    } catch (e) {
-      alert(`Error: ${e.message}`);
-    }
-  };
+  const onSort = (key) => setSortConfig(prev => ({ key, dir: prev.key === key && prev.dir === "desc" ? "asc" : "desc" }));
 
   let filtered = results;
-  if (dropFilter) filtered = filtered.filter(r => r.cumulative_drop != null && r.cumulative_drop <= -dropThreshold);
   if (peFilter) filtered = filtered.filter(r => r.forward_pe && r.forward_pe < peThreshold);
   if (opFilter) filtered = filtered.filter(r => r.operating_margins && r.operating_margins > 0);
   if (revFilter) filtered = filtered.filter(r => r.revenue_growth && r.revenue_growth > 0);
+  filtered = applySortAndPct(filtered, sortConfig);
 
   const curSym = market === "IN" ? "₹" : "$";
-  const fmtLarge = (v) => {
-    if (v == null) return "—";
-    const abs = Math.abs(v);
-    if (abs >= 1e12) return `${(v / 1e12).toFixed(1)}T`;
-    if (abs >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
-    if (abs >= 1e6) return `${(v / 1e6).toFixed(0)}M`;
-    return v.toLocaleString();
-  };
 
   // Group by earnings date for calendar view
   const byDate = {};
-  results.forEach(r => {
-    if (!r.report_date) return;
-    byDate[r.report_date] = byDate[r.report_date] || [];
-    byDate[r.report_date].push(r);
-  });
+  results.forEach(r => { if (r.report_date) { byDate[r.report_date] = byDate[r.report_date] || []; byDate[r.report_date].push(r); } });
 
   return (
     <div>
-      {/* Controls */}
       <div style={{ ...card, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <label style={{ fontSize: 12 }}>Market<br />
           <select value={market} onChange={e => setMarket(e.target.value)} style={{ padding: 6 }}>
@@ -111,81 +111,78 @@ function ScreenerSection() {
             <option value="IN">India (Nifty 500)</option>
           </select>
         </label>
-        <button style={btnPrimary} onClick={handleRun} disabled={running}>
-          {running ? "Triggering..." : "🔍 Run Screener"}
-        </button>
-        <button style={{ ...btn, border: "1px solid #ccc" }} onClick={handleRefreshIndexes}>↻ Refresh Indexes</button>
+        <button style={btnPrimary} onClick={handleRun} disabled={running}>{running ? "Triggering..." : "🔍 Run Screener"}</button>
+        <button style={{ ...btn, border: "1px solid #ccc" }} onClick={() => refreshIndexes(market).then(r => alert(`Indexes refreshed: ${JSON.stringify(r.indexes)}`)).catch(e => alert(e.message))}>↻ Refresh Indexes</button>
         <button style={{ ...btn, border: "1px solid #ccc" }} onClick={loadResults}>🔄 Reload</button>
       </div>
 
-      {/* Filters */}
       <div style={{ ...card, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", padding: 10 }}>
         <span style={{ fontSize: 12, fontWeight: "bold" }}>Filters:</span>
         <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
-          <input type="checkbox" checked={dropFilter} onChange={e => setDropFilter(e.target.checked)} />
-          Drop ≥ <input type="number" value={dropThreshold} onChange={e => setDropThreshold(parseFloat(e.target.value) || 0)}
-            style={{ width: 40, padding: 2, marginLeft: 2 }} disabled={!dropFilter} />%
-        </label>
-        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
           <input type="checkbox" checked={peFilter} onChange={e => setPeFilter(e.target.checked)} />
-          Fwd P/E &lt; <input type="number" value={peThreshold} onChange={e => setPeThreshold(parseFloat(e.target.value) || 0)}
-            style={{ width: 40, padding: 2, marginLeft: 2 }} disabled={!peFilter} />
+          Fwd P/E &lt; <input type="number" value={peThreshold} onChange={e => setPeThreshold(parseFloat(e.target.value) || 0)} style={{ width: 40, padding: 2, marginLeft: 2 }} disabled={!peFilter} />
         </label>
         <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
-          <input type="checkbox" checked={opFilter} onChange={e => setOpFilter(e.target.checked)} />
-          Op Margin +ve
+          <input type="checkbox" checked={opFilter} onChange={e => setOpFilter(e.target.checked)} /> Op Margin +ve
         </label>
         <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
-          <input type="checkbox" checked={revFilter} onChange={e => setRevFilter(e.target.checked)} />
-          Rev Growth +ve
+          <input type="checkbox" checked={revFilter} onChange={e => setRevFilter(e.target.checked)} /> Rev Growth +ve
+        </label>
+        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+          <input type="checkbox" checked={showExtPct} onChange={e => setShowExtPct(e.target.checked)} /> 1W-3M %
         </label>
         <span style={{ fontSize: 11, color: "#999" }}>{filtered.length} of {results.length} stocks</span>
       </div>
 
       {error && <div style={{ ...card, background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
 
-      {/* Results table */}
       {loading ? <p>Loading...</p> : filtered.length > 0 ? (
+        <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead><tr style={{ background: "#f5f5f5" }}>
-            <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
-            <th style={{ padding: 6, textAlign: "left" }}>Name</th>
-            <th style={{ padding: 6, textAlign: "left" }}>Sector</th>
-            <th style={{ padding: 6, textAlign: "left" }}>Earnings</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Pre Price</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Cur Price</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Day Drop</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Cum Drop</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Op Margin</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Rev Growth</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Fwd P/E</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Mkt Cap</th>
+            <SortHeader label="Symbol" sortKey="symbol" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Name" sortKey="name" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Sector" sortKey="sector" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Last Earn" sortKey="report_date" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Next Earn" sortKey="earnings_date" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Price" sortKey="current_price" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="1D%" sortKey="pct1d" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="3D%" sortKey="pct3d" sortConfig={sortConfig} onSort={onSort} />
+            {showExtPct && <><SortHeader label="1W%" sortKey="pct1w" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="3W%" sortKey="pct3w" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="1M%" sortKey="pct1m" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="3M%" sortKey="pct3m" sortConfig={sortConfig} onSort={onSort} /></>}
+            <SortHeader label="Op Mgn" sortKey="operating_margins" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="Rev Gr" sortKey="revenue_growth" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="Fwd P/E" sortKey="forward_pe" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="Mkt Cap" sortKey="market_cap" sortConfig={sortConfig} onSort={onSort} />
           </tr></thead>
           <tbody>
-            {filtered.map((r, i) => {
-              const dropColor = r.cumulative_drop < -6 ? "#c62828" : r.cumulative_drop < 0 ? "#e65100" : "#2e7d32";
-              return (
-                <tr key={r.symbol} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
-                  <td style={{ padding: 6, fontWeight: "bold" }}>{r.symbol}</td>
-                  <td style={{ padding: 6, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</td>
-                  <td style={{ padding: 6, fontSize: 11, color: "#666" }}>{r.sector}</td>
-                  <td style={{ padding: 6 }}>{r.report_date}</td>
-                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.pre_earnings_price?.toLocaleString()}</td>
-                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.current_price?.toLocaleString()}</td>
-                  <td style={{ padding: 6, textAlign: "right", color: r.day_drop < 0 ? "#c62828" : "#2e7d32", fontWeight: "bold" }}>{r.day_drop?.toFixed(1)}%</td>
-                  <td style={{ padding: 6, textAlign: "right", color: dropColor, fontWeight: "bold" }}>{r.cumulative_drop?.toFixed(1)}%</td>
-                  <td style={{ padding: 6, textAlign: "right", color: r.operating_margins > 0 ? "#2e7d32" : "#c62828" }}>{r.operating_margins != null ? `${r.operating_margins.toFixed(1)}%` : "—"}</td>
-                  <td style={{ padding: 6, textAlign: "right", color: r.revenue_growth > 0 ? "#2e7d32" : "#c62828" }}>{r.revenue_growth != null ? `${r.revenue_growth.toFixed(1)}%` : "—"}</td>
-                  <td style={{ padding: 6, textAlign: "right" }}>{r.forward_pe != null ? `${r.forward_pe.toFixed(1)}x` : "—"}</td>
-                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{fmtLarge(r.market_cap)}</td>
-                </tr>
-              );
-            })}
+            {filtered.map((r, i) => (
+              <tr key={r.symbol} style={{ background: i % 2 ? "#fafafa" : "#fff" }}>
+                <td style={{ padding: 6, fontWeight: "bold" }}>{r.symbol}</td>
+                <td style={{ padding: 6, maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</td>
+                <td style={{ padding: 6, fontSize: 11, color: "#666" }}>{r.sector}</td>
+                <td style={{ padding: 6, fontSize: 11 }}>{r.report_date || "—"}</td>
+                <td style={{ padding: 6, fontSize: 11 }}>{r.earnings_date || "—"}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.current_price?.toLocaleString()}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct1d)}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct3d)}</td>
+                {showExtPct && <><td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct1w)}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct3w)}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct1m)}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct3m)}</td></>}
+                <td style={{ padding: 6, textAlign: "right", color: r.operating_margins > 0 ? "#2e7d32" : "#c62828" }}>{r.operating_margins != null ? `${r.operating_margins.toFixed(1)}%` : "—"}</td>
+                <td style={{ padding: 6, textAlign: "right", color: r.revenue_growth > 0 ? "#2e7d32" : "#c62828" }}>{r.revenue_growth != null ? `${r.revenue_growth.toFixed(1)}%` : "—"}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{r.forward_pe != null ? `${r.forward_pe.toFixed(1)}x` : "—"}</td>
+                <td style={{ padding: 6, textAlign: "right" }}>{curSym}{fmtLarge(r.market_cap)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
+        </div>
       ) : !loading && <p style={{ color: "#999" }}>No results. Click "🔍 Run Screener" to scan (takes ~2 min), then "🔄 Reload".</p>}
 
-      {/* Earnings Calendar summary */}
       {Object.keys(byDate).length > 0 && (
         <div style={{ ...card, marginTop: 16 }}>
           <h4 style={{ margin: "0 0 8px" }}>📅 Earnings This Week — {results.length} stocks from {market === "US" ? "S&P 500 + Nasdaq 100" : "Nifty 500"}</h4>
@@ -220,10 +217,12 @@ function BuyCandidatesSection() {
   const [minScore, setMinScore] = useState(4);
   const [maOnly, setMaOnly] = useState(false);
   const [earnOnly, setEarnOnly] = useState(false);
+  const [sortConfig, setSortConfig] = useState({ key: "total_score", dir: "desc" });
+  const [showExtPct, setShowExtPct] = useState(false);
 
   const loadResults = useCallback(async () => {
     setLoading(true); setError(null);
-    try { setResults(await fetchBuyCandidates(market)); } catch (e) { setError(e.message); }
+    try { setResults(enrichPct(await fetchBuyCandidates(market))); } catch (e) { setError(e.message); }
     setLoading(false);
   }, [market]);
 
@@ -235,15 +234,15 @@ function BuyCandidatesSection() {
     setScanning(false);
   };
 
+  const onSort = (key) => setSortConfig(prev => ({ key, dir: prev.key === key && prev.dir === "desc" ? "asc" : "desc" }));
+  const scoreBar = (score, max, color) => <span>{Array.from({length: max}, (_, i) => <span key={i} style={{ color: i < score ? color : "#ddd" }}>●</span>)}</span>;
+
   let filtered = results.filter(r => r.total_score >= minScore);
   if (maOnly) filtered = filtered.filter(r => r.ma_aligned);
   if (earnOnly) filtered = filtered.filter(r => r.report_date);
+  filtered = applySortAndPct(filtered, sortConfig);
 
   const curSym = market === "IN" ? "₹" : "$";
-  const fmtLarge = (v) => { if (v == null) return "—"; const abs = Math.abs(v); if (abs >= 1e12) return `${(v/1e12).toFixed(1)}T`; if (abs >= 1e9) return `${(v/1e9).toFixed(1)}B`; if (abs >= 1e6) return `${(v/1e6).toFixed(0)}M`; return v.toLocaleString(); };
-  const scoreBar = (score, max, color) => (
-    <span>{Array.from({length: max}, (_, i) => <span key={i} style={{ color: i < score ? color : "#ddd" }}>●</span>)}</span>
-  );
 
   return (
     <div>
@@ -266,10 +265,12 @@ function BuyCandidatesSection() {
         <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
           <input type="checkbox" checked={earnOnly} onChange={e => setEarnOnly(e.target.checked)} /> With Earnings Only
         </label>
+        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+          <input type="checkbox" checked={showExtPct} onChange={e => setShowExtPct(e.target.checked)} /> 1W-3M %
+        </label>
         <span style={{ fontSize: 11, color: "#999" }}>{filtered.length} of {results.length} stocks</span>
       </div>
 
-      {/* Score legend */}
       <div style={{ ...card, padding: 8, fontSize: 11, lineHeight: 1.6 }}>
         <div><b>Score = Tech (0-3) + Fund (0-3) + Earn (0-2) = 0-8</b></div>
         <div style={{ color: "#1565c0" }}>●●● <b>Tech:</b> MA aligned (P&gt;50MA&gt;150MA&gt;200MA) +1 | 200MA trending up +1 | Near 52w high &amp; above 52w low +1</div>
@@ -281,22 +282,29 @@ function BuyCandidatesSection() {
       {error && <div style={{ ...card, background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
 
       {loading ? <p>Loading...</p> : filtered.length > 0 ? (
+        <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead><tr style={{ background: "#f5f5f5" }}>
-            <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
-            <th style={{ padding: 6, textAlign: "left" }}>Name</th>
-            <th style={{ padding: 6, textAlign: "center" }}>Score</th>
+            <SortHeader label="Symbol" sortKey="symbol" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Name" sortKey="name" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Score" sortKey="total_score" sortConfig={sortConfig} onSort={onSort} align="center" />
             <th style={{ padding: 6, textAlign: "center" }}>Tech</th>
             <th style={{ padding: 6, textAlign: "center" }}>Fund</th>
             <th style={{ padding: 6, textAlign: "center" }}>Earn</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Price</th>
-            <th style={{ padding: 6, textAlign: "right" }}>50MA</th>
-            <th style={{ padding: 6, textAlign: "right" }}>150MA</th>
-            <th style={{ padding: 6, textAlign: "right" }}>200MA</th>
-            <th style={{ padding: 6, textAlign: "right" }}>From 52wH</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Fwd P/E</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Drop</th>
-            <th style={{ padding: 6, textAlign: "left" }}>Earnings</th>
+            <SortHeader label="Sector" sortKey="sector" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Last Earn" sortKey="report_date" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Next Earn" sortKey="earnings_date" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Price" sortKey="current_price" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="1D%" sortKey="pct1d" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="3D%" sortKey="pct3d" sortConfig={sortConfig} onSort={onSort} />
+            {showExtPct && <><SortHeader label="1W%" sortKey="pct1w" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="3W%" sortKey="pct3w" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="1M%" sortKey="pct1m" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="3M%" sortKey="pct3m" sortConfig={sortConfig} onSort={onSort} /></>}
+            <SortHeader label="Op Mgn" sortKey="operating_margins" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="Rev Gr" sortKey="revenue_growth" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="Fwd P/E" sortKey="forward_pe" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="Mkt Cap" sortKey="market_cap" sortConfig={sortConfig} onSort={onSort} />
           </tr></thead>
           <tbody>
             {filtered.map((r, i) => {
@@ -309,19 +317,26 @@ function BuyCandidatesSection() {
                   <td style={{ padding: 6, textAlign: "center" }}>{scoreBar(r.tech_score, 3, "#1565c0")}</td>
                   <td style={{ padding: 6, textAlign: "center" }}>{scoreBar(r.fund_score, 3, "#2e7d32")}</td>
                   <td style={{ padding: 6, textAlign: "center" }}>{scoreBar(r.earn_score, 2, "#ff9800")}</td>
-                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.current_price?.toLocaleString()}</td>
-                  <td style={{ padding: 6, textAlign: "right", color: r.current_price > (r.ma50 || 0) ? "#2e7d32" : "#c62828" }}>{r.ma50 ? curSym + r.ma50.toLocaleString() : "—"}</td>
-                  <td style={{ padding: 6, textAlign: "right" }}>{r.ma150 ? curSym + r.ma150.toLocaleString() : "—"}</td>
-                  <td style={{ padding: 6, textAlign: "right" }}>{r.ma200 ? curSym + r.ma200.toLocaleString() : "—"}</td>
-                  <td style={{ padding: 6, textAlign: "right", color: (r.pct_from_high || 0) >= -10 ? "#2e7d32" : "#c62828" }}>{r.pct_from_high != null ? `${r.pct_from_high.toFixed(0)}%` : "—"}</td>
-                  <td style={{ padding: 6, textAlign: "right" }}>{r.forward_pe != null ? `${r.forward_pe.toFixed(1)}x` : "—"}</td>
-                  <td style={{ padding: 6, textAlign: "right", color: (r.cumulative_drop || 0) < -6 ? "#c62828" : "#666" }}>{r.cumulative_drop != null ? `${r.cumulative_drop.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: 6, fontSize: 11, color: "#666" }}>{r.sector}</td>
                   <td style={{ padding: 6, fontSize: 11 }}>{r.report_date || "—"}</td>
+                  <td style={{ padding: 6, fontSize: 11 }}>{r.earnings_date || "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.current_price?.toLocaleString()}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct1d)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct3d)}</td>
+                  {showExtPct && <><td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct1w)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct3w)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct1m)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct3m)}</td></>}
+                  <td style={{ padding: 6, textAlign: "right", color: r.operating_margins > 0 ? "#2e7d32" : "#c62828" }}>{r.operating_margins != null ? `${r.operating_margins.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: r.revenue_growth > 0 ? "#2e7d32" : "#c62828" }}>{r.revenue_growth != null ? `${r.revenue_growth.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{r.forward_pe != null ? `${r.forward_pe.toFixed(1)}x` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{fmtLarge(r.market_cap)}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+        </div>
       ) : !loading && <p style={{ color: "#999" }}>No candidates found. Run "📈 MA Scanner" first (takes ~3 min), then "🔄 Reload".</p>}
     </div>
   );
@@ -334,24 +349,27 @@ function PullbackBuySection() {
   const [error, setError] = useState(null);
   const [peFilter, setPeFilter] = useState(false);
   const [peThreshold, setPeThreshold] = useState(30);
+  const [sortConfig, setSortConfig] = useState({ key: "total_score", dir: "desc" });
+  const [showExtPct, setShowExtPct] = useState(false);
 
   const loadResults = useCallback(async () => {
     setLoading(true); setError(null);
-    try { setResults(await fetchPullbackBuys(market)); } catch (e) { setError(e.message); }
+    try { setResults(enrichPct(await fetchPullbackBuys(market))); } catch (e) { setError(e.message); }
     setLoading(false);
   }, [market]);
 
   useEffect(() => { loadResults(); }, [loadResults]);
 
+  const onSort = (key) => setSortConfig(prev => ({ key, dir: prev.key === key && prev.dir === "desc" ? "asc" : "desc" }));
+
   let filtered = results;
   if (peFilter) filtered = filtered.filter(r => r.forward_pe && r.forward_pe < peThreshold);
+  filtered = applySortAndPct(filtered, sortConfig);
 
   const curSym = market === "IN" ? "₹" : "$";
-  const fmtLarge = (v) => { if (v == null) return "—"; const abs = Math.abs(v); if (abs >= 1e12) return `${(v/1e12).toFixed(1)}T`; if (abs >= 1e9) return `${(v/1e9).toFixed(1)}B`; if (abs >= 1e6) return `${(v/1e6).toFixed(0)}M`; return v.toLocaleString(); };
 
   return (
     <div>
-      {/* Explanation */}
       <div style={{ ...card, background: "#e8f5e9", border: "1px solid #66bb6a" }}>
         <div style={{ fontSize: 14, fontWeight: "bold", marginBottom: 4 }}>🎯 Pullback Buy — Strong Uptrend + 50MA Pullback</div>
         <div style={{ fontSize: 12, color: "#333", lineHeight: 1.6 }}>
@@ -371,8 +389,10 @@ function PullbackBuySection() {
         <button style={{ ...btn, border: "1px solid #ccc" }} onClick={loadResults}>🔄 Reload</button>
         <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
           <input type="checkbox" checked={peFilter} onChange={e => setPeFilter(e.target.checked)} />
-          Fwd P/E &lt; <input type="number" value={peThreshold} onChange={e => setPeThreshold(parseFloat(e.target.value) || 0)}
-            style={{ width: 40, padding: 2, marginLeft: 2 }} disabled={!peFilter} />
+          Fwd P/E &lt; <input type="number" value={peThreshold} onChange={e => setPeThreshold(parseFloat(e.target.value) || 0)} style={{ width: 40, padding: 2, marginLeft: 2 }} disabled={!peFilter} />
+        </label>
+        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+          <input type="checkbox" checked={showExtPct} onChange={e => setShowExtPct(e.target.checked)} /> 1W-3M %
         </label>
         <span style={{ fontSize: 11, color: "#999" }}>{filtered.length} stocks in pullback zone</span>
       </div>
@@ -380,32 +400,41 @@ function PullbackBuySection() {
       {error && <div style={{ ...card, background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
 
       {loading ? <p>Loading...</p> : filtered.length > 0 ? (
+        <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead><tr style={{ background: "#e8f5e9" }}>
-            <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
-            <th style={{ padding: 6, textAlign: "left" }}>Name</th>
-            <th style={{ padding: 6, textAlign: "center" }}>Score</th>
+            <SortHeader label="Symbol" sortKey="symbol" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Name" sortKey="name" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Score" sortKey="total_score" sortConfig={sortConfig} onSort={onSort} align="center" />
             <th style={{ padding: 6, textAlign: "center" }}>Tech</th>
             <th style={{ padding: 6, textAlign: "center" }}>Fund</th>
             <th style={{ padding: 6, textAlign: "center" }}>Earn</th>
-            <th style={{ padding: 6, textAlign: "left" }}>Sector</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Price</th>
-            <th style={{ padding: 6, textAlign: "right" }}>50MA</th>
-            <th style={{ padding: 6, textAlign: "right" }}>From 50MA</th>
-            <th style={{ padding: 6, textAlign: "right" }}>150MA</th>
-            <th style={{ padding: 6, textAlign: "right" }}>200MA</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Op Margin</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Rev Growth</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Fwd P/E</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Mkt Cap</th>
-            <th style={{ padding: 6, textAlign: "left" }}>Earnings</th>
+            <SortHeader label="Sector" sortKey="sector" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Last Earn" sortKey="report_date" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Next Earn" sortKey="earnings_date" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Price" sortKey="current_price" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="50MA" sortKey="ma50" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="From 50MA" sortKey="pct_from_50ma" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="150MA" sortKey="ma150" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="200MA" sortKey="ma200" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="1D%" sortKey="pct1d" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="3D%" sortKey="pct3d" sortConfig={sortConfig} onSort={onSort} />
+            {showExtPct && <><SortHeader label="1W%" sortKey="pct1w" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="3W%" sortKey="pct3w" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="1M%" sortKey="pct1m" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="3M%" sortKey="pct3m" sortConfig={sortConfig} onSort={onSort} /></>}
+            <SortHeader label="Op Mgn" sortKey="operating_margins" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="Rev Gr" sortKey="revenue_growth" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="Fwd P/E" sortKey="forward_pe" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="Mkt Cap" sortKey="market_cap" sortConfig={sortConfig} onSort={onSort} />
           </tr></thead>
           <tbody>
             {filtered.map((r, i) => {
               const fromMA = r.pct_from_50ma || 0;
               const maColor = fromMA <= -3 ? "#c62828" : fromMA <= 0 ? "#e65100" : "#2e7d32";
+              const bg = r.total_score >= 6 ? "#c8e6c9" : r.total_score >= 4 ? "#f1f8e9" : i % 2 ? "#fafafa" : "#fff";
               return (
-                <tr key={r.symbol} style={{ background: r.total_score >= 6 ? "#c8e6c9" : r.total_score >= 4 ? "#f1f8e9" : i % 2 ? "#fafafa" : "#fff" }}>
+                <tr key={r.symbol} style={{ background: bg }}>
                   <td style={{ padding: 6, fontWeight: "bold" }}>{r.symbol}</td>
                   <td style={{ padding: 6, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</td>
                   <td style={{ padding: 6, textAlign: "center", fontWeight: "bold", fontSize: 14 }}>{r.total_score}/8</td>
@@ -413,21 +442,29 @@ function PullbackBuySection() {
                   <td style={{ padding: 6, textAlign: "center" }}>{[0,1,2].map(j => <span key={j} style={{ color: j < r.fund_score ? "#2e7d32" : "#ddd" }}>●</span>)}</td>
                   <td style={{ padding: 6, textAlign: "center" }}>{[0,1].map(j => <span key={j} style={{ color: j < r.earn_score ? "#ff9800" : "#ddd" }}>●</span>)}</td>
                   <td style={{ padding: 6, fontSize: 11, color: "#666" }}>{r.sector}</td>
+                  <td style={{ padding: 6, fontSize: 11 }}>{r.report_date || "—"}</td>
+                  <td style={{ padding: 6, fontSize: 11 }}>{r.earnings_date || "—"}</td>
                   <td style={{ padding: 6, textAlign: "right", fontWeight: "bold" }}>{curSym}{r.current_price?.toLocaleString()}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.ma50?.toLocaleString()}</td>
                   <td style={{ padding: 6, textAlign: "right", color: maColor, fontWeight: "bold" }}>{fromMA.toFixed(1)}%</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.ma150?.toLocaleString()}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.ma200?.toLocaleString()}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct1d)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct3d)}</td>
+                  {showExtPct && <><td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct1w)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct3w)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct1m)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct3m)}</td></>}
                   <td style={{ padding: 6, textAlign: "right", color: r.operating_margins > 0 ? "#2e7d32" : "#c62828" }}>{r.operating_margins != null ? `${r.operating_margins.toFixed(1)}%` : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right", color: r.revenue_growth > 0 ? "#2e7d32" : "#c62828" }}>{r.revenue_growth != null ? `${r.revenue_growth.toFixed(1)}%` : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{r.forward_pe != null ? `${r.forward_pe.toFixed(1)}x` : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{curSym}{fmtLarge(r.market_cap)}</td>
-                  <td style={{ padding: 6, fontSize: 11 }}>{r.report_date ? `📅 ${r.report_date}` : "—"}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+        </div>
       ) : !loading && <p style={{ color: "#999" }}>No stocks in pullback zone right now. Run MA Scanner from Buy Candidates tab first.</p>}
     </div>
   );
