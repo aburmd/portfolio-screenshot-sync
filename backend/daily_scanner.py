@@ -85,14 +85,13 @@ def refresh_index_constituents(market):
 def scan_stock(sym, market, index_info):
     """Fetch ALL data for one stock in TWO calls: info + history."""
     yf_sym = f"{sym}.NS" if market == "IN" else sym
-    min_price = 50 if market == "IN" else 5
 
     try:
         t = yf.Ticker(yf_sym)
         info = t.info or {}
 
         price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
-        if price < min_price:
+        if price <= 0:
             return None
 
         # Earnings date from calendar

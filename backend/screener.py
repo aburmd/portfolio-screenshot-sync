@@ -128,14 +128,14 @@ def get_earnings_this_week(av_key):
 def scan_stock(sym, earnings_info, market):
     """Get price change and basic fundamentals for one stock."""
     yf_sym = f"{sym}.NS" if market == "IN" else sym
-    min_price = 50 if market == "IN" else 5
+
 
     try:
         t = yf.Ticker(yf_sym)
         info = t.info or {}
 
         current_price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
-        if current_price < min_price:
+        if current_price <= 0:
             return None
 
         # Pre-earnings price

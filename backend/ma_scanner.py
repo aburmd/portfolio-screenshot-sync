@@ -39,7 +39,7 @@ def get_index_symbols(market):
 def compute_ma_signals(sym, market):
     """Fetch 1 year of prices, compute MAs and trend signals."""
     yf_sym = f"{sym}.NS" if market == "IN" else sym
-    min_price = 50 if market == "IN" else 5
+
 
     try:
         t = yf.Ticker(yf_sym)
@@ -54,7 +54,7 @@ def compute_ma_signals(sym, market):
 
         close = hist["Close"]
         current_price = float(close.iloc[-1])
-        if current_price < min_price:
+        if current_price <= 0:
             return None
 
         # Compute MAs
