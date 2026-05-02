@@ -23,11 +23,17 @@ const DEFAULT_COLUMNS = [
   { key: "invPct", label: "Inv %", sortable: true },
   { key: "curPct", label: "Cur %", sortable: true },
   { key: "platform_name", label: "Platform", sortable: true },
+  { key: "pct1d", label: "1D%", sortable: true },
+  { key: "pct3d", label: "3D%", sortable: true },
+  { key: "pct1w", label: "1W%", sortable: true, extended: true },
+  { key: "pct3w", label: "3W%", sortable: true, extended: true },
+  { key: "pct1m", label: "1M%", sortable: true, extended: true },
+  { key: "pct3m", label: "3M%", sortable: true, extended: true },
 ];
 
 const STORAGE_KEY = "portfolio_column_order";
 
-function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdate, onAdd, readOnly, displayCurrency, exchangeRate }) {
+function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdate, onAdd, readOnly, displayCurrency, exchangeRate, priceChanges, showExtendedPct, livePrice }) {
   const [editingRow, setEditingRow] = useState(null);
   const [editQty, setEditQty] = useState("");
   const [editAvg, setEditAvg] = useState("");
@@ -43,6 +49,8 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
   const [columns, setColumns] = useState(DEFAULT_COLUMNS);
   const [dragIdx, setDragIdx] = useState(null);
   const [selected, setSelected] = useState(new Set());
+
+  const visibleColumns = columns.filter(c => !c.extended || showExtendedPct);
 
   // Load column order from localStorage
   useEffect(() => {
@@ -99,7 +107,14 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
       dispSymbol = displayCurrency === "INR" ? "₹" : "$";
     }
 
-    return { ...row, curPrice, invested, currentAmt, pnl, pnlPct, convRate, dispSymbol, rowCurrency };
+    return { ...row, curPrice, invested, currentAmt, pnl, pnlPct, convRate, dispSymbol, rowCurrency,
+      pct1d: curPrice && priceChanges?.[row.symbol]?.close_1d ? ((curPrice - priceChanges[row.symbol].close_1d) / priceChanges[row.symbol].close_1d * 100) : null,
+      pct3d: curPrice && priceChanges?.[row.symbol]?.close_3d ? ((curPrice - priceChanges[row.symbol].close_3d) / priceChanges[row.symbol].close_3d * 100) : null,
+      pct1w: curPrice && priceChanges?.[row.symbol]?.close_1w ? ((curPrice - priceChanges[row.symbol].close_1w) / priceChanges[row.symbol].close_1w * 100) : null,
+      pct3w: curPrice && priceChanges?.[row.symbol]?.close_3w ? ((curPrice - priceChanges[row.symbol].close_3w) / priceChanges[row.symbol].close_3w * 100) : null,
+      pct1m: curPrice && priceChanges?.[row.symbol]?.close_1m ? ((curPrice - priceChanges[row.symbol].close_1m) / priceChanges[row.symbol].close_1m * 100) : null,
+      pct3m: curPrice && priceChanges?.[row.symbol]?.close_3m ? ((curPrice - priceChanges[row.symbol].close_3m) / priceChanges[row.symbol].close_3m * 100) : null,
+    };
   });
 
   const totalInvested = rows.reduce((s, r) => s + r.invested * r.convRate, 0);
@@ -185,6 +200,12 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
       case "invPct": return pctFmt(invPct);
       case "curPct": return curPct != null ? pctFmt(curPct) : "—";
       case "platform_name": return row.platform_name;
+      case "pct1d": return row.pct1d != null ? <span style={{ color: clr(row.pct1d), fontWeight: "bold" }}>{row.pct1d.toFixed(1)}%</span> : "—";
+      case "pct3d": return row.pct3d != null ? <span style={{ color: clr(row.pct3d), fontWeight: "bold" }}>{row.pct3d.toFixed(1)}%</span> : "—";
+      case "pct1w": return row.pct1w != null ? <span style={{ color: clr(row.pct1w) }}>{row.pct1w.toFixed(1)}%</span> : "—";
+      case "pct3w": return row.pct3w != null ? <span style={{ color: clr(row.pct3w) }}>{row.pct3w.toFixed(1)}%</span> : "—";
+      case "pct1m": return row.pct1m != null ? <span style={{ color: clr(row.pct1m) }}>{row.pct1m.toFixed(1)}%</span> : "—";
+      case "pct3m": return row.pct3m != null ? <span style={{ color: clr(row.pct3m) }}>{row.pct3m.toFixed(1)}%</span> : "—";
       default: return "";
     }
   };
@@ -218,7 +239,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
     cursor: "grab", userSelect: "none",
   });
 
-  const totalColSpan = columns.filter((c) => !["invested", "currentAmt", "pnl", "pnlPct", "invPct", "curPct", "serial"].includes(c.key)).length;
+  const totalColSpan = visibleColumns.filter((c) => !["invested", "currentAmt", "pnl", "pnlPct", "invPct", "curPct", "serial"].includes(c.key)).length;
 
   return (
     <div style={{ overflowX: "auto" }}>
@@ -243,7 +264,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
                 <input type="checkbox" checked={sortedRows.length > 0 && selected.size === sortedRows.length} onChange={toggleSelectAll} />
               </th>
             )}
-            {columns.map((col, i) => (
+            {visibleColumns.map((col, i) => (
               <th key={col.key} style={thStyle(dragIdx === i)}
                 draggable onDragStart={() => handleDragStart(i)}
                 onDragOver={handleDragOver} onDrop={() => handleDrop(i)}
@@ -262,7 +283,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
                   <input type="checkbox" checked={selected.has(row.stock_name)} onChange={() => toggleSelect(row.stock_name)} />
                 </td>
               )}
-              {columns.map((col) => (
+              {visibleColumns.map((col) => (
                 <td key={col.key} style={tdStyle}>{renderCell(col, row, idx)}</td>
               ))}
               {!readOnly && (
@@ -286,7 +307,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
           {rows.length > 0 && (
             <tr style={{ background: "#f5f5f5", fontWeight: "bold" }}>
               {!readOnly && <td style={tdStyle}></td>}
-              {columns.map((col, i) => {
+              {visibleColumns.map((col, i) => {
                 const val = renderTotalCell(col);
                 if (col.key === "symbol") return <td key={col.key} style={tdStyle}>TOTAL</td>;
                 return <td key={col.key} style={tdStyle}>{val}</td>;
@@ -298,7 +319,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
           {!readOnly && (adding ? (
             <tr style={{ background: "#e8f5e9" }}>
               <td style={tdStyle}></td>
-              {columns.map((col) => {
+              {visibleColumns.map((col) => {
                 if (col.key === "serial") return <td key={col.key} style={tdStyle}>—</td>;
                 if (col.key === "stock_name") return <td key={col.key} style={tdStyle}><input type="text" placeholder="Stock name" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ ...inputStyle, width: 140 }} /></td>;
                 if (col.key === "quantity") return <td key={col.key} style={tdStyle}><input type="number" step="any" placeholder="Qty" value={newQty} onChange={(e) => setNewQty(e.target.value)} style={inputStyle} /></td>;
@@ -318,7 +339,7 @@ function PortfolioTable({ data, prices, loading, onDelete, onBulkDelete, onUpdat
             </tr>
           ) : (
             <tr>
-              <td colSpan={columns.length + (readOnly ? 0 : 2)} style={{ ...tdStyle, textAlign: "center" }}>
+              <td colSpan={visibleColumns.length + (readOnly ? 0 : 2)} style={{ ...tdStyle, textAlign: "center" }}>
                 <button style={{ ...btnStyle, border: "1px solid #4CAF50", color: "#4CAF50", padding: "5px 14px" }} onClick={() => setAdding(true)}>+ Add Stock Manually</button>
               </td>
             </tr>

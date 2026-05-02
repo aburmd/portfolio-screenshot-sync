@@ -91,6 +91,16 @@ export async function fetchPrices(symbols, inrSymbols, live = false) {
   return res.json();
 }
 
+export async function fetchPriceChanges(symbols, inrSymbols) {
+  const res = await fetch(`${API_BASE}/price-changes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ symbols: symbols || [], inr_symbols: inrSymbols || [] }),
+  });
+  if (!res.ok) return {};
+  return res.json();
+}
+
 export async function fetchExchangeRate(from_cur, to_cur) {
   const res = await fetch(`${API_BASE}/exchange-rate/${from_cur}/${to_cur}`);
   if (!res.ok) return null;

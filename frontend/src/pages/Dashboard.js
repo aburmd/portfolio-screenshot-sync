@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import UploadArea from "../components/UploadArea";
 import PortfolioTable from "../components/PortfolioTable";
-import { fetchPortfolio, uploadScreenshots, uploadCsv, downloadCsv, deleteStock, bulkDeleteStocks, updateStock, addStock, fetchPrices, fetchExchangeRate, fetchUploadStatus, requestShare, getMyShares, revokeShare } from "../services/api";
+import { fetchPortfolio, uploadScreenshots, uploadCsv, downloadCsv, deleteStock, bulkDeleteStocks, updateStock, addStock, fetchPrices, fetchPriceChanges, fetchExchangeRate, fetchUploadStatus, requestShare, getMyShares, revokeShare } from "../services/api";
 
 const tabStyle = (active) => ({
   padding: "5px 14px", cursor: "pointer", border: "1px solid #ddd",
@@ -54,6 +54,8 @@ function Dashboard({ user }) {
   const [displayCurrency, setDisplayCurrency] = useState("default");
   const [exchangeRate, setExchangeRate] = useState(null);
   const [livePrice, setLivePrice] = useState(false);
+  const [priceChanges, setPriceChanges] = useState({});
+  const [showExtendedPct, setShowExtendedPct] = useState(false);
   const pollRef = useRef(null);
 
   const userId = user?.userId || user?.username;
@@ -66,7 +68,10 @@ function Dashboard({ user }) {
       setPortfolio(data);
       const usdSymbols = [...new Set(data.filter((d) => (!d.currency || d.currency === "USD") && d.symbol && d.symbol !== "UNKNOWN").map((d) => d.symbol))];
       const inrSymbols = [...new Set(data.filter((d) => d.currency === "INR" && d.symbol && d.symbol !== "UNKNOWN").map((d) => d.symbol))];
-      if (usdSymbols.length > 0 || inrSymbols.length > 0) setPrices(await fetchPrices(usdSymbols, inrSymbols, livePrice));
+      if (usdSymbols.length > 0 || inrSymbols.length > 0) {
+        setPrices(await fetchPrices(usdSymbols, inrSymbols, livePrice));
+        setPriceChanges(await fetchPriceChanges(usdSymbols, inrSymbols));
+      }
       // Always fetch exchange rate
       if (!exchangeRate) {
         const rate = await fetchExchangeRate("USD", "INR");
@@ -231,13 +236,22 @@ function Dashboard({ user }) {
             cursor: "pointer", fontWeight: livePrice ? "bold" : "normal", fontSize: 12,
           }}>{livePrice ? "🟢 Live" : "⚪ Static"}</button>
           <span style={{ color: "#999", fontSize: 11 }}>{livePrice ? "(yfinance real-time)" : "(DDB daily close)"}</span>
+          <span style={{ marginLeft: 8 }}>|</span>
+          <button onClick={() => setShowExtendedPct(!showExtendedPct)} style={{
+            padding: "3px 10px", border: showExtendedPct ? "2px solid #1565c0" : "1px solid #ccc",
+            borderRadius: 3, background: showExtendedPct ? "#e3f2fd" : "#fff",
+            cursor: "pointer", fontWeight: showExtendedPct ? "bold" : "normal", fontSize: 12,
+          }}>{showExtendedPct ? "1W 3W 1M 3M ✔" : "1W 3W 1M 3M"}</button>
         </div>
       )}
 
       <PortfolioTable data={filteredPortfolio} prices={prices} loading={loading}
         onDelete={handleDelete} onBulkDelete={handleBulkDelete} onUpdate={handleUpdate} onAdd={handleAdd}
         displayCurrency={displayCurrency}
-        exchangeRate={exchangeRate} />
+        exchangeRate={exchangeRate}
+        priceChanges={priceChanges}
+        showExtendedPct={showExtendedPct}
+        livePrice={livePrice} />
 
       {myShares.length > 0 && (
         <div style={{ marginTop: 30 }}>
