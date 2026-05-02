@@ -180,32 +180,50 @@ def store_stock(table, market, sym, data, now):
     earnings_date = data.get("earnings_date")
     today = date.today()
     week_ago = today - timedelta(days=7)
+
+    # Try to preserve existing report_date from DDB
+    try:
+        existing = table.get_item(Key={"market": market, "symbol": sym}).get("Item")
+    except Exception:
+        existing = None
+
     if earnings_date:
         try:
             ed = date.fromisoformat(earnings_date)
             if week_ago <= ed <= today:
                 item["report_date"] = earnings_date
-                # Preserve pre_earnings_price from existing record if available
-                try:
-                    existing = table.get_item(Key={"market": market, "symbol": sym}).get("Item")
-                    if existing and existing.get("pre_earnings_price"):
-                        pre = float(existing["pre_earnings_price"])
-                        item["pre_earnings_price"] = existing["pre_earnings_price"]
-                        if pre > 0:
-                            price = data.get("current_price", 0)
-                            item["cumulative_drop"] = Decimal(str(round((price - pre) / pre * 100, 2)))
-                            item["day_drop"] = item["cumulative_drop"]
-                    else:
-                        # First time seeing this earnings — use previous_close as pre-earnings price
-                        pre = data.get("previous_close") or data.get("current_price", 0)
-                        if pre > 0:
-                            item["pre_earnings_price"] = Decimal(str(round(pre, 2)))
-                            price = data.get("current_price", 0)
-                            item["cumulative_drop"] = Decimal(str(round((price - pre) / pre * 100, 2)))
-                            item["day_drop"] = item["cumulative_drop"]
-                except Exception:
-                    pass
-                item["first_seen"] = item.get("first_seen") or now[:10]
+                if existing and existing.get("pre_earnings_price"):
+                    pre = float(existing["pre_earnings_price"])
+                    item["pre_earnings_price"] = existing["pre_earnings_price"]
+                    if pre > 0:
+                        price = data.get("current_price", 0)
+                        item["cumulative_drop"] = Decimal(str(round((price - pre) / pre * 100, 2)))
+                        item["day_drop"] = item["cumulative_drop"]
+                else:
+                    pre = data.get("previous_close") or data.get("current_price", 0)
+                    if pre > 0:
+                        item["pre_earnings_price"] = Decimal(str(round(pre, 2)))
+                        price = data.get("current_price", 0)
+                        item["cumulative_drop"] = Decimal(str(round((price - pre) / pre * 100, 2)))
+                        item["day_drop"] = item["cumulative_drop"]
+                item["first_seen"] = (existing or {}).get("first_seen") or now[:10]
+        except ValueError:
+            pass
+
+    # Preserve existing report_date if still within 7 days (calendar may have flipped to next earnings)
+    if "report_date" not in item and existing and existing.get("report_date"):
+        try:
+            old_rd = date.fromisoformat(existing["report_date"])
+            if week_ago <= old_rd <= today:
+                for field in ["report_date", "pre_earnings_price", "day_drop", "cumulative_drop", "first_seen"]:
+                    if field in existing:
+                        item[field] = existing[field]
+                # Update cumulative drop with current price
+                if existing.get("pre_earnings_price"):
+                    pre = float(existing["pre_earnings_price"])
+                    if pre > 0:
+                        price = data.get("current_price", 0)
+                        item["cumulative_drop"] = Decimal(str(round((price - pre) / pre * 100, 2)))
         except ValueError:
             pass
 
