@@ -1,0 +1,62 @@
+/* AdminPage — responsive layout */
+
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: -1px;
+  flex-wrap: wrap;
+}
+.admin-content {
+  border: 1px solid #ddd;
+  padding: 16px;
+  border-radius: 0 4px 4px 4px;
+}
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.admin-table th {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 2px solid #ddd;
+  background: #f5f5f5;
+}
+.admin-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #eee;
+}
+.admin-msg {
+  color: #2e7d32;
+  background: #e8f5e9;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+@media (max-width: 900px) {
+  .admin-table th, .admin-table td {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 600px) {
+  .admin-tabs button {
+    font-size: 11px;
+    padding: 5px 8px;
+    flex: 1;
+  }
+  .admin-content {
+    padding: 10px;
+  }
+  .admin-table th, .admin-table td {
+    padding: 4px 6px;
+    font-size: 11px;
+  }
+  .admin-table input {
+    width: 60px !important;
+  }
+  .admin-table button {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+}

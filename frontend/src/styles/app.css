@@ -1,0 +1,59 @@
+/* App shell — responsive layout */
+
+.app-shell {
+  font-family: sans-serif;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px;
+}
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.app-header h2 { margin: 0; }
+.app-user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.app-nav {
+  border-bottom: 1px solid #eee;
+  margin-bottom: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+}
+.app-nav button {
+  padding: 8px 20px;
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .app-shell {
+    padding: 10px 6px;
+  }
+  .app-header h2 {
+    font-size: 16px;
+  }
+  .app-user-info {
+    font-size: 11px;
+  }
+  .app-user-info button {
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+  .app-nav button {
+    padding: 6px 10px;
+    font-size: 12px;
+    flex: 1 1 auto;
+    text-align: center;
+  }
+}

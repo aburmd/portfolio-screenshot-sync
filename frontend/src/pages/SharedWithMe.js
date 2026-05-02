@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback } from "react";
 import PortfolioTable from "../components/PortfolioTable";
 import { getSharedWithMe, getPendingViewer, viewerRespond, revokeShare, fetchPortfolio, fetchPrices, fetchPriceChanges } from "../services/api";
+import "../styles/shared.css";
 
-const th = { textAlign: "left", padding: "6px 8px", borderBottom: "2px solid #ddd", background: "#f5f5f5" };
-const td = { padding: "6px 8px", borderBottom: "1px solid #eee" };
 const btnStyle = { padding: "3px 10px", marginRight: 4, cursor: "pointer", fontSize: 12 };
 
 function SharedWithMe({ user }) {
@@ -65,7 +64,7 @@ function SharedWithMe({ user }) {
       <div>
         <button onClick={() => setViewing(null)} style={{ marginBottom: 12 }}>← Back to list</button>
         <h3>📊 {viewing.owner_email}'s Portfolio</h3>
-        <div style={{ marginBottom: 8, display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="shared-toggles">
           <button onClick={() => { setLivePrice(!livePrice); }} style={{
             padding: "3px 10px", border: livePrice ? "2px solid #2e7d32" : "1px solid #ccc",
             borderRadius: 3, background: livePrice ? "#e8f5e9" : "#fff",
@@ -93,18 +92,18 @@ function SharedWithMe({ user }) {
 
   return (
     <div>
-      {message && <p style={{ color: "#2e7d32", background: "#e8f5e9", padding: 8, borderRadius: 4 }}>{message}</p>}
+      {message && <p className="shared-msg">{message}</p>}
 
       {pending.length > 0 && (
         <>
           <h4>📩 Incoming Share Requests</h4>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr><th style={th}>From</th><th style={th}>Action</th></tr></thead>
+          <table className="shared-table">
+            <thead><tr><th>From</th><th>Action</th></tr></thead>
             <tbody>
               {pending.map((p) => (
                 <tr key={p.owner_id}>
-                  <td style={td}>{p.owner_email}</td>
-                  <td style={td}>
+                  <td>{p.owner_email}</td>
+                  <td>
                     <button style={{ ...btnStyle, background: "#4CAF50", color: "#fff", border: "none" }} onClick={() => handleRespond(p.owner_id, "approve")}>Accept</button>
                     <button style={{ ...btnStyle, border: "1px solid #d32f2f", color: "#d32f2f" }} onClick={() => handleRespond(p.owner_id, "reject")}>Reject</button>
                   </td>
@@ -119,13 +118,13 @@ function SharedWithMe({ user }) {
       {approved.length === 0 ? (
         <p style={{ color: "#999" }}>No shared dashboards yet.</p>
       ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr><th style={th}>Owner</th><th style={th}>Action</th></tr></thead>
+        <table className="shared-table">
+          <thead><tr><th>Owner</th><th>Action</th></tr></thead>
           <tbody>
             {approved.map((s) => (
               <tr key={s.owner_id}>
-                <td style={td}>{s.owner_email}</td>
-                <td style={td}>
+                <td>{s.owner_email}</td>
+                <td>
                   <button style={{ ...btnStyle, border: "1px solid #1976d2", color: "#1976d2" }} onClick={() => viewPortfolio(s)}>View Portfolio</button>
                   <button style={{ ...btnStyle, border: "1px solid #d32f2f", color: "#d32f2f" }} onClick={() => handleRevoke(s.owner_id)}>Remove</button>
                 </td>

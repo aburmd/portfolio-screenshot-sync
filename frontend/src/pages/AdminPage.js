@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
+import "../styles/admin.css";
 
 const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:8000";
-const th = { textAlign: "left", padding: "8px 12px", borderBottom: "2px solid #ddd", background: "#f5f5f5" };
-const td = { padding: "8px 12px", borderBottom: "1px solid #eee" };
 
 function AdminPage() {
   const [tab, setTab] = useState("symbols");
@@ -16,12 +15,12 @@ function AdminPage() {
 
   return (
     <div>
-      <div style={{ marginBottom: -1 }}>
+      <div className="admin-tabs">
         <button style={tabStyle(tab === "symbols")} onClick={() => setTab("symbols")}>⚠️ Unknown Symbols</button>
         <button style={tabStyle(tab === "shares")} onClick={() => setTab("shares")}>🔗 Share Requests</button>
         <button style={tabStyle(tab === "users")} onClick={() => setTab("users")}>👥 Manage Users</button>
       </div>
-      <div style={{ border: "1px solid #ddd", padding: 16, borderRadius: "0 4px 4px 4px" }}>
+      <div className="admin-content">
         {tab === "symbols" && <SymbolsTab />}
         {tab === "shares" && <SharesTab />}
         {tab === "users" && <UsersTab />}
@@ -95,24 +94,24 @@ function SymbolsTab() {
 
   return (
     <div>
-      {message && <p style={{ color: "#2e7d32", background: "#e8f5e9", padding: 8, borderRadius: 4 }}>{message}</p>}
+      {message && <p className="admin-msg">{message}</p>}
       <h4>Unknown Symbols ({uniqueUnknowns.length})</h4>
       {loading ? <p>Loading...</p> : uniqueUnknowns.length === 0 ? (
         <p style={{ color: "#999" }}>All stocks are mapped ✅</p>
       ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr><th style={th}>Stock Name</th><th style={th}>Platform</th><th style={th}>Enter Symbol</th><th style={th}></th></tr></thead>
+        <table className="admin-table">
+          <thead><tr><th >Stock Name</th><th >Platform</th><th >Enter Symbol</th><th ></th></tr></thead>
           <tbody>
             {uniqueUnknowns.map((u) => (
               <tr key={u.stock_name} style={{ background: "#fff8e1" }}>
-                <td style={td}>{u.stock_name}</td>
-                <td style={td}>{u.platform_name}</td>
-                <td style={td}>
+                <td >{u.stock_name}</td>
+                <td >{u.platform_name}</td>
+                <td >
                   <input type="text" placeholder="e.g. AAPL" value={edits[u.stock_name] || ""}
                     onChange={(e) => setEdits({ ...edits, [u.stock_name]: e.target.value.toUpperCase() })}
                     style={{ padding: 4, width: 80, textTransform: "uppercase" }} />
                 </td>
-                <td style={td}><button onClick={() => handleSave(u.stock_name)} disabled={!edits[u.stock_name]}>Save</button></td>
+                <td ><button onClick={() => handleSave(u.stock_name)} disabled={!edits[u.stock_name]}>Save</button></td>
               </tr>
             ))}
           </tbody>
@@ -134,13 +133,13 @@ function SymbolsTab() {
         </div>
       )}
       {symbolMap.length === 0 ? <p style={{ color: "#999" }}>No mappings yet.</p> : (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr><th style={th}>Stock Name</th><th style={th}>Symbol</th><th style={th}>Edit</th><th style={th}></th></tr></thead>
+        <table className="admin-table">
+          <thead><tr><th >Stock Name</th><th >Symbol</th><th >Edit</th><th ></th></tr></thead>
           <tbody>
             {sortedSymbolMap.map((m) => (
               <tr key={m.stock_name}>
-                <td style={td}>{m.stock_name}</td>
-                <td style={td}>
+                <td >{m.stock_name}</td>
+                <td >
                   {edits[`map_${m.stock_name}`] !== undefined ? (
                     <input type="text" value={edits[`map_${m.stock_name}`]}
                       onChange={(e) => setEdits({ ...edits, [`map_${m.stock_name}`]: e.target.value.toUpperCase() })}
@@ -149,7 +148,7 @@ function SymbolsTab() {
                     <strong>{m.symbol}</strong>
                   )}
                 </td>
-                <td style={td}>
+                <td >
                   {edits[`map_${m.stock_name}`] !== undefined ? (
                     <>
                       <button onClick={async () => { await handleSave(m.stock_name, edits[`map_${m.stock_name}`]); setEdits(prev => ({ ...prev, [`map_${m.stock_name}`]: undefined })); }}
@@ -162,7 +161,7 @@ function SymbolsTab() {
                       style={{ fontSize: 12 }}>✏️ Edit</button>
                   )}
                 </td>
-                <td style={td}>
+                <td >
                   <button onClick={() => handleDeleteMapping(m.stock_name)}
                     style={{ fontSize: 12, color: "#d32f2f", border: "1px solid #d32f2f", background: "#fff", cursor: "pointer", padding: "2px 8px" }}>✖ Del</button>
                 </td>
@@ -212,33 +211,33 @@ function UsersTab() {
 
   return (
     <div>
-      {message && <p style={{ color: "#2e7d32", background: "#e8f5e9", padding: 8, borderRadius: 4 }}>{message}</p>}
+      {message && <p className="admin-msg">{message}</p>}
       <h4>Users ({users.length})</h4>
       {loading ? <p>Loading...</p> : (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table className="admin-table">
           <thead>
             <tr>
-              <th style={th}>Email</th>
-              <th style={th}>Role</th>
-              <th style={th}>Status</th>
-              <th style={th}>Created</th>
-              <th style={th}>Action</th>
+              <th >Email</th>
+              <th >Role</th>
+              <th >Status</th>
+              <th >Created</th>
+              <th >Action</th>
             </tr>
           </thead>
           <tbody>
             {users.map((u) => (
               <tr key={u.username}>
-                <td style={td}>{u.email}</td>
-                <td style={td}>
+                <td >{u.email}</td>
+                <td >
                   <span style={{
                     background: u.role === "admin" ? "#e3f2fd" : "#f5f5f5",
                     color: u.role === "admin" ? "#1565c0" : "#666",
                     padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: "bold",
                   }}>{u.role.toUpperCase()}</span>
                 </td>
-                <td style={td}>{u.status}</td>
-                <td style={td}>{u.created?.split("T")[0]}</td>
-                <td style={td}>
+                <td >{u.status}</td>
+                <td >{u.created?.split("T")[0]}</td>
+                <td >
                   <button onClick={() => toggleRole(u.username, u.role)}
                     style={{ fontSize: 12, padding: "4px 10px" }}>
                     {u.role === "admin" ? "Demote to User" : "Promote to Admin"}
@@ -280,20 +279,20 @@ function SharesTab() {
 
   return (
     <div>
-      {message && <p style={{ color: "#2e7d32", background: "#e8f5e9", padding: 8, borderRadius: 4 }}>{message}</p>}
+      {message && <p className="admin-msg">{message}</p>}
       <h4>Pending Share Requests ({pending.length})</h4>
       {loading ? <p>Loading...</p> : pending.length === 0 ? (
         <p style={{ color: "#999" }}>No pending share requests ✅</p>
       ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr><th style={th}>Owner</th><th style={th}>Viewer</th><th style={th}>Requested</th><th style={th}>Action</th></tr></thead>
+        <table className="admin-table">
+          <thead><tr><th >Owner</th><th >Viewer</th><th >Requested</th><th >Action</th></tr></thead>
           <tbody>
             {pending.map((p) => (
               <tr key={`${p.owner_id}-${p.viewer_id}`} style={{ background: "#fff8e1" }}>
-                <td style={td}>{p.owner_email}</td>
-                <td style={td}>{p.viewer_email}</td>
-                <td style={td}>{p.created_at?.split("T")[0]}</td>
-                <td style={td}>
+                <td >{p.owner_email}</td>
+                <td >{p.viewer_email}</td>
+                <td >{p.created_at?.split("T")[0]}</td>
+                <td >
                   <button style={{ padding: "3px 10px", marginRight: 4, background: "#4CAF50", color: "#fff", border: "none", cursor: "pointer", fontSize: 12 }}
                     onClick={() => handleRespond(p.owner_id, p.viewer_id, "approve")}>Approve</button>
                   <button style={{ padding: "3px 10px", border: "1px solid #d32f2f", color: "#d32f2f", cursor: "pointer", fontSize: 12 }}

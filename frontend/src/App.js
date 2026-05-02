@@ -3,6 +3,7 @@ import { Amplify } from "aws-amplify";
 import { Authenticator } from "@aws-amplify/ui-react";
 import { fetchUserAttributes } from "aws-amplify/auth";
 import "@aws-amplify/ui-react/styles.css";
+import "./styles/app.css";
 import awsConfig from "./aws-config";
 import Dashboard from "./pages/Dashboard";
 import AdminPage from "./pages/AdminPage";
@@ -33,17 +34,17 @@ function AppContent({ signOut, user }) {
   const isAdmin = role === "admin";
 
   return (
-    <div style={{ fontFamily: "sans-serif", maxWidth: 1100, margin: "0 auto", padding: 20 }}>
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <h2 style={{ margin: 0 }}>📊 Portfolio Screenshot Sync</h2>
-        <div>
-          <span style={{ marginRight: 8, color: "#666" }}>{user?.signInDetails?.loginId || user?.username}</span>
-          {isAdmin && <span style={{ marginRight: 8, background: "#e3f2fd", color: "#1565c0", padding: "2px 8px", borderRadius: 4, fontSize: 12 }}>ADMIN</span>}
-          <button onClick={signOut} style={{ padding: "6px 16px", cursor: "pointer" }}>Sign out</button>
+    <div className="app-shell">
+      <header className="app-header">
+        <h2>📊 Portfolio Screenshot Sync</h2>
+        <div className="app-user-info">
+          <span style={{ color: "#666" }}>{user?.signInDetails?.loginId || user?.username}</span>
+          {isAdmin && <span style={{ background: "#e3f2fd", color: "#1565c0", padding: "2px 8px", borderRadius: 4, fontSize: 12 }}>ADMIN</span>}
+          <button onClick={signOut}>Sign out</button>
         </div>
       </header>
 
-      <nav style={{ borderBottom: "1px solid #eee", marginBottom: 20 }}>
+      <nav className="app-nav">
         <button style={tabStyle(page === "dashboard")} onClick={() => setPage("dashboard")}>Dashboard</button>
         <button style={tabStyle(page === "shared")} onClick={() => setPage("shared")}>Shared With Me</button>
         {isAdmin && <button style={tabStyle(page === "admin")} onClick={() => setPage("admin")}>Admin</button>}
