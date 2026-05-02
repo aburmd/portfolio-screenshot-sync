@@ -284,6 +284,11 @@ export async function deleteCustomSymbol(market, symbol) {
   const res = await fetch(`${API_BASE}/research/custom-symbols/${market}/${encodeURIComponent(symbol)}`, { method: "DELETE" });
   return res.json();
 }
+export async function scanSymbol(market, symbol) {
+  const res = await fetch(`${API_BASE}/research/scan-symbol/${market}/${encodeURIComponent(symbol)}`, { method: "POST" });
+  if (!res.ok) throw new Error("Scan failed");
+  return res.json();
+}
 export async function fetchMissingSymbols(userId) {
   const res = await fetch(`${API_BASE}/research/missing-symbols/${userId}`);
   if (!res.ok) return { US: [], IN: [] };

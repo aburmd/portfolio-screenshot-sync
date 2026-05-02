@@ -2492,6 +2492,34 @@ async def delete_custom_symbol(market: str, symbol: str):
     return {"deleted": symbol}
 
 
+@app.post("/research/scan-symbol/{market}/{symbol}")
+async def scan_single_symbol(market: str, symbol: str):
+    """Scan a single stock immediately — stores screener data + OHLC history + AGG."""
+    from daily_scanner import scan_stock, store_stock, store_history
+    from datetime import datetime, timezone as tz
+
+    sym = symbol.upper()
+    mkt = market.upper()
+    now = datetime.now(tz.utc).isoformat()
+
+    data, hist = scan_stock(sym, mkt, {"name": "", "sector": ""})
+    if not data:
+        return {"error": f"Failed to scan {sym}. Check if symbol is valid."}
+
+    screener_table = ddb.Table(SCREENER_TABLE)
+    store_stock(screener_table, mkt, sym, data, now)
+    store_history(mkt, sym, hist)
+
+    return {
+        "symbol": sym, "market": mkt,
+        "current_price": data.get("current_price"),
+        "ma50": data.get("ma50"),
+        "operating_margins": data.get("operating_margins"),
+        "forward_pe": data.get("forward_pe"),
+        "has_history": hist is not None and len(hist) > 0,
+    }
+
+
 @app.get("/research/missing-symbols/{user_id}")
 async def get_missing_symbols(user_id: str):
     """Find portfolio symbols not in any index (need to be added as custom)."""

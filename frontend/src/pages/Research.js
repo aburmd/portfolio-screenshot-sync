@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell } from "recharts";
-import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, fetchPullbackBuys, fetchPositionMonitor, checkStock, refreshIndexes, fetchCustomSymbols, addCustomSymbol, deleteCustomSymbol, fetchMissingSymbols } from "../services/api";
+import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, fetchPullbackBuys, fetchPositionMonitor, checkStock, refreshIndexes, fetchCustomSymbols, addCustomSymbol, deleteCustomSymbol, scanSymbol, fetchMissingSymbols } from "../services/api";
 
 const card = { border: "1px solid #e0e0e0", borderRadius: 8, padding: 16, marginBottom: 16, background: "#fafafa" };
 const btn = { padding: "6px 16px", cursor: "pointer", borderRadius: 4, fontSize: 13 };
@@ -636,6 +636,16 @@ function SettingsSection({ userId }) {
   const handleAdd = async (sym) => {
     await addCustomSymbol(market, sym);
     setNewSymbol("");
+    try {
+      const result = await scanSymbol(market, sym);
+      if (result.error) {
+        alert(`Added ${sym} but scan failed: ${result.error}`);
+      } else {
+        alert(`${sym} added and scanned: price=${result.current_price}, MA50=${result.ma50 || '—'}, history=${result.has_history ? 'yes' : 'no'}`);
+      }
+    } catch (e) {
+      alert(`Added ${sym} to list. Scan failed: ${e.message}. Will be picked up on next daily run.`);
+    }
     load();
   };
 
@@ -648,9 +658,12 @@ function SettingsSection({ userId }) {
 
   const handleAddAll = async () => {
     const syms = missing[market] || [];
+    let scanned = 0;
     for (const s of syms) {
       await addCustomSymbol(market, s.symbol, s.stock_name);
+      try { await scanSymbol(market, s.symbol); scanned++; } catch (e) { /* continue */ }
     }
+    alert(`Added ${syms.length} symbols, scanned ${scanned} successfully.`);
     load();
   };
 
