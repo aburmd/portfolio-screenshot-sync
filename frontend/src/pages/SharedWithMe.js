@@ -14,6 +14,7 @@ function SharedWithMe({ user }) {
   const [prices, setPrices] = useState({});
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [livePrice, setLivePrice] = useState(false);
 
   const userId = user?.userId || user?.username;
 
@@ -45,7 +46,7 @@ function SharedWithMe({ user }) {
       const data = await fetchPortfolio(share.owner_id);
       setPortfolio(data);
       const symbols = [...new Set(data.map((d) => d.symbol).filter((s) => s && s !== "UNKNOWN"))];
-      if (symbols.length > 0) setPrices(await fetchPrices(symbols));
+      if (symbols.length > 0) setPrices(await fetchPrices(symbols, [], livePrice));
     } catch (e) { setMessage("Failed to load portfolio"); }
     setLoading(false);
   };
@@ -55,6 +56,15 @@ function SharedWithMe({ user }) {
       <div>
         <button onClick={() => setViewing(null)} style={{ marginBottom: 12 }}>← Back to list</button>
         <h3>📊 {viewing.owner_email}'s Portfolio</h3>
+        <div style={{ marginBottom: 8, display: "flex", gap: 8, alignItems: "center" }}>
+          <button onClick={() => { setLivePrice(!livePrice); }} style={{
+            padding: "3px 10px", border: livePrice ? "2px solid #2e7d32" : "1px solid #ccc",
+            borderRadius: 3, background: livePrice ? "#e8f5e9" : "#fff",
+            cursor: "pointer", fontWeight: livePrice ? "bold" : "normal", fontSize: 12,
+          }}>{livePrice ? "🟢 Live" : "⚪ Static"}</button>
+          <span style={{ color: "#999", fontSize: 11 }}>{livePrice ? "(real-time prices)" : "(daily close prices)"}</span>
+          {livePrice && <button onClick={() => viewPortfolio(viewing)} style={{ fontSize: 11, padding: "2px 8px", cursor: "pointer" }}>🔄 Refresh</button>}
+        </div>
         <PortfolioTable data={portfolio} prices={prices} loading={loading} readOnly />
         <button onClick={() => handleRevoke(viewing.owner_id)}
           style={{ marginTop: 16, color: "#d32f2f", border: "1px solid #d32f2f", background: "none", padding: "6px 16px", cursor: "pointer" }}>
