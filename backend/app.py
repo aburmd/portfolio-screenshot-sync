@@ -2578,16 +2578,21 @@ async def get_position_monitor(user_id: str, platform: str = None):
         pe_limit = sector_median_pe * 2  # quality = PE below 2x peer median
         if op_margins and op_margins > 40:
             pe_limit = sector_median_pe * 3  # moat gets 3x peer median
-        is_quality = (op_margins and op_margins > 5 and fwd_pe and 0 < fwd_pe < pe_limit)
+        # Use forward PE, fallback to trailing PE for quality check
+        trailing_pe = cached.get("trailing_pe")
+        effective_pe = fwd_pe or trailing_pe
+        pe_source = "fwd" if fwd_pe else ("trail" if trailing_pe else None)
+        is_quality = (op_margins and op_margins > 5 and effective_pe and 0 < effective_pe < pe_limit)
 
         if ma200 and price < ma200:
             if is_quality:
+                pe_label = f"{effective_pe:.0f}x({'F' if pe_source == 'fwd' else 'T'})"
                 if pnl_pct <= -15:
                     signal = "AVERAGE"
-                    reason = f"Below 200MA but quality (OpMgn {op_margins:.0f}%, PE {fwd_pe:.0f}x) \u2014 average down"
+                    reason = f"Below 200MA but quality (OpMgn {op_margins:.0f}%, PE {pe_label}) \u2014 average down"
                 else:
                     signal = "HOLD"
-                    reason = f"Below 200MA but quality (OpMgn {op_margins:.0f}%, PE {fwd_pe:.0f}x) \u2014 hold, watch recovery"
+                    reason = f"Below 200MA but quality (OpMgn {op_margins:.0f}%, PE {pe_label}) \u2014 hold, watch recovery"
             else:
                 signal = "SELL"
                 reason = "Below 200MA + weak fundamentals \u2014 cut losses"
@@ -2625,10 +2630,13 @@ async def get_position_monitor(user_id: str, platform: str = None):
             "sector": stock_sector, "industry": stock_industry,
             "peer_median_pe": round(sector_median_pe, 1),
             "pe_limit": round(pe_limit, 1),
+            "pe_source": pe_source,
+            "effective_pe": round(effective_pe, 2) if effective_pe else None,
             "quality_tier": "moat" if (op_margins and op_margins > 40) else "quality" if (op_margins and op_margins > 5) else "weak",
             "operating_margins": op_margins,
             "revenue_growth": rev_growth,
             "forward_pe": fwd_pe,
+            "trailing_pe": trailing_pe,
         })
 
     results.sort(key=lambda x: x.get("pnl_pct", 0))
@@ -2711,7 +2719,12 @@ async def check_stock(symbol: str, market: str = "US", user_id: str = None):
             sector_pes_list.sort()
             sector_median_pe = sector_pes_list[len(sector_pes_list)//2]
     pe_limit = sector_median_pe * 2
-    is_quality = (op_margins and op_margins > 5 and fwd_pe and 0 < fwd_pe < pe_limit)
+    if op_margins and op_margins > 40:
+        pe_limit = sector_median_pe * 3
+    trailing_pe_val = cached.get("trailing_pe") or (round(info["trailingPE"], 2) if info.get("trailingPE") else None)
+    effective_pe = fwd_pe or trailing_pe_val
+    pe_source = "fwd" if fwd_pe else ("trail" if trailing_pe_val else None)
+    is_quality = (op_margins and op_margins > 5 and effective_pe and 0 < effective_pe < pe_limit)
 
     # Signal for non-portfolio stock
     signal = "NEUTRAL"

@@ -521,7 +521,7 @@ function PositionMonitorSection({ userId }) {
       {/* Portfolio Monitor */}
       <div style={{ ...card, padding: 8, fontSize: 11, lineHeight: 1.6, background: "#fff3e0", border: "1px solid #ffb74d" }}>
         <div style={{ fontWeight: "bold", fontSize: 12, marginBottom: 2 }}>🚦 Signal Logic</div>
-        <div><b>Quality Check:</b> OpMgn &gt; 5% AND Fwd PE &lt; peer limit (industry median × 2, or × 3 for moat stocks with OpMgn &gt; 40%)</div>
+        <div><b>Quality Check:</b> OpMgn &gt; 5% AND PE &lt; peer limit. PE = Forward PE (F), fallback to Trailing PE (T) if no analyst coverage.</div>
         <div>🔴 <b>SELL:</b> Below 200MA + NOT quality | Below 200MA + down &gt;20% + NOT quality</div>
         <div>🟡 <b>AVERAGE:</b> Below 200MA + quality + P/L ≤ -15% — average down</div>
         <div>🔵 <b>HOLD:</b> Below 200MA + quality | Pullback in uptrend | Moderate gain (5-20%)</div>
@@ -576,7 +576,7 @@ function PositionMonitorSection({ userId }) {
             <th style={{ padding: 6, textAlign: "right" }}>50MA</th>
             <th style={{ padding: 6, textAlign: "right" }}>200MA</th>
             <th style={{ padding: 6, textAlign: "right" }}>Op Mgn</th>
-            <th style={{ padding: 6, textAlign: "right" }}>Fwd PE</th>
+            <th style={{ padding: 6, textAlign: "right" }}>PE</th>
             <th style={{ padding: 6, textAlign: "left" }}>Reason</th>
           </tr></thead>
           <tbody>
@@ -595,12 +595,13 @@ function PositionMonitorSection({ userId }) {
                   <td style={{ padding: 6, textAlign: "right", color: r.above_50ma ? "#2e7d32" : "#c62828" }}>{r.ma50 ? cur + r.ma50.toLocaleString() : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right", color: r.above_200ma ? "#2e7d32" : "#c62828" }}>{r.ma200 ? cur + r.ma200.toLocaleString() : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{r.operating_margins != null ? `${r.operating_margins.toFixed(1)}%` : "—"}</td>
-                  <td style={{ padding: 6, textAlign: "right" }}>{r.forward_pe != null ? `${r.forward_pe.toFixed(1)}x` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{r.effective_pe != null ? <span>{r.effective_pe.toFixed(1)}x<sup style={{ fontSize: 9, color: r.pe_source === "fwd" ? "#2e7d32" : "#ff9800" }}>{r.pe_source === "fwd" ? "F" : "T"}</sup></span> : (r.forward_pe != null ? `${r.forward_pe.toFixed(1)}x` : "—")}</td>
                   <td style={{ padding: 6, fontSize: 11, maxWidth: 200 }}>
                     {r.reason}
-                    {r.quality_tier && r.forward_pe && <div style={{ fontSize: 10, color: "#999", marginTop: 2 }}>
+                    {r.quality_tier && (r.forward_pe || r.trailing_pe) && <div style={{ fontSize: 10, color: "#999", marginTop: 2 }}>
                       {r.quality_tier === "moat" ? "🛡️ Moat" : r.quality_tier === "quality" ? "✅ Quality" : "⚠️ Weak"}
                       {r.peer_median_pe ? ` | Peer PE: ${r.peer_median_pe}x | Limit: ${r.pe_limit}x` : ""}
+                      {r.pe_source ? ` | Using: ${r.pe_source === "fwd" ? "Forward" : "Trailing"} PE` : ""}
                       {r.industry ? ` | ${r.industry}` : ""}
                     </div>}
                   </td>
