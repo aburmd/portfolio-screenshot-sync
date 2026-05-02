@@ -2210,6 +2210,25 @@ async def get_fundamentals(symbol: str, market: str = "US", period: str = "annua
     return {**meta_out, "data": all_data, "cached": False, "period": period}
 
 
+def _enrich_with_agg(results, market):
+    """Add AGG reference prices (close_1d through close_3m) to each result for % computation."""
+    history_table = ddb.Table(STOCK_HISTORY_TABLE)
+    for r in results:
+        sym = r.get("symbol", "")
+        if not sym:
+            continue
+        try:
+            resp = history_table.get_item(Key={"market_symbol": f"{market}#{sym}", "date": "AGG"})
+            agg = resp.get("Item")
+            if agg:
+                for k in ["close_1d", "close_3d", "close_1w", "close_3w", "close_1m", "close_3m"]:
+                    if k in agg:
+                        r[k] = float(agg[k]) if hasattr(agg[k], "is_finite") else agg[k]
+        except Exception:
+            pass
+    return results
+
+
 @app.get("/research/screener/{market}")
 async def get_screener_results(market: str):
     """Get earnings dip screener results for a market (US or IN)."""
@@ -2220,6 +2239,7 @@ async def get_screener_results(market: str):
     for item in items:
         row = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
         results.append(row)
+    results = _enrich_with_agg(results, market.upper())
     results.sort(key=lambda x: x.get("market_cap", 0), reverse=True)
     return results
 
@@ -2346,6 +2366,7 @@ async def get_buy_candidates(market: str):
         row["quality_tier"] = "moat" if (op_margins and op_margins > 40) else "quality" if (op_margins and op_margins > 5) else "weak"
         results.append(row)
 
+    results = _enrich_with_agg(results, market.upper())
     results.sort(key=lambda x: (-x["total_score"], -(x.get("market_cap") or 0)))
     return results
 
@@ -2438,6 +2459,7 @@ async def get_pullback_buys(market: str):
         row["quality_tier"] = "moat" if (op_margins and op_margins > 40) else "quality" if (op_margins and op_margins > 5) else "weak"
         results.append(row)
 
+    results = _enrich_with_agg(results, market.upper())
     results.sort(key=lambda x: (-x["total_score"], -(x.get("market_cap") or 0)))
     return results
 
