@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import PortfolioTable from "../components/PortfolioTable";
-import { getSharedWithMe, getPendingViewer, viewerRespond, revokeShare, fetchPortfolio, fetchPrices } from "../services/api";
+import { getSharedWithMe, getPendingViewer, viewerRespond, revokeShare, fetchPortfolio, fetchPrices, fetchPriceChanges } from "../services/api";
 
 const th = { textAlign: "left", padding: "6px 8px", borderBottom: "2px solid #ddd", background: "#f5f5f5" };
 const td = { padding: "6px 8px", borderBottom: "1px solid #eee" };
@@ -15,6 +15,9 @@ function SharedWithMe({ user }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [livePrice, setLivePrice] = useState(false);
+  const [priceChanges, setPriceChanges] = useState({});
+  const [lastClosePrices, setLastClosePrices] = useState({});
+  const [showExtendedPct, setShowExtendedPct] = useState(false);
 
   const userId = user?.userId || user?.username;
 
@@ -45,8 +48,14 @@ function SharedWithMe({ user }) {
     try {
       const data = await fetchPortfolio(share.owner_id);
       setPortfolio(data);
-      const symbols = [...new Set(data.map((d) => d.symbol).filter((s) => s && s !== "UNKNOWN"))];
-      if (symbols.length > 0) setPrices(await fetchPrices(symbols, [], livePrice));
+      const usdSymbols = [...new Set(data.filter(d => (!d.currency || d.currency === "USD") && d.symbol && d.symbol !== "UNKNOWN").map(d => d.symbol))];
+      const inrSymbols = [...new Set(data.filter(d => d.currency === "INR" && d.symbol && d.symbol !== "UNKNOWN").map(d => d.symbol))];
+      if (usdSymbols.length > 0 || inrSymbols.length > 0) {
+        const screenerPrices = await fetchPrices(usdSymbols, inrSymbols, false);
+        setLastClosePrices(screenerPrices);
+        setPrices(livePrice ? await fetchPrices(usdSymbols, inrSymbols, true) : screenerPrices);
+        setPriceChanges(await fetchPriceChanges(usdSymbols, inrSymbols));
+      }
     } catch (e) { setMessage("Failed to load portfolio"); }
     setLoading(false);
   };
@@ -64,8 +73,16 @@ function SharedWithMe({ user }) {
           }}>{livePrice ? "🟢 Live" : "⚪ Static"}</button>
           <span style={{ color: "#999", fontSize: 11 }}>{livePrice ? "(real-time prices)" : "(daily close prices)"}</span>
           {livePrice && <button onClick={() => viewPortfolio(viewing)} style={{ fontSize: 11, padding: "2px 8px", cursor: "pointer" }}>🔄 Refresh</button>}
+          <span style={{ marginLeft: 8 }}>|</span>
+          <button onClick={() => setShowExtendedPct(!showExtendedPct)} style={{
+            padding: "3px 10px", border: showExtendedPct ? "2px solid #1565c0" : "1px solid #ccc",
+            borderRadius: 3, background: showExtendedPct ? "#e3f2fd" : "#fff",
+            cursor: "pointer", fontWeight: showExtendedPct ? "bold" : "normal", fontSize: 12,
+          }}>{showExtendedPct ? "1W 3W 1M 3M ✔" : "1W 3W 1M 3M"}</button>
         </div>
-        <PortfolioTable data={portfolio} prices={prices} loading={loading} readOnly />
+        <PortfolioTable data={portfolio} prices={prices} loading={loading} readOnly
+          priceChanges={priceChanges} showExtendedPct={showExtendedPct}
+          livePrice={livePrice} lastClosePrices={lastClosePrices} />
         <button onClick={() => handleRevoke(viewing.owner_id)}
           style={{ marginTop: 16, color: "#d32f2f", border: "1px solid #d32f2f", background: "none", padding: "6px 16px", cursor: "pointer" }}>
           Remove this shared dashboard
