@@ -2229,6 +2229,33 @@ def _enrich_with_agg(results, market):
     return results
 
 
+def _enrich_with_last_earnings(results, market):
+    """For stocks missing report_date, look up last EARN# record from history table."""
+    history_table = ddb.Table(STOCK_HISTORY_TABLE)
+    for r in results:
+        if r.get("report_date"):
+            continue
+        sym = r.get("symbol", "")
+        if not sym:
+            continue
+        try:
+            resp = history_table.query(
+                KeyConditionExpression=Key("market_symbol").eq(f"{market}#{sym}") & Key("date").begins_with("EARN#"),
+                ScanIndexForward=False, Limit=1
+            )
+            items = resp.get("Items", [])
+            if items:
+                earn = items[0]
+                r["report_date"] = earn.get("report_date", "")
+                if earn.get("pre_earnings_price"):
+                    r["pre_earnings_price"] = float(earn["pre_earnings_price"]) if hasattr(earn["pre_earnings_price"], "is_finite") else earn["pre_earnings_price"]
+                if earn.get("cumulative_drop") is not None:
+                    r["cumulative_drop"] = float(earn["cumulative_drop"]) if hasattr(earn["cumulative_drop"], "is_finite") else earn["cumulative_drop"]
+        except Exception:
+            pass
+    return results
+
+
 @app.get("/research/screener/{market}")
 async def get_screener_results(market: str):
     """Get earnings dip screener results for a market (US or IN)."""
@@ -2240,6 +2267,7 @@ async def get_screener_results(market: str):
         row = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
         results.append(row)
     results = _enrich_with_agg(results, market.upper())
+    results = _enrich_with_last_earnings(results, market.upper())
     results.sort(key=lambda x: x.get("market_cap", 0), reverse=True)
     return results
 
@@ -2367,6 +2395,7 @@ async def get_buy_candidates(market: str):
         results.append(row)
 
     results = _enrich_with_agg(results, market.upper())
+    results = _enrich_with_last_earnings(results, market.upper())
     results.sort(key=lambda x: (-x["total_score"], -(x.get("market_cap") or 0)))
     return results
 
@@ -2460,6 +2489,7 @@ async def get_pullback_buys(market: str):
         results.append(row)
 
     results = _enrich_with_agg(results, market.upper())
+    results = _enrich_with_last_earnings(results, market.upper())
     results.sort(key=lambda x: (-x["total_score"], -(x.get("market_cap") or 0)))
     return results
 
@@ -2530,7 +2560,11 @@ async def scan_single_symbol(market: str, symbol: str):
 
     screener_table = ddb.Table(SCREENER_TABLE)
     store_stock(screener_table, mkt, sym, data, now)
-    store_history(mkt, sym, hist)
+    try:
+        screener_item = screener_table.get_item(Key={"market": mkt, "symbol": sym}).get("Item")
+    except Exception:
+        screener_item = None
+    store_history(mkt, sym, hist, data, screener_item)
 
     return {
         "symbol": sym, "market": mkt,

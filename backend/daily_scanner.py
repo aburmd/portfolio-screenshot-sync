@@ -242,8 +242,8 @@ def store_stock(table, market, sym, data, now):
     table.put_item(Item=item)
 
 
-def store_history(market, sym, hist):
-    """Store today's OHLC + compute AGG reference prices from history."""
+def store_history(market, sym, hist, data=None, screener_item=None):
+    """Store today's OHLC + fundamentals snapshot + AGG reference prices + earnings archive."""
     if hist is None or hist.empty:
         return
     history_table = ddb.Table(HISTORY_TABLE)
@@ -252,17 +252,25 @@ def store_history(market, sym, hist):
     today_idx = hist.index[-1]
     ttl_90 = int((datetime.now(timezone.utc) + timedelta(days=90)).timestamp())
 
-    # Store today's OHLC
+    # Store today's OHLC + fundamentals snapshot
     try:
         today_date = today_idx.strftime("%Y-%m-%d")
-        history_table.put_item(Item={
+        daily = {
             "market_symbol": pk, "date": today_date,
             "open": Decimal(str(round(float(hist["Open"].iloc[-1]), 2))),
             "high": Decimal(str(round(float(hist["High"].iloc[-1]), 2))),
             "low": Decimal(str(round(float(hist["Low"].iloc[-1]), 2))),
             "close": Decimal(str(round(float(close.iloc[-1]), 2))),
             "ttl": ttl_90,
-        })
+        }
+        # Add fundamentals snapshot (same TTL, enables PE/EPS trajectory)
+        if data:
+            for k in ["forward_pe", "trailing_pe", "forward_eps", "trailing_eps",
+                       "operating_margins", "revenue_growth", "earnings_growth", "market_cap"]:
+                v = data.get(k)
+                if v is not None:
+                    daily[k] = Decimal(str(round(v, 4))) if isinstance(v, float) else Decimal(str(v))
+        history_table.put_item(Item=daily)
     except Exception:
         return
 
@@ -274,8 +282,34 @@ def store_history(market, sym, hist):
         if n > days:
             val = float(close.iloc[-(days + 1)])
             agg[key] = Decimal(str(round(val, 2)))
-
     history_table.put_item(Item=agg)
+
+    # Archive earnings event permanently (SK=EARN#date, no TTL)
+    if screener_item and screener_item.get("report_date") and screener_item.get("pre_earnings_price"):
+        earn_sk = f"EARN#{screener_item['report_date']}"
+        try:
+            existing_earn = history_table.get_item(Key={"market_symbol": pk, "date": earn_sk}).get("Item")
+        except Exception:
+            existing_earn = None
+        earn_record = {
+            "market_symbol": pk, "date": earn_sk,
+            "report_date": screener_item["report_date"],
+            "pre_earnings_price": screener_item["pre_earnings_price"],
+            "post_price": Decimal(str(round(data["current_price"], 2))) if data and data.get("current_price") else None,
+        }
+        if screener_item.get("cumulative_drop") is not None:
+            earn_record["cumulative_drop"] = screener_item["cumulative_drop"]
+        # Snapshot fundamentals at earnings time
+        if data:
+            for k in ["forward_pe", "trailing_pe", "forward_eps", "trailing_eps",
+                       "operating_margins", "revenue_growth", "earnings_growth", "market_cap"]:
+                v = data.get(k)
+                if v is not None:
+                    earn_record[k] = Decimal(str(round(v, 4))) if isinstance(v, float) else Decimal(str(v))
+        # Only write if new or update cumulative_drop (it changes over the 7-day window)
+        if not existing_earn or screener_item.get("cumulative_drop") is not None:
+            earn_record = {k: v for k, v in earn_record.items() if v is not None}
+            history_table.put_item(Item=earn_record)
 
 
 def handler(event, context):
@@ -301,7 +335,12 @@ def handler(event, context):
         data, hist = scan_stock(sym, market, info)
         if data:
             store_stock(table, market, sym, data, now)
-            store_history(market, sym, hist)
+            # Read back screener item for earnings archive (has report_date + pre_earnings_price)
+            try:
+                screener_item = table.get_item(Key={"market": market, "symbol": sym}).get("Item")
+            except Exception:
+                screener_item = None
+            store_history(market, sym, hist, data, screener_item)
             scanned += 1
 
     print(f"Daily Stock Scanner complete: {scanned}/{total} updated")
