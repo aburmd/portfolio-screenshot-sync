@@ -10,15 +10,15 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine,
 } from "recharts";
+import "../styles/position-tracker.css";
 
 const btn = { padding: "6px 14px", cursor: "pointer", borderRadius: 4, border: "1px solid #ccc", background: "#fff", fontSize: 13 };
 const btnPrimary = { ...btn, background: "#1976d2", color: "#fff", border: "none" };
 const btnDanger = { ...btn, color: "#d32f2f", border: "1px solid #d32f2f" };
-const card = { border: "1px solid #e0e0e0", borderRadius: 8, padding: 16, marginBottom: 16, background: "#fafafa" };
-const subTab = (active) => ({ padding: "6px 16px", cursor: "pointer", border: "none", borderBottom: active ? "2px solid #1976d2" : "2px solid transparent", background: "none", fontWeight: active ? "bold" : "normal", fontSize: 13 });
 
 const clr = (v) => (v > 0 ? "#2e7d32" : v < 0 ? "#c62828" : "#333");
 const fmt = (v) => v != null ? v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
+const subTab = (active) => ({ borderBottom: active ? "2px solid #1976d2" : "2px solid transparent", fontWeight: active ? "bold" : "normal" });
 
 // Currency conversion helper
 function convertValue(value, fromCurrency, toCurrency, exchangeRate) {
@@ -88,7 +88,7 @@ export default function PositionTracker({ user }) {
       <h3 style={{ marginBottom: 8 }}>📈 Position Tracker</h3>
 
       {/* Platform selector */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+      <div className="pt-controls">
         <label style={{ fontSize: 12, fontWeight: "bold" }}>Platform:</label>
         <select value={selectedPlatform} onChange={e => { setSelectedPlatform(e.target.value); setEditingName(false); }}
           style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #ccc", fontSize: 13 }}>
@@ -114,7 +114,7 @@ export default function PositionTracker({ user }) {
 
       {/* Currency toggle */}
       {exchangeRate && (
-        <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 12, fontSize: 12 }}>
+        <div className="pt-currency-bar">
           <span style={{ fontWeight: "bold" }}>Currency:</span>
           {["default", "USD", "INR"].map(c => (
             <button key={c} onClick={() => { if (selectedPlatform !== "all" || c !== "default") setDisplayCurrency(c); }}
@@ -130,7 +130,7 @@ export default function PositionTracker({ user }) {
         </div>
       )}
 
-      <nav style={{ borderBottom: "1px solid #eee", marginBottom: 16 }}>
+      <nav className="pt-nav">
         <button style={subTab(tab === "freeze")} onClick={() => setTab("freeze")}>Freeze & Diff</button>
         <button style={subTab(tab === "cashflows")} onClick={() => setTab("cashflows")}>Cash Flows</button>
         <button style={subTab(tab === "positions")} onClick={() => setTab("positions")}>Positions</button>
@@ -224,13 +224,13 @@ function FreezeSection({ userId, platform, getDisplayName }) {
       {diffs && diffs.map((diff) => {
         const needsSell = diff.changes.filter((c) => c.needs_sold_price);
         return (
-          <div key={diff.platform} style={card}>
+          <div key={diff.platform} className="pt-card">
             <h4 style={{ margin: "0 0 8px" }}>{diff.platform}</h4>
             <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
               Snapshot: {diff.snapshot_date || "just now"} | Previous: {diff.previous_snapshot_date || "none (first freeze)"}
               {diff.auto_deposit != null && <span style={{ color: "#1976d2", marginLeft: 8 }}>💰 Auto-deposit: {fmt(diff.auto_deposit)}</span>}
             </p>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table className="pt-table">
               <thead>
                 <tr style={{ background: "#f5f5f5" }}>
                   <th style={{ padding: 6, textAlign: "left" }}>Type</th>
@@ -278,7 +278,7 @@ function FreezeSection({ userId, platform, getDisplayName }) {
       {snapshots.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <h4>Snapshot History</h4>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table className="pt-table">
             <thead><tr style={{ background: "#f5f5f5" }}>
               <th style={{ padding: 6, textAlign: "left" }}>Platform</th>
               <th style={{ padding: 6, textAlign: "left" }}>Date</th>
@@ -369,7 +369,7 @@ function CashFlowSection({ userId, platform: selectedPlatform, getDisplayName, d
     <div>
       {/* Projected Summary */}
       {filtered.length > 0 && (
-        <div style={{ ...card, background: "#f0f7ff", border: "1px solid #90caf9", marginBottom: 12 }}>
+        <div className="pt-card" style={{ background: "#f0f7ff", border: "1px solid #90caf9" }}>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>💰 Cash Flow Summary</div>
           <div style={{ display: "flex", gap: 24, fontSize: 13 }}>
             <span style={{ color: "#2e7d32" }}>⬇ Deposits: {fmt(totalDep)}</span>
@@ -380,7 +380,7 @@ function CashFlowSection({ userId, platform: selectedPlatform, getDisplayName, d
         </div>
       )}
 
-      <div style={{ ...card, display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+      <div className="pt-card pt-form">
         <label style={{ fontSize: 12 }}>Platform<br />
           <input value={platform} onChange={(e) => setPlatform(e.target.value)} placeholder="e.g. prostocks" style={{ padding: 4, width: 120 }} />
         </label>
@@ -410,7 +410,7 @@ function CashFlowSection({ userId, platform: selectedPlatform, getDisplayName, d
       </div>
 
       {importResult && (
-        <div style={{ ...card, background: importResult.error ? "#fce4ec" : "#e8f5e9", fontSize: 13 }}>
+        <div className="pt-card" style={{ background: importResult.error ? "#fce4ec" : "#e8f5e9", fontSize: 13 }}>
           {importResult.error ? `❌ ${importResult.error}` : (
             <>
               ✅ Imported {importResult.imported} new transactions from {importResult.files_processed} files
@@ -425,7 +425,7 @@ function CashFlowSection({ userId, platform: selectedPlatform, getDisplayName, d
       )}
 
       {filtered.length > 0 && (
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <table className="pt-table">
           <thead><tr style={{ background: "#f5f5f5" }}>
             <th style={{ padding: 6, textAlign: "left" }}>Platform</th>
             <th style={{ padding: 6, textAlign: "left" }}>Type</th>
@@ -494,7 +494,7 @@ function PositionsSection({ userId, platform: selectedPlatform, displayCurrency,
       <h4>Open Positions ({openFiltered.length})</h4>
       {openFiltered.length > 0 ? (
         <>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 8 }}>
+          <table className="pt-table" style={{ marginBottom: 8 }}>
             <thead><tr style={{ background: "#e8f5e9" }}>
               <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
               <th style={{ padding: 6, textAlign: "left" }}>Name</th>
@@ -541,7 +541,7 @@ function PositionsSection({ userId, platform: selectedPlatform, displayCurrency,
 
       <h4>Closed Positions ({closedFiltered.length})</h4>
       {closedFiltered.length > 0 ? (
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <table className="pt-table">
           <thead><tr style={{ background: "#ffebee" }}>
             <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
             <th style={{ padding: 6, textAlign: "left" }}>Name</th>
@@ -597,12 +597,12 @@ function XirrSection({ userId, platform: selectedPlatform, getDisplayName, displ
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
+      <div className="pt-xirr-cards">
         {filteredPlatforms.map((p) => {
           const cur = p.currency || "USD";
           const isINR = cur === "INR";
           return (
-          <div key={p.platform} style={{ ...card, minWidth: 200, flex: 1 }}>
+          <div key={p.platform} className="pt-card">
             <h4 style={{ margin: "0 0 8px" }}>{getDisplayName(p.platform)}</h4>
             <div style={{ fontSize: 28, fontWeight: "bold", color: clr(p.xirr) }}>{p.xirr_pct}</div>
             {p.total_pnl !== undefined && (
@@ -629,7 +629,7 @@ function XirrSection({ userId, platform: selectedPlatform, getDisplayName, displ
         })}
       </div>
 
-      <div style={{ ...card, background: "#e3f2fd" }}>
+      <div className="pt-card" style={{ background: "#e3f2fd" }}>
         <h4 style={{ margin: "0 0 8px" }}>Overall (USD)</h4>
         <div style={{ fontSize: 32, fontWeight: "bold", color: clr(data.overall.xirr) }}>{data.overall.xirr_pct}</div>
         {data.overall.total_pnl !== undefined && (
@@ -768,7 +768,7 @@ function PerformanceSection({ userId, platform: selectedPlatform, displayCurrenc
   return (
     <div>
       {/* Timeframe selector */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
+      <div className="pt-period-bar">
         {PERIODS.map(p => (
           <button key={p} style={periodBtn(period === p.toLowerCase() || period === p)}
             onClick={() => setPeriod(p === "Custom" ? "custom" : p)}>
@@ -787,7 +787,7 @@ function PerformanceSection({ userId, platform: selectedPlatform, displayCurrenc
 
       {/* Summary card */}
       {chartData && chartData.data_points.length > 0 && (
-        <div style={{ ...card, display: "flex", gap: 20, flexWrap: "wrap", background: isPositive ? "#e8f5e9" : "#ffebee" }}>
+        <div className="pt-card pt-summary-cards" style={{ background: isPositive ? "#e8f5e9" : "#ffebee" }}>
           <div><span style={{ fontSize: 12, color: "#666" }}>Start Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(cv(s.start_value))}</span></div>
           <div><span style={{ fontSize: 12, color: "#666" }}>End Value</span><br /><span style={{ fontSize: 18, fontWeight: "bold" }}>{cur}{fmt(cv(s.end_value))}</span></div>
           <div><span style={{ fontSize: 12, color: "#666" }}>Period Gain</span><br />
@@ -801,7 +801,7 @@ function PerformanceSection({ userId, platform: selectedPlatform, displayCurrenc
         </div>
       )}
       {chartData && chartData.data_points.length > 0 && s.net_invested > 0 && (
-        <div style={{ ...card, display: "flex", gap: 20, flexWrap: "wrap", background: "#f5f5f5", padding: 12 }}>
+        <div className="pt-card pt-summary-cards" style={{ background: "#f5f5f5" }}>
           <div><span style={{ fontSize: 11, color: "#666" }}>Net Deposited</span><br /><span style={{ fontSize: 15, fontWeight: "bold" }}>{cur}{fmt(cv(s.net_invested))}</span></div>
           <div><span style={{ fontSize: 11, color: "#666" }}>Unrealized P/L</span><br /><span style={{ fontSize: 15, fontWeight: "bold", color: clr(s.unrealized_pnl) }}>{s.unrealized_pnl >= 0 ? "+" : ""}{cur}{fmt(cv(s.unrealized_pnl))}</span></div>
           <div><span style={{ fontSize: 11, color: "#666" }}>Realized P/L</span><br /><span style={{ fontSize: 15, fontWeight: "bold", color: clr(s.realized_pnl) }}>{s.realized_pnl >= 0 ? "+" : ""}{cur}{fmt(cv(s.realized_pnl))}</span></div>
@@ -864,7 +864,7 @@ function PerformanceSection({ userId, platform: selectedPlatform, displayCurrenc
       {lotsOpen && (
         <div style={{ marginTop: 12 }}>
           {/* Add lot form */}
-          <div style={{ ...card, display: "flex", gap: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div className="pt-card pt-lot-form">
             <label style={{ fontSize: 11 }}>Symbol<br />
               <input value={lotForm.symbol} onChange={e => setLotForm({ ...lotForm, symbol: e.target.value })}
                 placeholder="AAPL" style={{ padding: 3, width: 80 }} />
@@ -899,7 +899,7 @@ function PerformanceSection({ userId, platform: selectedPlatform, displayCurrenc
 
           {/* Lots table */}
           {lots.length > 0 ? (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginTop: 8 }}>
+            <table className="pt-table" style={{ marginTop: 8, fontSize: 12 }}>
               <thead><tr style={{ background: "#f5f5f5" }}>
                 <th style={{ padding: 5, textAlign: "left" }}>Symbol</th>
                 <th style={{ padding: 5, textAlign: "left" }}>Name</th>

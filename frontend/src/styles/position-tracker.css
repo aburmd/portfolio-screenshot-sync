@@ -1,0 +1,149 @@
+/* PositionTracker — responsive layout */
+
+.pt-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.pt-currency-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 12px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.pt-nav {
+  border-bottom: 1px solid #eee;
+  margin-bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+}
+.pt-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  background: #fafafa;
+}
+.pt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.pt-table th {
+  padding: 6px;
+  text-align: left;
+  background: #f5f5f5;
+  border-bottom: 2px solid #ddd;
+  white-space: nowrap;
+}
+.pt-table td {
+  padding: 6px;
+  border-bottom: 1px solid #eee;
+  white-space: nowrap;
+}
+.pt-form {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.pt-form label {
+  font-size: 12px;
+}
+.pt-xirr-cards {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.pt-xirr-cards > div {
+  min-width: 200px;
+  flex: 1;
+}
+.pt-period-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.pt-summary-cards {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.pt-lot-form {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.pt-lot-form label {
+  font-size: 11px;
+}
+.pt-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 900px) {
+  .pt-table {
+    font-size: 12px;
+  }
+  .pt-table th, .pt-table td {
+    padding: 4px;
+  }
+  .pt-xirr-cards > div {
+    min-width: 160px;
+  }
+}
+
+@media (max-width: 600px) {
+  .pt-controls {
+    gap: 6px;
+  }
+  .pt-nav button {
+    font-size: 11px;
+    padding: 5px 8px;
+    flex: 1;
+    text-align: center;
+  }
+  .pt-card {
+    padding: 10px;
+    margin-bottom: 10px;
+  }
+  .pt-table {
+    font-size: 11px;
+  }
+  .pt-table th, .pt-table td {
+    padding: 3px;
+  }
+  .pt-currency-bar {
+    font-size: 10px;
+    gap: 4px;
+  }
+  .pt-currency-bar button {
+    padding: 2px 6px !important;
+    font-size: 10px !important;
+  }
+  .pt-xirr-cards {
+    gap: 8px;
+  }
+  .pt-xirr-cards > div {
+    min-width: 140px;
+  }
+  .pt-summary-cards {
+    gap: 10px;
+  }
+  .pt-period-bar button {
+    padding: 3px 8px !important;
+    font-size: 11px !important;
+  }
+  .pt-lot-form input, .pt-lot-form select {
+    width: 60px !important;
+  }
+}
