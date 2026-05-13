@@ -852,9 +852,11 @@ function FundamentalsSection() {
   const chartData = data?.data?.map(d => {
     const eps = d.eps || 0;
     const annualizedEps = data?.period === "quarterly" ? eps * 4 : eps;
+    // Check if this data point was updated within last 7 days
+    const isRecent = d.updated_at ? (Date.now() - new Date(d.updated_at).getTime()) < 7 * 24 * 60 * 60 * 1000 : false;
     return {
       year: d.label ? (d.type === "estimate" ? `${d.label}E` : d.label) : (d.type === "estimate" ? `${d.year}E` : `${d.year}`),
-      operating_income: d.operating_income, pe: d.pe, eps: d.eps, revenue: d.revenue, type: d.type,
+      operating_income: d.operating_income, pe: d.pe, eps: d.eps, revenue: d.revenue, type: d.type, isRecent,
       op_income_display: d.operating_income != null ? d.operating_income / (data.currency === "INR" ? 1e7 : 1e6) : null,
       custom_pe: annualizedEps > 0 && cp > 0 ? parseFloat((cp / annualizedEps).toFixed(2)) : null,
       buy_pe: annualizedEps > 0 && bp > 0 ? parseFloat((bp / annualizedEps).toFixed(2)) : null,
@@ -913,9 +915,18 @@ function FundamentalsSection() {
                 }} />
                 <Legend />
                 <Bar yAxisId="left" dataKey="op_income_display" name={`Op Income (${opUnit})`} radius={[4, 4, 0, 0]}>
-                  {chartData.map((d, i) => (<Cell key={i} fill={d.type === "estimate" ? "#90caf9" : (d.op_income_display >= 0 ? "#2e7d32" : "#c62828")} opacity={d.type === "estimate" ? 0.6 : 1} />))}
+                  {chartData.map((d, i) => {
+                    // Recently updated (within 7 days): bright orange border effect
+                    // Estimates: light blue | Actuals: green (positive) / red (negative)
+                    let fill = d.type === "estimate" ? "#90caf9" : (d.op_income_display >= 0 ? "#2e7d32" : "#c62828");
+                    if (d.isRecent) fill = d.type === "estimate" ? "#ff9800" : "#1565c0";
+                    return <Cell key={i} fill={fill} opacity={d.type === "estimate" && !d.isRecent ? 0.6 : 1} stroke={d.isRecent ? "#ff6f00" : "none"} strokeWidth={d.isRecent ? 2 : 0} />;
+                  })}
                 </Bar>
-                <Line yAxisId="right" type="monotone" dataKey="pe" name="Historical P/E" stroke="#ff9800" strokeWidth={2} dot={{ r: 4, fill: "#ff9800" }} connectNulls strokeDasharray={cp > 0 ? "5 3" : undefined} />
+                <Line yAxisId="right" type="monotone" dataKey="pe" name="Historical P/E" stroke="#ff9800" strokeWidth={2} dot={({ cx, cy, payload }) => {
+                  if (!cx || !cy) return null;
+                  return <circle cx={cx} cy={cy} r={payload.isRecent ? 7 : 4} fill={payload.isRecent ? "#ff6f00" : "#ff9800"} stroke={payload.isRecent ? "#fff" : "none"} strokeWidth={payload.isRecent ? 2 : 0} />;
+                }} connectNulls strokeDasharray={cp > 0 ? "5 3" : undefined} />
                 {cp > 0 && <Line yAxisId="right" type="monotone" dataKey="custom_pe" name={`P/E @ ${curSym}${cp}`} stroke="#9c27b0" strokeWidth={2} dot={{ r: 4, fill: "#9c27b0" }} connectNulls />}
                 {bp > 0 && <Line yAxisId="right" type="monotone" dataKey="buy_pe" name={`Buy @ ${curSym}${bp}`} stroke="#2e7d32" strokeWidth={2} dot={{ r: 3, fill: "#2e7d32" }} connectNulls strokeDasharray="8 4" />}
                 {sp > 0 && <Line yAxisId="right" type="monotone" dataKey="sell_pe" name={`Sell @ ${curSym}${sp}`} stroke="#c62828" strokeWidth={2} dot={{ r: 3, fill: "#c62828" }} connectNulls strokeDasharray="8 4" />}
@@ -942,16 +953,18 @@ function FundamentalsSection() {
               <th style={{ padding: 6, textAlign: "left" }}>Type</th>
             </tr></thead>
             <tbody>
-              {data.data.map((d, i) => (
-                <tr key={i} style={{ background: d.type === "estimate" ? "#f3f8ff" : "transparent" }}>
-                  <td style={{ padding: 6, fontWeight: "bold" }}>{d.label || d.year}{d.type === "estimate" ? "E" : ""}</td>
+              {data.data.map((d, i) => {
+                const isRecent = d.updated_at ? (Date.now() - new Date(d.updated_at).getTime()) < 7 * 24 * 60 * 60 * 1000 : false;
+                return (
+                <tr key={i} style={{ background: isRecent ? "#fff3e0" : d.type === "estimate" ? "#f3f8ff" : "transparent" }}>
+                  <td style={{ padding: 6, fontWeight: "bold" }}>{d.label || d.year}{d.type === "estimate" ? "E" : ""}{isRecent && <span style={{ marginLeft: 4, fontSize: 9, color: "#ff6f00" }}>● NEW</span>}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{d.revenue != null ? `${curSym}${fmtLarge(d.revenue)}` : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right", color: d.operating_income != null ? (d.operating_income >= 0 ? "#2e7d32" : "#c62828") : "#999" }}>{d.operating_income != null ? `${curSym}${fmtLarge(d.operating_income)}` : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{d.eps != null ? `${curSym}${d.eps.toFixed(2)}` : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{d.pe != null ? `${d.pe.toFixed(1)}x` : "—"}</td>
-                  <td style={{ padding: 6, fontSize: 11, color: "#666" }}>{d.type === "estimate" ? "📊 Est" : "✅ Actual"}</td>
-                </tr>
-              ))}
+                  <td style={{ padding: 6, fontSize: 11, color: "#666" }}>{d.type === "estimate" ? "📊 Est" : "✅ Actual"}{isRecent && " 🔥"}</td>
+                </tr>);
+              })}
             </tbody>
           </table>
         </div>

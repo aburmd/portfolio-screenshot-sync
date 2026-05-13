@@ -2118,7 +2118,7 @@ async def get_fundamentals(symbol: str, market: str = "US", period: str = "annua
 
         record = {
             "year": sk, "label": display_label, "fiscal_date": col.strftime("%Y-%m-%d"),
-            "type": "actual",
+            "type": "actual", "updated_at": now.isoformat(),
             "operating_income": round(op_inc, 0) if op_inc is not None else None,
             "revenue": round(revenue, 0) if revenue is not None else None,
             "eps": round(eps, 2) if eps is not None else None,
@@ -2174,6 +2174,7 @@ async def get_fundamentals(symbol: str, market: str = "US", period: str = "annua
 
                 est_record = {
                     "year": sk, "label": display_label, "type": "estimate",
+                    "updated_at": now.isoformat(),
                     "operating_income": est_op_inc,
                     "revenue": round(est_rev, 0) if est_rev else None,
                     "eps": round(est_eps, 2) if est_eps else None,
