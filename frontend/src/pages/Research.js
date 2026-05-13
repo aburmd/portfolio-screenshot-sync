@@ -222,7 +222,7 @@ function BuyCandidatesSection() {
   const [minScore, setMinScore] = useState(4);
   const [maOnly, setMaOnly] = useState(false);
   const [earnOnly, setEarnOnly] = useState(false);
-  const [sortConfig, setSortConfig] = useState({ key: "total_score", dir: "desc" });
+  const [sortConfig, setSortConfig] = useState({ key: "entry_score", dir: "desc" });
   const [showExtPct, setShowExtPct] = useState(false);
 
   const loadResults = useCallback(async () => {
@@ -282,6 +282,7 @@ function BuyCandidatesSection() {
         <div style={{ color: "#2e7d32" }}>●●● <b>Fund:</b> Op Margin &gt; 0 +1 | Rev Growth &gt; 0 +1 | Fwd PE &lt; peer limit +1</div>
         <div style={{ color: "#ff9800" }}>●● <b>Earn:</b> Reported earnings last 7 days +1 | Post-earnings dip ≥ 6% +1</div>
         <div style={{ color: "#666" }}><b>PE Limit:</b> Quality (OpMgn &gt;5%) = 2× industry median PE | Moat (OpMgn &gt;40%) = 3× industry median PE</div>
+        <div style={{ color: "#555", marginTop: 4, fontSize: 11 }}><b>⚖️ Weighted Entry Score:</b> Tech×1.5 + Fund×1.0 + Earn×1.0 — trend confirmation matters for buy timing</div>
       </div>
 
       {error && <div className="r-card" style={{ background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
@@ -292,7 +293,8 @@ function BuyCandidatesSection() {
           <thead><tr style={{ background: "#f5f5f5" }}>
             <SortHeader label="Symbol" sortKey="symbol" sortConfig={sortConfig} onSort={onSort} align="left" />
             <SortHeader label="Name" sortKey="name" sortConfig={sortConfig} onSort={onSort} align="left" />
-            <SortHeader label="Score" sortKey="total_score" sortConfig={sortConfig} onSort={onSort} align="center" />
+            <SortHeader label="Entry" sortKey="entry_score" sortConfig={sortConfig} onSort={onSort} align="center" />
+            <SortHeader label="Raw" sortKey="total_score" sortConfig={sortConfig} onSort={onSort} align="center" />
             <th style={{ padding: 6, textAlign: "center" }}>Tech</th>
             <th style={{ padding: 6, textAlign: "center" }}>Fund</th>
             <th style={{ padding: 6, textAlign: "center" }}>Earn</th>
@@ -318,7 +320,8 @@ function BuyCandidatesSection() {
                 <tr key={r.symbol} style={{ background: bg }}>
                   <td style={{ padding: 6, fontWeight: "bold" }}>{r.symbol}</td>
                   <td style={{ padding: 6, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</td>
-                  <td style={{ padding: 6, textAlign: "center", fontWeight: "bold", fontSize: 14 }}>{r.total_score}/8</td>
+                  <td style={{ padding: 6, textAlign: "center", fontWeight: "bold", fontSize: 14, color: "#1565c0" }}>{r.entry_score}</td>
+                  <td style={{ padding: 6, textAlign: "center", fontSize: 11, color: "#999" }}>{r.total_score}/8</td>
                   <td style={{ padding: 6, textAlign: "center" }}>{scoreBar(r.tech_score, 3, "#1565c0")}</td>
                   <td style={{ padding: 6, textAlign: "center" }}>{scoreBar(r.fund_score, 3, "#2e7d32")}</td>
                   <td style={{ padding: 6, textAlign: "center" }}>{scoreBar(r.earn_score, 2, "#ff9800")}</td>
@@ -354,7 +357,7 @@ function PullbackBuySection() {
   const [error, setError] = useState(null);
   const [peFilter, setPeFilter] = useState(false);
   const [peThreshold, setPeThreshold] = useState(30);
-  const [sortConfig, setSortConfig] = useState({ key: "total_score", dir: "desc" });
+  const [sortConfig, setSortConfig] = useState({ key: "pullback_score", dir: "desc" });
   const [showExtPct, setShowExtPct] = useState(false);
 
   const loadResults = useCallback(async () => {
@@ -379,7 +382,7 @@ function PullbackBuySection() {
         <div style={{ fontSize: 14, fontWeight: "bold", marginBottom: 4 }}>🎯 Pullback Buy — Strong Uptrend + 50MA Pullback</div>
         <div style={{ fontSize: 12, color: "#333", lineHeight: 1.6 }}>
           <b>Filters (all mandatory):</b> Price &gt; 150MA &gt; 200MA | 200MA rising | Price within +3% to -8% of 50MA | Op Margin &gt; 0 | Rev Growth ≥ 0<br/>
-          <b>Scoring:</b> Tech (0-3) + Fund (0-3) + Earn (0-2) = 0-8<br/>
+          <b>Scoring:</b> Tech (0-3) + Fund (0-3) + Earn (0-2) = 0-8 | <b>⚖️ Pullback Score:</b> Tech×0.5 + Fund×1.5 + Earn×1.0 (Fund weighted higher — Tech is low by definition in a pullback)<br/>
           <b>PE Check:</b> Quality (OpMgn &gt;5%) = PE &lt; 2× industry median | Moat (OpMgn &gt;40%) = PE &lt; 3× industry median<br/>
           <b>Why it works:</b> 50MA acts as dynamic support in uptrends — institutional buyers step in here.
         </div>
@@ -410,7 +413,8 @@ function PullbackBuySection() {
           <thead><tr style={{ background: "#e8f5e9" }}>
             <SortHeader label="Symbol" sortKey="symbol" sortConfig={sortConfig} onSort={onSort} align="left" />
             <SortHeader label="Name" sortKey="name" sortConfig={sortConfig} onSort={onSort} align="left" />
-            <SortHeader label="Score" sortKey="total_score" sortConfig={sortConfig} onSort={onSort} align="center" />
+            <SortHeader label="PB Score" sortKey="pullback_score" sortConfig={sortConfig} onSort={onSort} align="center" />
+            <SortHeader label="Raw" sortKey="total_score" sortConfig={sortConfig} onSort={onSort} align="center" />
             <th style={{ padding: 6, textAlign: "center" }}>Tech</th>
             <th style={{ padding: 6, textAlign: "center" }}>Fund</th>
             <th style={{ padding: 6, textAlign: "center" }}>Earn</th>
@@ -442,7 +446,8 @@ function PullbackBuySection() {
                 <tr key={r.symbol} style={{ background: bg }}>
                   <td style={{ padding: 6, fontWeight: "bold" }}>{r.symbol}</td>
                   <td style={{ padding: 6, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</td>
-                  <td style={{ padding: 6, textAlign: "center", fontWeight: "bold", fontSize: 14 }}>{r.total_score}/8</td>
+                  <td style={{ padding: 6, textAlign: "center", fontWeight: "bold", fontSize: 14, color: "#2e7d32" }}>{r.pullback_score}</td>
+                  <td style={{ padding: 6, textAlign: "center", fontSize: 11, color: "#999" }}>{r.total_score}/8</td>
                   <td style={{ padding: 6, textAlign: "center" }}>{[0,1,2].map(j => <span key={j} style={{ color: j < r.tech_score ? "#1565c0" : "#ddd" }}>●</span>)}</td>
                   <td style={{ padding: 6, textAlign: "center" }}>{[0,1,2].map(j => <span key={j} style={{ color: j < r.fund_score ? "#2e7d32" : "#ddd" }}>●</span>)}</td>
                   <td style={{ padding: 6, textAlign: "center" }}>{[0,1].map(j => <span key={j} style={{ color: j < r.earn_score ? "#ff9800" : "#ddd" }}>●</span>)}</td>
@@ -568,6 +573,7 @@ function PositionMonitorSection({ userId }) {
         <div>🟡 <b>AVERAGE:</b> Below 200MA + quality + P/L ≤ -15% — average down</div>
         <div>🔵 <b>HOLD:</b> Below 200MA + quality | Pullback in uptrend | Moderate gain (5-20%)</div>
         <div>🟢 <b>TAKE PROFIT:</b> In uptrend + P/L ≥ 20% — sell half, trail rest</div>
+        <div style={{ color: "#555", marginTop: 4, fontSize: 11 }}><b>⚖️ Hold Score:</b> Tech×0.5 + Fund×2.0 + Earn×1.5 — high = strong fundamentals, don't sell on price dips. Sorted weakest first.</div>
       </div>
       <div className="r-card r-controls">
         <label style={{ fontSize: 12 }}>Platform<br />
@@ -610,6 +616,7 @@ function PositionMonitorSection({ userId }) {
           <thead><tr style={{ background: "#f5f5f5" }}>
             <th style={{ padding: 6, textAlign: "left" }}>Symbol</th>
             <th style={{ padding: 6, textAlign: "center" }}>Signal</th>
+            <th style={{ padding: 6, textAlign: "center" }}>Hold</th>
             <th style={{ padding: 6, textAlign: "right" }}>Qty</th>
             <th style={{ padding: 6, textAlign: "right" }}>Avg</th>
             <th style={{ padding: 6, textAlign: "right" }}>Price</th>
@@ -629,6 +636,7 @@ function PositionMonitorSection({ userId }) {
                 <tr key={r.symbol + r.platform} style={{ background: bg }}>
                   <td style={{ padding: 6, fontWeight: "bold" }}>{r.symbol}</td>
                   <td style={{ padding: 6, textAlign: "center" }}><span style={signalStyle(r.signal)}>{r.signal}</span></td>
+                  <td style={{ padding: 6, textAlign: "center", fontWeight: "bold", fontSize: 12, color: r.hold_score >= 7 ? "#2e7d32" : r.hold_score >= 4 ? "#f57f17" : "#c62828" }}>{r.hold_score != null ? r.hold_score : "—"}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{r.quantity}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{cur}{r.avg_buy_price?.toLocaleString()}</td>
                   <td style={{ padding: 6, textAlign: "right" }}>{cur}{r.current_price?.toLocaleString()}</td>
