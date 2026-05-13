@@ -277,12 +277,11 @@ function BuyCandidatesSection() {
       </div>
 
       <div className="r-card r-legend">
-        <div><b>Score = Tech (0-3) + Fund (0-3) + Earn (0-2) = 0-8</b></div>
-        <div style={{ color: "#1565c0" }}>●●● <b>Tech:</b> MA aligned (P&gt;50MA&gt;150MA&gt;200MA) +1 | 200MA trending up +1 | Near 52w high &amp; above 52w low +1</div>
-        <div style={{ color: "#2e7d32" }}>●●● <b>Fund:</b> Op Margin &gt; 0 +1 | Rev Growth &gt; 0 +1 | Fwd PE &lt; peer limit +1</div>
-        <div style={{ color: "#ff9800" }}>●● <b>Earn:</b> Reported earnings last 7 days +1 | Post-earnings dip ≥ 6% +1</div>
-        <div style={{ color: "#666" }}><b>PE Limit:</b> Quality (OpMgn &gt;5%) = 2× industry median PE | Moat (OpMgn &gt;40%) = 3× industry median PE</div>
-        <div style={{ color: "#555", marginTop: 4, fontSize: 11 }}><b>⚖️ Weighted Entry Score:</b> Tech×1.5 + Fund×1.0 + Earn×1.0 — trend confirmation matters for buy timing</div>
+        <div><b>⚖️ Entry Score = Tech×1.5 + Fund×1.0 + Earn×1.0 (max 9.5)</b> — trend confirmation weighted higher for buy timing</div>
+        <div style={{ color: "#1565c0" }}>●●● <b>Tech (0-3):</b> MA aligned (P&gt;50&gt;150&gt;200) +1 | 200MA up +1 | Near 52w high &amp; above low +1</div>
+        <div style={{ color: "#2e7d32" }}>●●● <b>Fund (0-3):</b> Op Margin &gt; 0 +1 | Rev Growth &gt; 0 +1 | Fwd PE &lt; peer limit +1</div>
+        <div style={{ color: "#ff9800" }}>●● <b>Earn (0-2):</b> Reported last 7 days +1 | Post-earnings dip ≥ 6% +1</div>
+        <div style={{ color: "#666" }}><b>PE Limit:</b> Quality (OpMgn &gt;5%) = 2× industry median | Moat (OpMgn &gt;40%) = 3× industry median</div>
       </div>
 
       {error && <div className="r-card" style={{ background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
@@ -381,10 +380,10 @@ function PullbackBuySection() {
       <div className="r-card" style={{ background: "#e8f5e9", border: "1px solid #66bb6a" }}>
         <div style={{ fontSize: 14, fontWeight: "bold", marginBottom: 4 }}>🎯 Pullback Buy — Strong Uptrend + 50MA Pullback</div>
         <div style={{ fontSize: 12, color: "#333", lineHeight: 1.6 }}>
-          <b>Filters (all mandatory):</b> Price &gt; 150MA &gt; 200MA | 200MA rising | Price within +3% to -8% of 50MA | Op Margin &gt; 0 | Rev Growth ≥ 0<br/>
-          <b>Scoring:</b> Tech (0-3) + Fund (0-3) + Earn (0-2) = 0-8 | <b>⚖️ Pullback Score:</b> Tech×0.5 + Fund×1.5 + Earn×1.0 (Fund weighted higher — Tech is low by definition in a pullback)<br/>
-          <b>PE Check:</b> Quality (OpMgn &gt;5%) = PE &lt; 2× industry median | Moat (OpMgn &gt;40%) = PE &lt; 3× industry median<br/>
-          <b>Why it works:</b> 50MA acts as dynamic support in uptrends — institutional buyers step in here.
+          <b>⚖️ Pullback Score = Tech×0.5 + Fund×1.5 + Earn×1.0 (max 8.0)</b> — Fund weighted higher because Tech is low by definition in a pullback<br/>
+          <b>Filters:</b> Price &gt; 150MA &gt; 200MA | 200MA rising | Price within +3% to -8% of 50MA | Op Margin &gt; 0 | Rev Growth ≥ 0<br/>
+          <b>PE Limit:</b> Quality (OpMgn &gt;5%) = 2× industry median | Moat (OpMgn &gt;40%) = 3× industry median<br/>
+          <b>Why:</b> 50MA = dynamic support in uptrends. Institutional buyers step in here.
         </div>
       </div>
 
