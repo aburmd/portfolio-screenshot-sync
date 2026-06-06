@@ -2506,6 +2506,84 @@ async def get_pullback_buys(market: str):
     return results
 
 
+@app.get("/research/value-entry/{market}")
+async def get_value_entry(market: str):
+    """Value Entry Score: quality stocks at discount with catalyst. Score 0-8."""
+    table = ddb.Table(SCREENER_TABLE)
+    resp = table.query(KeyConditionExpression=Key("market").eq(market.upper()))
+    items = resp.get("Items", [])
+
+    # Industry/sector median PE
+    from collections import defaultdict
+    by_industry = defaultdict(list)
+    for item in items:
+        pe = float(item["forward_pe"]) if item.get("forward_pe") else None
+        if pe and 0 < pe < 200 and item.get("industry"):
+            by_industry[item["industry"]].append(pe)
+    ind_medians = {k: sorted(v)[len(v)//2] for k, v in by_industry.items() if len(v) >= 3}
+
+    results = []
+    for item in items:
+        row = {k: float(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
+        price = row.get("current_price", 0)
+        ma50 = row.get("ma50")
+        ma150 = row.get("ma150")
+        ma200 = row.get("ma200")
+        op_margins = row.get("operating_margins")
+        rev_growth = row.get("revenue_growth")
+        fwd_pe = row.get("forward_pe")
+
+        # Quality score (0-3)
+        quality = 0
+        if op_margins and op_margins > 0:
+            quality += 1
+        if rev_growth is not None and rev_growth >= 0:
+            quality += 1
+        peer_median = ind_medians.get(row.get("industry", ""), 25)
+        pe_limit = peer_median * 3 if (op_margins and op_margins > 40) else peer_median * 2
+        if fwd_pe and 0 < fwd_pe < pe_limit:
+            quality += 1
+
+        # Discount score (0-3) — below MAs = discounted
+        discount = 0
+        if ma50 and price < ma50:
+            discount += 1
+        if ma150 and price < ma150:
+            discount += 1
+        if ma200 and price < ma200:
+            discount += 1
+
+        # Catalyst score (0-2)
+        catalyst = 0
+        if row.get("report_date"):
+            catalyst += 1
+            if row.get("cumulative_drop") is not None and row["cumulative_drop"] <= -6:
+                catalyst += 1
+
+        total = quality + discount + catalyst
+
+        # Weak flag
+        weak = (op_margins is not None and op_margins <= 0) or (rev_growth is not None and rev_growth < 0)
+
+        row["value_score"] = total
+        row["quality_score"] = quality
+        row["discount_score"] = discount
+        row["catalyst_score"] = catalyst
+        row["weak"] = weak
+        row["peer_median_pe"] = round(peer_median, 1)
+        row["pe_limit"] = round(pe_limit, 1)
+        # Distance from MAs
+        row["pct_from_50ma"] = round((price - ma50) / ma50 * 100, 2) if ma50 and ma50 > 0 else None
+        row["pct_from_150ma"] = round((price - ma150) / ma150 * 100, 2) if ma150 and ma150 > 0 else None
+        row["pct_from_200ma"] = round((price - ma200) / ma200 * 100, 2) if ma200 and ma200 > 0 else None
+        results.append(row)
+
+    results = _enrich_with_agg(results, market.upper())
+    results = _enrich_with_last_earnings(results, market.upper())
+    results.sort(key=lambda x: (-x["value_score"], -x["discount_score"], -(x.get("market_cap") or 0)))
+    return results
+
+
 @app.post("/research/refresh-indexes/{market}")
 async def refresh_indexes(market: str):
     """Refresh index constituent lists from FMP."""

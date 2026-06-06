@@ -249,6 +249,11 @@ export async function fetchPullbackBuys(market) {
   if (!res.ok) throw new Error("Failed to fetch pullback buys");
   return res.json();
 }
+export async function fetchValueEntry(market) {
+  const res = await fetch(`${API_BASE}/research/value-entry/${market}`);
+  if (!res.ok) throw new Error("Failed to fetch value entry");
+  return res.json();
+}
 export async function fetchPositionMonitor(userId, platform) {
   let url = `${API_BASE}/research/position-monitor/${userId}`;
   if (platform) url += `?platform=${platform}`;

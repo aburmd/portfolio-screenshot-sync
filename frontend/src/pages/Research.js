@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell } from "recharts";
-import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, fetchPullbackBuys, fetchPositionMonitor, checkStock, refreshIndexes, fetchCustomSymbols, addCustomSymbol, deleteCustomSymbol, scanSymbol, fetchMissingSymbols } from "../services/api";
+import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, fetchPullbackBuys, fetchValueEntry, fetchPositionMonitor, checkStock, refreshIndexes, fetchCustomSymbols, addCustomSymbol, deleteCustomSymbol, scanSymbol, fetchMissingSymbols } from "../services/api";
 import "../styles/research.css";
 
 const btnPrimary = { padding: "6px 16px", cursor: "pointer", borderRadius: 4, fontSize: 13, background: "#1976d2", color: "#fff", border: "none" };
@@ -52,6 +52,7 @@ export default function Research({ user }) {
         <button style={tabBtn(tab === "screener")} onClick={() => setTab("screener")}>Earnings Screener</button>
         <button style={tabBtn(tab === "candidates")} onClick={() => setTab("candidates")}>Buy Candidates</button>
         <button style={tabBtn(tab === "pullback", "#2e7d32")} onClick={() => setTab("pullback")}>🎯 Pullback Buy</button>
+        <button style={tabBtn(tab === "value", "#e65100")} onClick={() => setTab("value")}>🎯 Value Entry</button>
         <button style={tabBtn(tab === "monitor", "#c62828")} onClick={() => setTab("monitor")}>🚦 Position Monitor</button>
         <button style={tabBtn(tab === "fundamentals")} onClick={() => setTab("fundamentals")}>Fundamentals</button>
         <button style={tabBtn(tab === "settings", "#616161")} onClick={() => setTab("settings")}>⚙️ Settings</button>
@@ -59,6 +60,7 @@ export default function Research({ user }) {
       {tab === "screener" && <ScreenerSection />}
       {tab === "candidates" && <BuyCandidatesSection />}
       {tab === "pullback" && <PullbackBuySection />}
+      {tab === "value" && <ValueEntrySection />}
       {tab === "monitor" && <PositionMonitorSection userId={userId} />}
       {tab === "fundamentals" && <FundamentalsSection />}
       {tab === "settings" && <SettingsSection userId={userId} />}
@@ -475,6 +477,139 @@ function PullbackBuySection() {
         </table>
         </div>
       ) : !loading && <p style={{ color: "#999" }}>No stocks in pullback zone right now. Run MA Scanner from Buy Candidates tab first.</p>}
+    </div>
+  );
+}
+
+function ValueEntrySection() {
+  const [market, setMarket] = useState("US");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [minScore, setMinScore] = useState(4);
+  const [hideWeak, setHideWeak] = useState(true);
+  const [sortConfig, setSortConfig] = useState({ key: "value_score", dir: "desc" });
+  const [showExtPct, setShowExtPct] = useState(false);
+
+  const loadResults = useCallback(async () => {
+    setLoading(true); setError(null);
+    try { setResults(enrichPct(await fetchValueEntry(market))); } catch (e) { setError(e.message); }
+    setLoading(false);
+  }, [market]);
+
+  useEffect(() => { loadResults(); }, [loadResults]);
+
+  const onSort = (key) => setSortConfig(prev => ({ key, dir: prev.key === key && prev.dir === "desc" ? "asc" : "desc" }));
+  const scoreBar = (score, max, color) => <span>{Array.from({length: max}, (_, i) => <span key={i} style={{ color: i < score ? color : "#ddd" }}>●</span>)}</span>;
+
+  let filtered = results.filter(r => r.value_score >= minScore);
+  if (hideWeak) filtered = filtered.filter(r => !r.weak);
+  filtered = applySortAndPct(filtered, sortConfig);
+
+  const curSym = market === "IN" ? "₹" : "$";
+
+  return (
+    <div>
+      <div className="r-card" style={{ background: "#fff3e0", border: "1px solid #ff9800" }}>
+        <div style={{ fontSize: 14, fontWeight: "bold", marginBottom: 4 }}>🎯 Value Entry — Quality Stocks at Discount</div>
+        <div style={{ fontSize: 12, color: "#333", lineHeight: 1.6 }}>
+          <b>Score = Quality (0-3) + Discount (0-3) + Catalyst (0-2) = 0-8</b><br/>
+          <span style={{ color: "#2e7d32" }}>●●●</span> <b>Quality:</b> OpMgn &gt; 0 +1 | RevGr ≥ 0 +1 | PE &lt; industry limit +1<br/>
+          <span style={{ color: "#c62828" }}>●●●</span> <b>Discount:</b> Below 50MA +1 | Below 150MA +1 | Below 200MA +1<br/>
+          <span style={{ color: "#ff9800" }}>●●</span> <b>Catalyst:</b> Earnings last 14 days +1 | Drop ≥ 6% +1<br/>
+          <b>🔴 Weak:</b> OpMgn ≤ 0 or RevGrowth &lt; 0 — flagged, not a buy candidate
+        </div>
+      </div>
+
+      <div className="r-card r-controls">
+        <label style={{ fontSize: 12 }}>Market<br />
+          <select value={market} onChange={e => setMarket(e.target.value)} style={{ padding: 6 }}>
+            <option value="US">US</option><option value="IN">India</option>
+          </select>
+        </label>
+        <button style={btnSecondary} onClick={loadResults}>🔄 Reload</button>
+        <label style={{ fontSize: 12 }}>Min Score<br />
+          <select value={minScore} onChange={e => setMinScore(parseInt(e.target.value))} style={{ padding: 6 }}>
+            {[0,1,2,3,4,5,6,7,8].map(n => <option key={n} value={n}>{n}/8</option>)}
+          </select>
+        </label>
+        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+          <input type="checkbox" checked={hideWeak} onChange={e => setHideWeak(e.target.checked)} /> Hide 🔴 Weak
+        </label>
+        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+          <input type="checkbox" checked={showExtPct} onChange={e => setShowExtPct(e.target.checked)} /> 1W-3M %
+        </label>
+        <span style={{ fontSize: 11, color: "#999" }}>{filtered.length} of {results.length} stocks</span>
+      </div>
+
+      {error && <div className="r-card" style={{ background: "#fce4ec", color: "#c62828" }}>❌ {error}</div>}
+
+      {loading ? <p>Loading...</p> : filtered.length > 0 ? (
+        <div className="r-table-wrap">
+        <table className="r-table">
+          <thead><tr style={{ background: "#fff3e0" }}>
+            <SortHeader label="Symbol" sortKey="symbol" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Name" sortKey="name" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Score" sortKey="value_score" sortConfig={sortConfig} onSort={onSort} align="center" />
+            <th style={{ padding: 6, textAlign: "center" }}>Qual</th>
+            <th style={{ padding: 6, textAlign: "center" }}>Disc</th>
+            <th style={{ padding: 6, textAlign: "center" }}>Cat</th>
+            <th style={{ padding: 6, textAlign: "center" }}>🔴</th>
+            <SortHeader label="Sector" sortKey="sector" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Price" sortKey="current_price" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="vs 50MA" sortKey="pct_from_50ma" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="vs 150MA" sortKey="pct_from_150ma" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="vs 200MA" sortKey="pct_from_200ma" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="1D%" sortKey="pct1d" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="3D%" sortKey="pct3d" sortConfig={sortConfig} onSort={onSort} />
+            {showExtPct && <><SortHeader label="1W%" sortKey="pct1w" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="3W%" sortKey="pct3w" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="1M%" sortKey="pct1m" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="3M%" sortKey="pct3m" sortConfig={sortConfig} onSort={onSort} /></>}
+            <SortHeader label="Op Mgn" sortKey="operating_margins" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="Rev Gr" sortKey="revenue_growth" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="Fwd P/E" sortKey="forward_pe" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="Ind PE" sortKey="peer_median_pe" sortConfig={sortConfig} onSort={onSort} />
+            <SortHeader label="Last Earn" sortKey="report_date" sortConfig={sortConfig} onSort={onSort} align="left" />
+            <SortHeader label="Mkt Cap" sortKey="market_cap" sortConfig={sortConfig} onSort={onSort} />
+          </tr></thead>
+          <tbody>
+            {filtered.map((r, i) => {
+              const bg = r.value_score >= 6 ? "#fff3e0" : r.value_score >= 4 ? "#fffde7" : i % 2 ? "#fafafa" : "#fff";
+              const maClr = (v) => v == null ? "#999" : v < 0 ? "#c62828" : "#2e7d32";
+              return (
+                <tr key={r.symbol} style={{ background: bg }}>
+                  <td style={{ padding: 6, fontWeight: "bold" }}>{r.symbol}</td>
+                  <td style={{ padding: 6, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</td>
+                  <td style={{ padding: 6, textAlign: "center", fontWeight: "bold", fontSize: 14 }}>{r.value_score}/8</td>
+                  <td style={{ padding: 6, textAlign: "center" }}>{scoreBar(r.quality_score, 3, "#2e7d32")}</td>
+                  <td style={{ padding: 6, textAlign: "center" }}>{scoreBar(r.discount_score, 3, "#c62828")}</td>
+                  <td style={{ padding: 6, textAlign: "center" }}>{scoreBar(r.catalyst_score, 2, "#ff9800")}</td>
+                  <td style={{ padding: 6, textAlign: "center" }}>{r.weak ? "🔴" : ""}</td>
+                  <td style={{ padding: 6, fontSize: 11, color: "#666" }}>{r.sector}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{r.current_price?.toLocaleString()}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: maClr(r.pct_from_50ma), fontWeight: "bold" }}>{r.pct_from_50ma != null ? `${r.pct_from_50ma.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: maClr(r.pct_from_150ma), fontWeight: "bold" }}>{r.pct_from_150ma != null ? `${r.pct_from_150ma.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: maClr(r.pct_from_200ma), fontWeight: "bold" }}>{r.pct_from_200ma != null ? `${r.pct_from_200ma.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct1d)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct3d)}</td>
+                  {showExtPct && <><td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct1w)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct3w)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct1m)}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{pctCell(r.pct3m)}</td></>}
+                  <td style={{ padding: 6, textAlign: "right", color: r.operating_margins > 0 ? "#2e7d32" : "#c62828" }}>{r.operating_margins != null ? `${r.operating_margins.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: r.revenue_growth >= 0 ? "#2e7d32" : "#c62828" }}>{r.revenue_growth != null ? `${r.revenue_growth.toFixed(1)}%` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{r.forward_pe != null ? `${r.forward_pe.toFixed(1)}x` : "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right", color: "#666" }}>{r.peer_median_pe != null ? `${r.peer_median_pe.toFixed(1)}x` : "—"}</td>
+                  <td style={{ padding: 6, fontSize: 11 }}>{r.report_date || "—"}</td>
+                  <td style={{ padding: 6, textAlign: "right" }}>{curSym}{fmtLarge(r.market_cap)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        </div>
+      ) : !loading && <p style={{ color: "#999" }}>No stocks match filters. Try lowering min score.</p>}
     </div>
   );
 }
