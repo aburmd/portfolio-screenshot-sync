@@ -50,6 +50,7 @@ function Dashboard({ user }) {
   const [showShare, setShowShare] = useState(false);
   const [myShares, setMyShares] = useState([]);
   const [platformFilter, setPlatformFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [uploadStatus, setUploadStatus] = useState([]);
   const [showStatus, setShowStatus] = useState(false);
   const [displayCurrency, setDisplayCurrency] = useState("default");
@@ -178,7 +179,8 @@ function Dashboard({ user }) {
   const handleRevoke = async (viewerId) => { await revokeShare(userId, viewerId); setMessage("Share revoked"); loadShares(); };
 
   const platforms = [...new Set(portfolio.map((p) => p.platform_name).filter(Boolean))];
-  const filteredPortfolio = platformFilter === "all" ? portfolio : portfolio.filter((p) => p.platform_name === platformFilter);
+  const filteredPortfolio = (platformFilter === "all" ? portfolio : portfolio.filter((p) => p.platform_name === platformFilter))
+    .filter((p) => !searchQuery || p.symbol?.toLowerCase().includes(searchQuery.toLowerCase()) || p.stock_name?.toLowerCase().includes(searchQuery.toLowerCase()));
 
   const statusLabel = (s) => {
     if (s === "pending_admin") return "⏳ Pending Admin";
@@ -195,8 +197,10 @@ function Dashboard({ user }) {
       {showStatus && uploadStatus.length > 0 && <ProcessingStatus items={uploadStatus} />}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 30 }}>
-        <h3 style={{ margin: 0 }}>My Portfolio <span style={{ fontSize: 13, color: "#999", fontWeight: "normal" }}>({portfolio.length} stocks)</span></h3>
+        <h3 style={{ margin: 0 }}>My Portfolio <span style={{ fontSize: 13, color: "#999", fontWeight: "normal" }}>({filteredPortfolio.length}{searchQuery ? ` of ${portfolio.length}` : ""} stocks)</span></h3>
         <div className="dash-actions">
+          <input type="text" placeholder="Search symbol or name..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+            style={{ padding: "5px 10px", border: "1px solid #ccc", borderRadius: 4, fontSize: 12, width: 160 }} />
           <button onClick={() => setShowShare(!showShare)} style={{ marginRight: 8 }}>🔗 Share</button>
           <button onClick={loadPortfolio} disabled={loading} style={{ marginRight: 8 }}>{loading ? "Loading..." : "Refresh"}</button>
           <button onClick={handleDownloadCsv} disabled={portfolio.length === 0}>Download CSV</button>
