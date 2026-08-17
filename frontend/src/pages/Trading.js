@@ -3,6 +3,7 @@ import { API_BASE } from "../services/api";
 
 const fmt = (n, prefix = "$") => n != null ? `${prefix}${Number(n).toFixed(2)}` : "—";
 const pct = (n) => n != null ? <span style={{ color: n >= 0 ? "green" : "red" }}>{n >= 0 ? "+" : ""}{n.toFixed(2)}%</span> : "—";
+const CANCELABLE = ["new", "accepted", "pending_new", "accepted_for_bidding", "held"];
 
 export default function Trading({ user }) {
   const [paper, setPaper] = useState(true);
@@ -12,16 +13,12 @@ export default function Trading({ user }) {
   const [form, setForm] = useState({ symbol: "", qty: "", amount: "", by: "qty", side: "buy", order_type: "market", limit_price: "" });
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const [canceling, setCanceling] = useState(null);
 
   const switchMode = (toLive) => {
-    if (toLive) {
-      if (!window.confirm("⚠️ Switch to LIVE trading?\n\nReal money will be used. Are you sure?")) return;
-    }
+    if (toLive && !window.confirm("⚠️ Switch to LIVE trading?\n\nReal money will be used. Are you sure?")) return;
     setPaper(!toLive);
-    setAccount(null);
-    setPositions([]);
-    setOrders([]);
-    setStatus("");
+    setAccount(null); setPositions([]); setOrders([]); setStatus("");
   };
 
   const load = useCallback(async () => {
@@ -36,27 +33,29 @@ export default function Trading({ user }) {
       setPositions(Array.isArray(pos) ? pos : []);
       setOrders(Array.isArray(ords) ? ords : []);
       if (acct.error) setStatus("❌ " + acct.error);
-    } catch (e) {
-      setStatus("❌ " + e.message);
-    }
+    } catch (e) { setStatus("❌ " + e.message); }
     setLoading(false);
   }, [paper]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Pre-fill form when selecting a position to sell
+  const sellPosition = (p) => {
+    setForm(f => ({ ...f, symbol: p.symbol, side: "sell", by: "qty", qty: p.qty, amount: "" }));
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    setStatus(`Selling ${p.symbol} — adjust qty/amount then click Sell`);
+  };
 
   const placeOrder = async () => {
     const byAmount = form.by === "amount";
     if (!form.symbol) return setStatus("Symbol required");
     if (byAmount && !form.amount) return setStatus("Amount required");
     if (!byAmount && !form.qty) return setStatus("Qty required");
-    // amount mode only works with market orders
     if (byAmount && form.order_type !== "market") return setStatus("Dollar amount only works with Market orders");
     setStatus("Placing order...");
     const body = {
-      symbol: form.symbol.toUpperCase(),
-      side: form.side,
-      order_type: form.order_type,
-      paper,
+      symbol: form.symbol.toUpperCase(), side: form.side,
+      order_type: form.order_type, paper,
       ...(byAmount ? { notional: parseFloat(form.amount) } : { qty: parseFloat(form.qty) }),
       ...(form.order_type === "limit" && form.limit_price ? { limit_price: parseFloat(form.limit_price) } : {}),
     };
@@ -66,25 +65,33 @@ export default function Trading({ user }) {
 
     if (res.error) {
       let msg = res.error;
-      try { const parsed = JSON.parse(msg); msg = parsed.message || msg; } catch {}
+      try { const p = JSON.parse(msg); msg = p.message || msg; } catch {}
       setStatus("❌ " + msg);
     } else {
       const detail = byAmount ? `$${form.amount}` : `${res.qty} shares`;
-      setStatus(`✅ Order placed: ${res.side} ${detail} of ${res.symbol} @ ${res.type} — status: ${res.status}`);      setForm(f => ({ ...f, symbol: "", qty: "", amount: "", limit_price: "" }));
+      setStatus(`✅ Order placed: ${res.side} ${detail} of ${res.symbol} — status: ${res.status}`);
+      setForm(f => ({ ...f, symbol: "", qty: "", amount: "", limit_price: "", side: "buy" }));
       setTimeout(load, 1500);
     }
   };
 
-  const statusColor = { filled: "green", accepted: "#2196f3", pending_new: "#ff9800", canceled: "#999", rejected: "red" };
+  const cancelOrder = async (orderId) => {
+    setCanceling(orderId);
+    const res = await fetch(`${API_BASE}/trading/order/${orderId}?paper=${paper}`, { method: "DELETE" }).then(r => r.json());
+    if (res.error) setStatus("❌ Cancel failed: " + res.error);
+    else setStatus("✅ Order cancelled");
+    setCanceling(null);
+    setTimeout(load, 800);
+  };
+
+  const statusColor = { filled: "green", accepted: "#2196f3", pending_new: "#ff9800", canceled: "#999", rejected: "red", new: "#2196f3" };
 
   return (
-    <div style={{ padding: "20px", maxWidth: 1000, margin: "0 auto" }}>
+    <div style={{ padding: "20px", maxWidth: 1100, margin: "0 auto" }}>
 
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
         <h2 style={{ margin: 0 }}>Trading</h2>
-
-        {/* Paper / Live toggle */}
         <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid #ddd", marginLeft: 8 }}>
           <button onClick={() => switchMode(false)}
             style={{ padding: "6px 18px", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 13,
@@ -97,10 +104,8 @@ export default function Trading({ user }) {
             ⚡ Live
           </button>
         </div>
-
         {!paper && <span style={{ background: "#ff5722", color: "#fff", padding: "3px 10px", borderRadius: 4, fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>REAL MONEY</span>}
         {paper && <span style={{ background: "#e8f5e9", color: "#2e7d32", padding: "3px 10px", borderRadius: 4, fontSize: 12 }}>Paper account — no real money</span>}
-
         <button onClick={load} disabled={loading} style={{ marginLeft: "auto", padding: "6px 14px" }}>
           {loading ? "Loading..." : "↻ Refresh"}
         </button>
@@ -109,12 +114,8 @@ export default function Trading({ user }) {
       {/* Account Summary */}
       {account && (
         <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
-          {[
-            ["Portfolio Value", fmt(account.portfolio_value)],
-            ["Cash", fmt(account.cash)],
-            ["Buying Power", fmt(account.buying_power)],
-            ["Equity", fmt(account.equity)],
-          ].map(([label, val]) => (
+          {[["Portfolio Value", fmt(account.portfolio_value)], ["Cash", fmt(account.cash)],
+            ["Buying Power", fmt(account.buying_power)], ["Equity", fmt(account.equity)]].map(([label, val]) => (
             <div key={label} style={{ background: "#f5f5f5", borderRadius: 8, padding: "12px 20px", minWidth: 140 }}>
               <div style={{ fontSize: 11, color: "#888" }}>{label}</div>
               <div style={{ fontSize: 18, fontWeight: 600 }}>{val}</div>
@@ -133,7 +134,14 @@ export default function Trading({ user }) {
               placeholder="e.g. AAPL" style={{ width: 90, padding: "6px 8px", textTransform: "uppercase" }} />
           </div>
           <div>
-            <div style={{ fontSize: 11, marginBottom: 4 }}>Buy by</div>
+            <div style={{ fontSize: 11, marginBottom: 4 }}>Side</div>
+            <select value={form.side} onChange={e => setForm(f => ({ ...f, side: e.target.value }))} style={{ padding: "6px 8px" }}>
+              <option value="buy">Buy</option>
+              <option value="sell">Sell</option>
+            </select>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, marginBottom: 4 }}>{form.side === "sell" ? "Sell by" : "Buy by"}</div>
             <select value={form.by} onChange={e => setForm(f => ({ ...f, by: e.target.value, order_type: e.target.value === "amount" ? "market" : f.order_type }))} style={{ padding: "6px 8px" }}>
               <option value="qty">Qty (shares)</option>
               <option value="amount">Amount ($)</option>
@@ -152,13 +160,6 @@ export default function Trading({ user }) {
                 placeholder="100" style={{ width: 90, padding: "6px 8px" }} min="1" step="1" />
             </div>
           )}
-          <div>
-            <div style={{ fontSize: 11, marginBottom: 4 }}>Side</div>
-            <select value={form.side} onChange={e => setForm(f => ({ ...f, side: e.target.value }))} style={{ padding: "6px 8px" }}>
-              <option value="buy">Buy</option>
-              <option value="sell">Sell</option>
-            </select>
-          </div>
           <div>
             <div style={{ fontSize: 11, marginBottom: 4 }}>Type</div>
             <select value={form.order_type} onChange={e => setForm(f => ({ ...f, order_type: e.target.value }))} style={{ padding: "6px 8px" }}>
@@ -191,8 +192,8 @@ export default function Trading({ user }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "#f0f0f0" }}>
-                  {["Symbol", "Qty", "Avg Entry", "Current", "Market Value", "Unrealized P/L", "P/L %"].map(h => (
-                    <th key={h} style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
+                  {["Symbol", "Qty", "Avg Entry", "Current", "Market Value", "Unrealized P/L", "P/L %", ""].map(h => (
+                    <th key={h} style={{ padding: "8px 10px", textAlign: h === "Symbol" || h === "" ? "left" : "right", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -204,10 +205,14 @@ export default function Trading({ user }) {
                     <td style={{ padding: "7px 10px", textAlign: "right" }}>{fmt(p.avg_entry_price)}</td>
                     <td style={{ padding: "7px 10px", textAlign: "right" }}>{fmt(p.current_price)}</td>
                     <td style={{ padding: "7px 10px", textAlign: "right" }}>{fmt(p.market_value)}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right", color: p.unrealized_pl >= 0 ? "green" : "red" }}>
-                      {fmt(p.unrealized_pl)}
-                    </td>
+                    <td style={{ padding: "7px 10px", textAlign: "right", color: p.unrealized_pl >= 0 ? "green" : "red" }}>{fmt(p.unrealized_pl)}</td>
                     <td style={{ padding: "7px 10px", textAlign: "right" }}>{pct(p.unrealized_plpc)}</td>
+                    <td style={{ padding: "7px 10px" }}>
+                      <button onClick={() => sellPosition(p)}
+                        style={{ padding: "4px 12px", background: "#f44336", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                        Sell
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -224,7 +229,7 @@ export default function Trading({ user }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "#f0f0f0" }}>
-                  {["Symbol", "Side", "Type", "Qty / Amount", "Filled", "Price", "Status", "Submitted"].map(h => (
+                  {["Symbol", "Side", "Type", "Qty / Amount", "Filled", "Price", "Status", "Submitted", ""].map(h => (
                     <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -235,14 +240,21 @@ export default function Trading({ user }) {
                     <td style={{ padding: "7px 10px", fontWeight: 600 }}>{o.symbol}</td>
                     <td style={{ padding: "7px 10px", color: o.side === "buy" ? "green" : "red", fontWeight: 600 }}>{o.side.toUpperCase()}</td>
                     <td style={{ padding: "7px 10px" }}>{o.type}</td>
-                    <td style={{ padding: "7px 10px" }}>{o.qty}</td>
-                    <td style={{ padding: "7px 10px" }}>{o.filled_qty || o.notional ? (o.filled_qty > 0 ? o.filled_qty : "—") : "—"}</td>
                     <td style={{ padding: "7px 10px" }}>{o.notional ? `$${o.notional}` : (o.qty || "—")}</td>
+                    <td style={{ padding: "7px 10px" }}>{o.filled_qty > 0 ? o.filled_qty : "—"}</td>
                     <td style={{ padding: "7px 10px" }}>{o.filled_avg_price ? fmt(o.filled_avg_price) : (o.limit_price ? fmt(o.limit_price) : "market")}</td>
                     <td style={{ padding: "7px 10px" }}>
                       <span style={{ color: statusColor[o.status] || "#333", fontWeight: 500 }}>{o.status}</span>
                     </td>
                     <td style={{ padding: "7px 10px", color: "#888", fontSize: 12 }}>{o.submitted_at?.slice(0, 16).replace("T", " ")}</td>
+                    <td style={{ padding: "7px 10px" }}>
+                      {CANCELABLE.includes(o.status) && (
+                        <button onClick={() => cancelOrder(o.id)} disabled={canceling === o.id}
+                          style={{ padding: "4px 10px", background: "#fff", color: "#f44336", border: "1px solid #f44336", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                          {canceling === o.id ? "..." : "Cancel"}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -252,9 +264,7 @@ export default function Trading({ user }) {
       )}
 
       {!account && !loading && (
-        <div style={{ color: "#888", marginTop: 20 }}>
-          No account connected. Add your Alpaca API keys to SSM Parameter Store first.
-        </div>
+        <div style={{ color: "#888", marginTop: 20 }}>No account connected. Add your Alpaca API keys to SSM Parameter Store first.</div>
       )}
     </div>
   );

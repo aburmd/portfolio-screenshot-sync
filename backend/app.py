@@ -3039,6 +3039,15 @@ async def trading_list_orders(paper: bool = True, limit: int = 20):
         return {"error": str(e)}
 
 
+@app.delete("/trading/order/{order_id}")
+async def trading_cancel_order(order_id: str, paper: bool = True):
+    try:
+        from alpaca_client import cancel_order
+        return cancel_order(order_id=order_id, paper=paper)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/trading/positions")
 async def trading_positions(paper: bool = True):
     try:

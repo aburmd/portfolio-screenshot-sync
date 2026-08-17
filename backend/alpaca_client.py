@@ -93,6 +93,11 @@ def list_orders(paper: bool = True, limit: int = 20) -> list:
     ]
 
 
+def cancel_order(order_id: str, paper: bool = True) -> dict:
+    _get_client(paper).cancel_order_by_id(order_id)
+    return {"cancelled": order_id}
+
+
 def get_positions(paper: bool = True) -> list:
     client = _get_client(paper)
     positions = client.get_all_positions()
