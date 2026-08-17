@@ -42,9 +42,7 @@ def place_order(symbol: str, qty: float = None, side: str = "buy", order_type: s
     order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
 
     if notional:
-        # Dollar amount — fractional market order
-        from alpaca.trading.requests import MarketOrderRequest as MOR
-        req = MOR(symbol=symbol.upper(), notional=round(notional, 2),
+        req = MarketOrderRequest(symbol=symbol.upper(), notional=round(notional, 2),
                   side=order_side, time_in_force=TimeInForce.DAY)
     elif order_type == "limit" and limit_price:
         req = LimitOrderRequest(
@@ -61,12 +59,13 @@ def place_order(symbol: str, qty: float = None, side: str = "buy", order_type: s
     return {
         "id": str(order.id),
         "symbol": order.symbol,
-        "qty": float(order.qty),
+        "qty": float(order.qty) if order.qty is not None else None,
+        "notional": float(order.notional) if order.notional is not None else None,
         "side": order.side.value,
         "type": order.order_type.value,
         "status": order.status.value,
         "submitted_at": str(order.submitted_at),
-        "limit_price": float(order.limit_price) if order.limit_price else None,
+        "limit_price": float(order.limit_price) if order.limit_price is not None else None,
     }
 
 

@@ -70,8 +70,7 @@ export default function Trading({ user }) {
       setStatus("❌ " + msg);
     } else {
       const detail = byAmount ? `$${form.amount}` : `${res.qty} shares`;
-      setStatus(`✅ Order placed: ${res.side} ${detail} of ${res.symbol} @ ${res.type} — status: ${res.status}`);
-      setForm(f => ({ ...f, symbol: "", qty: "", amount: "", limit_price: "" }));
+      setStatus(`✅ Order placed: ${res.side} ${detail} of ${res.symbol} @ ${res.type} — status: ${res.status}`);      setForm(f => ({ ...f, symbol: "", qty: "", amount: "", limit_price: "" }));
       setTimeout(load, 1500);
     }
   };
