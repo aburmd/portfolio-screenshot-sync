@@ -3,6 +3,10 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+.env.*
+*.env
+secrets.json
+alpaca_keys.py
 *.egg-info/
 venv/
 .venv/
