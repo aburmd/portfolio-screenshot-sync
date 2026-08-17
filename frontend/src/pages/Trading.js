@@ -13,6 +13,17 @@ export default function Trading({ user }) {
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const switchMode = (toLive) => {
+    if (toLive) {
+      if (!window.confirm("⚠️ Switch to LIVE trading?\n\nReal money will be used. Are you sure?")) return;
+    }
+    setPaper(!toLive);
+    setAccount(null);
+    setPositions([]);
+    setOrders([]);
+    setStatus("");
+  };
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -73,11 +84,24 @@ export default function Trading({ user }) {
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
         <h2 style={{ margin: 0 }}>Trading</h2>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-          <input type="checkbox" checked={paper} onChange={e => setPaper(e.target.checked)} />
-          Paper Trading
-        </label>
-        {!paper && <span style={{ background: "#ff5722", color: "#fff", padding: "2px 8px", borderRadius: 4, fontSize: 12 }}>LIVE</span>}
+
+        {/* Paper / Live toggle */}
+        <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid #ddd", marginLeft: 8 }}>
+          <button onClick={() => switchMode(false)}
+            style={{ padding: "6px 18px", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 13,
+              background: paper ? "#e8f5e9" : "#eee", color: paper ? "#2e7d32" : "#999" }}>
+            📄 Paper
+          </button>
+          <button onClick={() => switchMode(true)}
+            style={{ padding: "6px 18px", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 13,
+              background: !paper ? "#ff5722" : "#eee", color: !paper ? "#fff" : "#999" }}>
+            ⚡ Live
+          </button>
+        </div>
+
+        {!paper && <span style={{ background: "#ff5722", color: "#fff", padding: "3px 10px", borderRadius: 4, fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>REAL MONEY</span>}
+        {paper && <span style={{ background: "#e8f5e9", color: "#2e7d32", padding: "3px 10px", borderRadius: 4, fontSize: 12 }}>Paper account — no real money</span>}
+
         <button onClick={load} disabled={loading} style={{ marginLeft: "auto", padding: "6px 14px" }}>
           {loading ? "Loading..." : "↻ Refresh"}
         </button>
@@ -151,8 +175,10 @@ export default function Trading({ user }) {
             </div>
           )}
           <button onClick={placeOrder}
-            style={{ padding: "7px 20px", background: form.side === "buy" ? "#4caf50" : "#f44336", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
-            {form.side === "buy" ? "Buy" : "Sell"}
+            style={{ padding: "7px 20px", background: form.side === "buy" ? "#4caf50" : "#f44336",
+              color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 600,
+              outline: !paper ? "3px solid #ff5722" : "none" }}>
+            {form.side === "buy" ? "Buy" : "Sell"}{!paper ? " (LIVE)" : ""}
           </button>
         </div>
         {status && <div style={{ marginTop: 10, fontSize: 13 }}>{status}</div>}
