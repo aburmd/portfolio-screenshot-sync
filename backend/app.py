@@ -3002,5 +3002,51 @@ async def check_stock(symbol: str, market: str = "US", user_id: str = None):
     }
 
 
+# ── Trading (Alpaca) ─────────────────────────────────────────────────────────
+
+@app.get("/trading/account")
+async def trading_account(paper: bool = True):
+    try:
+        from alpaca_client import get_account
+        return get_account(paper=paper)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/trading/order")
+async def trading_place_order(data: dict):
+    try:
+        from alpaca_client import place_order
+        return place_order(
+            symbol=data["symbol"],
+            qty=float(data["qty"]) if data.get("qty") else None,
+            side=data["side"],
+            order_type=data.get("order_type", "market"),
+            limit_price=data.get("limit_price"),
+            notional=float(data["notional"]) if data.get("notional") else None,
+            paper=data.get("paper", True),
+        )
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/trading/orders")
+async def trading_list_orders(paper: bool = True, limit: int = 20):
+    try:
+        from alpaca_client import list_orders
+        return list_orders(paper=paper, limit=limit)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/trading/positions")
+async def trading_positions(paper: bool = True):
+    try:
+        from alpaca_client import get_positions
+        return get_positions(paper=paper)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # Lambda handler via Mangum
 handler = Mangum(app)

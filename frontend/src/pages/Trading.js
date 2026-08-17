@@ -9,7 +9,7 @@ export default function Trading({ user }) {
   const [account, setAccount] = useState(null);
   const [positions, setPositions] = useState([]);
   const [orders, setOrders] = useState([]);
-  const [form, setForm] = useState({ symbol: "", qty: "", side: "buy", order_type: "market", limit_price: "" });
+  const [form, setForm] = useState({ symbol: "", qty: "", amount: "", by: "qty", side: "buy", order_type: "market", limit_price: "" });
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -34,14 +34,19 @@ export default function Trading({ user }) {
   useEffect(() => { load(); }, [load]);
 
   const placeOrder = async () => {
-    if (!form.symbol || !form.qty) return setStatus("Symbol and qty required");
+    const byAmount = form.by === "amount";
+    if (!form.symbol) return setStatus("Symbol required");
+    if (byAmount && !form.amount) return setStatus("Amount required");
+    if (!byAmount && !form.qty) return setStatus("Qty required");
+    // amount mode only works with market orders
+    if (byAmount && form.order_type !== "market") return setStatus("Dollar amount only works with Market orders");
     setStatus("Placing order...");
     const body = {
       symbol: form.symbol.toUpperCase(),
-      qty: parseFloat(form.qty),
       side: form.side,
       order_type: form.order_type,
       paper,
+      ...(byAmount ? { notional: parseFloat(form.amount) } : { qty: parseFloat(form.qty) }),
       ...(form.order_type === "limit" && form.limit_price ? { limit_price: parseFloat(form.limit_price) } : {}),
     };
     const res = await fetch(`${API_BASE}/trading/order`, {
@@ -51,8 +56,9 @@ export default function Trading({ user }) {
     if (res.error) {
       setStatus("❌ " + res.error);
     } else {
-      setStatus(`✅ Order placed: ${res.side} ${res.qty} ${res.symbol} @ ${res.type} — status: ${res.status}`);
-      setForm(f => ({ ...f, symbol: "", qty: "", limit_price: "" }));
+      const detail = byAmount ? `$${form.amount}` : `${res.qty} shares`;
+      setStatus(`✅ Order placed: ${res.side} ${detail} of ${res.symbol} @ ${res.type} — status: ${res.status}`);
+      setForm(f => ({ ...f, symbol: "", qty: "", amount: "", limit_price: "" }));
       setTimeout(load, 1500);
     }
   };
@@ -102,10 +108,25 @@ export default function Trading({ user }) {
               placeholder="e.g. AAPL" style={{ width: 90, padding: "6px 8px", textTransform: "uppercase" }} />
           </div>
           <div>
-            <div style={{ fontSize: 11, marginBottom: 4 }}>Qty</div>
-            <input type="number" value={form.qty} onChange={e => setForm(f => ({ ...f, qty: e.target.value }))}
-              placeholder="1" style={{ width: 70, padding: "6px 8px" }} min="0.001" step="0.001" />
+            <div style={{ fontSize: 11, marginBottom: 4 }}>Buy by</div>
+            <select value={form.by} onChange={e => setForm(f => ({ ...f, by: e.target.value, order_type: e.target.value === "amount" ? "market" : f.order_type }))} style={{ padding: "6px 8px" }}>
+              <option value="qty">Qty (shares)</option>
+              <option value="amount">Amount ($)</option>
+            </select>
           </div>
+          {form.by === "qty" ? (
+            <div>
+              <div style={{ fontSize: 11, marginBottom: 4 }}>Shares</div>
+              <input type="number" value={form.qty} onChange={e => setForm(f => ({ ...f, qty: e.target.value }))}
+                placeholder="1" style={{ width: 80, padding: "6px 8px" }} min="0.000001" step="any" />
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontSize: 11, marginBottom: 4 }}>Amount ($)</div>
+              <input type="number" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                placeholder="100" style={{ width: 90, padding: "6px 8px" }} min="1" step="1" />
+            </div>
+          )}
           <div>
             <div style={{ fontSize: 11, marginBottom: 4 }}>Side</div>
             <select value={form.side} onChange={e => setForm(f => ({ ...f, side: e.target.value }))} style={{ padding: "6px 8px" }}>
