@@ -10,6 +10,7 @@ import AdminPage from "./pages/AdminPage";
 import SharedWithMe from "./pages/SharedWithMe";
 import PositionTracker from "./pages/PositionTracker";
 import Research from "./pages/Research";
+import Trading from "./pages/Trading";
 
 Amplify.configure(awsConfig);
 
@@ -50,6 +51,7 @@ function AppContent({ signOut, user }) {
         {isAdmin && <button style={tabStyle(page === "admin")} onClick={() => setPage("admin")}>Admin</button>}
         {isAdmin && <button style={tabStyle(page === "tracker")} onClick={() => setPage("tracker")}>Position Tracker</button>}
         {isAdmin && <button style={tabStyle(page === "research")} onClick={() => setPage("research")}>Research</button>}
+        {isAdmin && <button style={tabStyle(page === "trading")} onClick={() => setPage("trading")}>Trading</button>}
       </nav>
 
       {page === "dashboard" && <Dashboard user={user} />}
@@ -57,6 +59,7 @@ function AppContent({ signOut, user }) {
       {page === "admin" && isAdmin && <AdminPage />}
       {page === "tracker" && isAdmin && <PositionTracker user={user} />}
       {page === "research" && isAdmin && <Research user={user} />}
+      {page === "trading" && isAdmin && <Trading user={user} />}
     </div>
   );
 }
