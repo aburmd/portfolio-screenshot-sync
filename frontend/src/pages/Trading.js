@@ -54,7 +54,9 @@ export default function Trading({ user }) {
     }).then(r => r.json());
 
     if (res.error) {
-      setStatus("❌ " + res.error);
+      let msg = res.error;
+      try { const parsed = JSON.parse(msg); msg = parsed.message || msg; } catch {}
+      setStatus("❌ " + msg);
     } else {
       const detail = byAmount ? `$${form.amount}` : `${res.qty} shares`;
       setStatus(`✅ Order placed: ${res.side} ${detail} of ${res.symbol} @ ${res.type} — status: ${res.status}`);
@@ -197,7 +199,7 @@ export default function Trading({ user }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "#f0f0f0" }}>
-                  {["Symbol", "Side", "Type", "Qty", "Filled", "Price", "Status", "Submitted"].map(h => (
+                  {["Symbol", "Side", "Type", "Qty / Amount", "Filled", "Price", "Status", "Submitted"].map(h => (
                     <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -209,7 +211,8 @@ export default function Trading({ user }) {
                     <td style={{ padding: "7px 10px", color: o.side === "buy" ? "green" : "red", fontWeight: 600 }}>{o.side.toUpperCase()}</td>
                     <td style={{ padding: "7px 10px" }}>{o.type}</td>
                     <td style={{ padding: "7px 10px" }}>{o.qty}</td>
-                    <td style={{ padding: "7px 10px" }}>{o.filled_qty}</td>
+                    <td style={{ padding: "7px 10px" }}>{o.filled_qty || o.notional ? (o.filled_qty > 0 ? o.filled_qty : "—") : "—"}</td>
+                    <td style={{ padding: "7px 10px" }}>{o.notional ? `$${o.notional}` : (o.qty || "—")}</td>
                     <td style={{ padding: "7px 10px" }}>{o.filled_avg_price ? fmt(o.filled_avg_price) : (o.limit_price ? fmt(o.limit_price) : "market")}</td>
                     <td style={{ padding: "7px 10px" }}>
                       <span style={{ color: statusColor[o.status] || "#333", fontWeight: 500 }}>{o.status}</span>

@@ -80,14 +80,15 @@ def list_orders(paper: bool = True, limit: int = 20) -> list:
         {
             "id": str(o.id),
             "symbol": o.symbol,
-            "qty": float(o.qty),
-            "filled_qty": float(o.filled_qty) if o.filled_qty else 0,
+            "qty": float(o.qty) if o.qty is not None else None,
+            "filled_qty": float(o.filled_qty) if o.filled_qty is not None else 0,
             "side": o.side.value,
             "type": o.order_type.value,
             "status": o.status.value,
             "submitted_at": str(o.submitted_at),
-            "filled_avg_price": float(o.filled_avg_price) if o.filled_avg_price else None,
-            "limit_price": float(o.limit_price) if o.limit_price else None,
+            "filled_avg_price": float(o.filled_avg_price) if o.filled_avg_price is not None else None,
+            "limit_price": float(o.limit_price) if o.limit_price is not None else None,
+            "notional": float(o.notional) if o.notional is not None else None,
         }
         for o in orders
     ]
