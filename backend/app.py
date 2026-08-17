@@ -3019,7 +3019,7 @@ async def trading_place_order(data: dict):
         from alpaca_client import place_order
         return place_order(
             symbol=data["symbol"],
-            qty=float(data["qty"]) if data.get("qty") else None,
+            qty=float(data["qty"]) if data.get("qty") is not None else None,
             side=data["side"],
             order_type=data.get("order_type", "market"),
             limit_price=data.get("limit_price"),
