@@ -1,20 +1,21 @@
 """Buy/Sell Zone computation from OHLCV history."""
 
 import os
-from decimal import Decimal
 from datetime import date, timedelta
 from collections import defaultdict
+from decimal import Decimal
 
 import boto3
 from boto3.dynamodb.conditions import Key
 
-REGION = os.environ.get("AWS_REGION", "us-west-1")
+REGION        = os.environ.get("AWS_REGION", "us-west-1")
 HISTORY_TABLE = os.environ.get("STOCK_HISTORY_TABLE", "portfolio-stock-history-dev")
+SCREENER_TABLE = os.environ.get("SCREENER_TABLE", "portfolio-screener-dev")
 
 ddb = boto3.resource("dynamodb", region_name=REGION)
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
 
 def _f(v):
     if v is None:
@@ -22,6 +23,15 @@ def _f(v):
     try:
         return float(v)
     except (TypeError, ValueError):
+        return None
+
+
+def _cagr(current, past_price, years):
+    if not current or not past_price or past_price <= 0 or years <= 0:
+        return None
+    try:
+        return round((current / past_price) ** (1 / years) - 1, 4)
+    except (TypeError, ZeroDivisionError):
         return None
 
 
@@ -39,15 +49,16 @@ def _fetch_ohlcv(market, symbol):
         )
         items.extend(resp.get("Items", []))
 
-    agg = None
+    agg   = None
     daily = []
     for item in items:
         d = item.get("date", "")
         if d == "AGG":
-            agg = {k: _f(v) if hasattr(v, "is_finite") else v for k, v in item.items()}
-        elif d[:1].isdigit():  # daily records start with year digit
+            agg = {k: _f(v) if hasattr(v, "is_finite") or isinstance(v, Decimal) else v
+                   for k, v in item.items()}
+        elif d[:1].isdigit():
             daily.append({
-                "date": d,
+                "date":   d,
                 "open":   _f(item.get("open")),
                 "high":   _f(item.get("high")),
                 "low":    _f(item.get("low")),
@@ -59,53 +70,87 @@ def _fetch_ohlcv(market, symbol):
     return daily, agg
 
 
+def _get_current_price(market, symbol, daily, agg):
+    """Get current price: screener table → last daily close → AGG field."""
+    # 1. Try screener table (most up-to-date)
+    try:
+        resp = ddb.Table(SCREENER_TABLE).get_item(
+            Key={"market": market, "symbol": symbol})
+        item = resp.get("Item")
+        if item and item.get("current_price"):
+            return _f(item["current_price"])
+    except Exception:
+        pass
+    # 2. Last daily close
+    if daily:
+        return _f(daily[-1].get("close"))
+    # 3. AGG field
+    return _f(agg.get("current_price")) if agg else None
+
+
+def _get_qqq_cagr():
+    """Get QQQ avg CAGR from screener + history tables."""
+    try:
+        # Current price from screener
+        resp = ddb.Table(SCREENER_TABLE).get_item(Key={"market": "US", "symbol": "QQQ"})
+        item = resp.get("Item")
+        qqq_price = _f(item.get("current_price")) if item else None
+
+        # Historical closes from AGG
+        resp2 = ddb.Table(HISTORY_TABLE).get_item(
+            Key={"market_symbol": "US#QQQ", "date": "AGG"})
+        agg = resp2.get("Item", {})
+
+        if not qqq_price:
+            return None
+
+        qc1 = _cagr(qqq_price, _f(agg.get("close_1y")), 1)
+        qc3 = _cagr(qqq_price, _f(agg.get("close_3y")), 3)
+        qc5 = _cagr(qqq_price, _f(agg.get("close_5y")), 5)
+        qa  = [c for c in [qc1, qc3, qc5] if c is not None]
+        return round(sum(qa) / len(qa), 4) if qa else None
+    except Exception:
+        return None
+
+
 def _window_records(daily, months):
-    """Return records from the last N months."""
     cutoff = (date.today() - timedelta(days=months * 30)).isoformat()
     return [r for r in daily if r["date"] >= cutoff]
 
 
-def _cluster_zones(values, prices, bucket_pct=0.015, min_touches=3):
+def _cluster_zones(price_vol_list, bucket_size, min_touches=3):
     """
-    Cluster a list of (price, volume_contribution) into zones.
+    Cluster (price, volume) pairs into zones using fixed bucket_size.
+    bucket_size = % of current price (e.g. 3% of $170 = $5.10 per bucket).
     Returns list of {price_level, touch_count, vol_sum}.
     """
-    if not values:
+    if not price_vol_list:
         return []
 
-    price_range = max(p for p, _ in values) - min(p for p, _ in values)
-    if price_range <= 0:
-        return []
-
-    bucket_size = price_range * bucket_pct
     buckets = defaultdict(lambda: {"touches": 0, "vol": 0.0, "prices": []})
-
-    for price, vol in values:
+    for price, vol in price_vol_list:
         key = round(price / bucket_size) * bucket_size
         buckets[key]["touches"] += 1
-        buckets[key]["vol"] += vol
+        buckets[key]["vol"]     += vol
         buckets[key]["prices"].append(price)
 
-    zones = []
-    for key, data in buckets.items():
-        if data["touches"] >= min_touches:
-            zones.append({
-                "price_level": round(sum(data["prices"]) / len(data["prices"]), 2),
-                "touch_count": data["touches"],
-                "vol_sum": data["vol"],
-            })
-    return zones
+    return [
+        {
+            "price_level": round(sum(d["prices"]) / len(d["prices"]), 2),
+            "touch_count": d["touches"],
+            "vol_sum":     d["vol"],
+        }
+        for d in buckets.values()
+        if d["touches"] >= min_touches
+    ]
 
 
-def _vol_at_zone(zone_price, records, bucket_pct=0.015):
-    """
-    Uniform distribution approximation: distribute daily volume across
-    the day's high-low range, sum the portion overlapping the zone bucket.
-    """
+def _vol_at_zone(zone_price, records, bucket_size):
+    """Uniform distribution: portion of daily volume overlapping zone bucket."""
     total_vol = sum(r["volume"] for r in records) or 1
-    zone_half = zone_price * bucket_pct / 2
-    zone_lo = zone_price - zone_half
-    zone_hi = zone_price + zone_half
+    zone_half = bucket_size / 2
+    zone_lo   = zone_price - zone_half
+    zone_hi   = zone_price + zone_half
 
     vol_sum = 0.0
     for r in records:
@@ -113,28 +158,15 @@ def _vol_at_zone(zone_price, records, bucket_pct=0.015):
         day_range = hi - lo
         if day_range <= 0 or vol <= 0:
             continue
-        overlap = max(0, min(hi, zone_hi) - max(lo, zone_lo))
+        overlap  = max(0, min(hi, zone_hi) - max(lo, zone_lo))
         vol_sum += vol * overlap / day_range
 
-    return round(vol_sum / total_vol * 100, 4)  # as % of total period volume
+    return round(vol_sum / total_vol * 100, 4)
 
 
-def _cagr(current, past_price, years):
-    if not current or not past_price or past_price <= 0 or years <= 0:
-        return None
-    try:
-        return round((current / past_price) ** (1 / years) - 1, 4)
-    except (TypeError, ZeroDivisionError):
-        return None
-
-
-# ── main compute ─────────────────────────────────────────────────────────────
+# ── main compute ──────────────────────────────────────────────────────────────
 
 def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0):
-    """
-    Compute buy/sell zones for a stock.
-    Returns dict with buy_zones, sell_zones, cagr_summary, current_price.
-    """
     market = market.upper()
     symbol = symbol.upper()
 
@@ -142,32 +174,23 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0):
     if not daily or not agg:
         return None
 
-    current_price = agg.get("current_price") or (daily[-1]["close"] if daily else None)
+    current_price = _get_current_price(market, symbol, daily, agg)
     if not current_price:
         return None
 
+    # Bucket size = 3% of current price (fixed, not % of range)
+    bucket_size = round(current_price * 0.03, 2)
+
     # ── CAGR ─────────────────────────────────────────────────────────────────
-    cagr_1y = _cagr(current_price, agg.get("close_1y"), 1)
-    cagr_3y = _cagr(current_price, agg.get("close_3y"), 3)
-    cagr_5y = _cagr(current_price, agg.get("close_5y"), 5)
+    cagr_1y = _cagr(current_price, _f(agg.get("close_1y")), 1)
+    cagr_3y = _cagr(current_price, _f(agg.get("close_3y")), 3)
+    cagr_5y = _cagr(current_price, _f(agg.get("close_5y")), 5)
     available = [c for c in [cagr_1y, cagr_3y, cagr_5y] if c is not None]
-    avg_cagr = round(sum(available) / len(available), 4) if available else None
+    avg_cagr  = round(sum(available) / len(available), 4) if available else None
 
     # ── QQQ gate ─────────────────────────────────────────────────────────────
-    qqq_agg = None
-    try:
-        resp = ddb.Table(HISTORY_TABLE).get_item(Key={"market_symbol": "US#QQQ", "date": "AGG"})
-        qqq_agg = resp.get("Item")
-    except Exception:
-        pass
-
-    qqq_avg_cagr = None
-    if qqq_agg:
-        qc1 = _cagr(_f(qqq_agg.get("current_price")), _f(qqq_agg.get("close_1y")), 1)
-        qc3 = _cagr(_f(qqq_agg.get("current_price")), _f(qqq_agg.get("close_3y")), 3)
-        qc5 = _cagr(_f(qqq_agg.get("current_price")), _f(qqq_agg.get("close_5y")), 5)
-        qa = [c for c in [qc1, qc3, qc5] if c is not None]
-        qqq_avg_cagr = round(sum(qa) / len(qa), 4) if qa else None
+    qqq_avg_cagr  = _get_qqq_cagr()
+    qqq_gate_price = None
 
     # ── windows ──────────────────────────────────────────────────────────────
     w6m  = _window_records(daily, 6)
@@ -175,19 +198,17 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0):
     w24m = _window_records(daily, 24)
     windows = {"6M": w6m, "12M": w12m, "24M": w24m}
 
-    # Use 24M as primary window for zone detection
     primary = w24m if len(w24m) >= 30 else (w12m if len(w12m) >= 30 else w6m)
     if not primary:
         return None
 
     period_hh = max(r["high"] for r in primary if r["high"])
     period_ll = min(r["low"]  for r in primary if r["low"])
+    low_1y    = min(r["low"]  for r in w12m if r["low"]) if w12m else period_ll
 
-    # 1Y low as deepest buy zone boundary
-    low_1y = min(r["low"] for r in w12m if r["low"]) if w12m else period_ll
-
-    # ── zone detection per window ─────────────────────────────────────────────
-    buy_zone_windows  = defaultdict(set)   # price_level → set of windows confirming
+    # ── zone detection: count touches per window ──────────────────────────────
+    # buy_zone_windows[price_level] = set of window names that confirm it
+    buy_zone_windows  = defaultdict(set)
     sell_zone_windows = defaultdict(set)
 
     for wname, wrecs in windows.items():
@@ -196,37 +217,65 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0):
         lows  = [(r["low"],  r["volume"]) for r in wrecs if r["low"]]
         highs = [(r["high"], r["volume"]) for r in wrecs if r["high"]]
 
-        for z in _cluster_zones(lows,  wrecs):
-            if z["price_level"] >= low_1y:  # only above 1Y low
+        for z in _cluster_zones(lows,  bucket_size):
+            if z["price_level"] >= low_1y:
                 buy_zone_windows[round(z["price_level"], 2)].add(wname)
 
-        for z in _cluster_zones(highs, wrecs):
+        for z in _cluster_zones(highs, bucket_size):
             sell_zone_windows[round(z["price_level"], 2)].add(wname)
+
+    # ── merge nearby zones (within 1 bucket of each other) ───────────────────
+    def _merge_nearby(zone_dict):
+        """Merge zones within 1 bucket_size of each other — keep strongest."""
+        prices = sorted(zone_dict.keys())
+        merged = {}
+        skip   = set()
+        for i, p in enumerate(prices):
+            if p in skip:
+                continue
+            group = {p}
+            for j in range(i + 1, len(prices)):
+                if prices[j] - p <= bucket_size:
+                    group.add(prices[j])
+                    skip.add(prices[j])
+                else:
+                    break
+            # Representative = price with most window confirmations
+            best = max(group, key=lambda x: len(zone_dict[x]))
+            # Union of all windows in group
+            all_wins = set()
+            for gp in group:
+                all_wins |= zone_dict[gp]
+            merged[round(sum(group) / len(group), 2)] = all_wins
+        return merged
+
+    buy_zone_windows  = _merge_nearby(buy_zone_windows)
+    sell_zone_windows = _merge_nearby(sell_zone_windows)
 
     # ── build buy zones ───────────────────────────────────────────────────────
     raw_buy = []
     for price_level, wins in buy_zone_windows.items():
-        level_count = len(wins)
-        vol_pct = _vol_at_zone(price_level, primary)
-        pct_from_hh = round((price_level - period_hh) / period_hh * 100, 2)
-        potential_gain = round((current_price - price_level) / price_level * 100, 2) if price_level < current_price else 0
+        level_count    = len(wins)
+        vol_pct        = _vol_at_zone(price_level, primary, bucket_size)
+        pct_from_hh    = round((price_level - period_hh) / period_hh * 100, 2)
+        potential_gain = round((current_price - price_level) / price_level * 100, 2) \
+                         if price_level < current_price else 0
         cagr_qualified = avg_cagr is not None and potential_gain >= avg_cagr * 100
         raw_buy.append({
-            "price_level": price_level,
-            "touch_count": max(len(wins) * 3, 3),
-            "level_count": level_count,
-            "vol_pct": vol_pct,
-            "pct_from_hh": pct_from_hh,
+            "price_level":   price_level,
+            "touch_count":   level_count * 3,
+            "level_count":   level_count,
+            "vol_pct":       vol_pct,
+            "pct_from_hh":   pct_from_hh,
             "cagr_qualified": cagr_qualified,
-            "in_zone_now": abs(current_price - price_level) / price_level <= 0.015,
+            "in_zone_now":   abs(current_price - price_level) / price_level <= 0.03,
         })
 
-    # Sort high→low (nearest first), filter below 1Y low
+    # Sort high→low (nearest first), exclude below 1Y low
     raw_buy.sort(key=lambda x: -x["price_level"])
     raw_buy = [z for z in raw_buy if z["price_level"] >= low_1y]
 
-    # QQQ gate: first buy must be at or below gate_price
-    qqq_gate_price = None
+    # QQQ gate
     if qqq_avg_cagr:
         qqq_gate_price = round(period_hh * (1 - 0.80 * qqq_avg_cagr), 2)
         for z in raw_buy:
@@ -235,14 +284,14 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0):
         for z in raw_buy:
             z["qqq_gate_qualified"] = True
 
-    # ── position sizing ───────────────────────────────────────────────��───────
+    # ── position sizing ───────────────────────────────────────────────────────
     qualified = [z for z in raw_buy if z["cagr_qualified"] and z["qqq_gate_qualified"]]
     n = len(qualified)
 
     if n > 0:
         max_vol = max(z["vol_pct"] for z in qualified) or 1
         max_raw = max(
-            (i * (qualified[i]["vol_pct"] / max_vol))
+            i * (qualified[i]["vol_pct"] / max_vol)
             for i in range(1, n)
         ) if n > 1 else 1
 
@@ -253,98 +302,97 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0):
                 z["total_target_pct"] = max_pos
             else:
                 rel_vol = z["vol_pct"] / max_vol
-                raw = i * rel_vol
-                z["total_target_pct"] = round(base_pos + (raw / max_raw) * (max_pos - base_pos), 2)
+                raw     = i * rel_vol
+                z["total_target_pct"] = round(
+                    base_pos + (raw / max_raw) * (max_pos - base_pos), 2)
 
         # 50% missed entry rule
         for z in qualified:
             if z["in_zone_now"] and z["total_target_pct"] >= 2 * base_pos:
                 z["adjusted_target_pct"] = round(z["total_target_pct"] / 2, 2)
-                z["reserved_pct"] = z["adjusted_target_pct"]
+                z["reserved_pct"]        = z["adjusted_target_pct"]
             else:
                 z["adjusted_target_pct"] = z["total_target_pct"]
-                z["reserved_pct"] = 0
+                z["reserved_pct"]        = 0
 
     # ── build sell zones ──────────────────────────────────────────────────────
     raw_sell = []
     for price_level, wins in sell_zone_windows.items():
         if price_level <= current_price:
-            continue  # only above current price
+            continue
         level_count = len(wins)
-        vol_pct = _vol_at_zone(price_level, primary)
+        vol_pct     = _vol_at_zone(price_level, primary, bucket_size)
         pct_from_ll = round((price_level - period_ll) / period_ll * 100, 2)
         raw_sell.append({
             "price_level": price_level,
-            "touch_count": max(len(wins) * 3, 3),
+            "touch_count": level_count * 3,
             "level_count": level_count,
-            "vol_pct": vol_pct,
+            "vol_pct":     vol_pct,
             "pct_from_ll": pct_from_ll,
         })
 
     raw_sell.sort(key=lambda x: x["price_level"])  # low→high
 
-    # Sell zone sizing (mirrored from buy)
+    # Sell zone sizing
     ns = len(raw_sell)
     if ns > 0:
         max_vol_s = max(z["vol_pct"] for z in raw_sell) or 1
         max_raw_s = max(
-            (i * (raw_sell[i]["vol_pct"] / max_vol_s))
+            i * (raw_sell[i]["vol_pct"] / max_vol_s)
             for i in range(1, ns)
         ) if ns > 1 else 1
 
         for i, z in enumerate(raw_sell):
             if i == ns - 1:
-                z["total_target_pct"] = 0.0   # final exit
+                z["total_target_pct"] = 0.0
                 z["note"] = "final exit = HH x (1 + 0.8 x QQQ_CAGR)"
             elif i == ns - 2:
-                z["total_target_pct"] = 0.25  # residual hold
+                z["total_target_pct"] = 0.25
                 z["note"] = "just below HH"
             else:
                 rel_vol = z["vol_pct"] / max_vol_s
-                raw = (ns - 1 - i) * rel_vol  # deeper = higher remaining
+                raw     = (ns - 1 - i) * rel_vol
                 z["total_target_pct"] = round(
                     0.25 + (raw / max_raw_s) * (max_pos - 0.25), 2
                 ) if max_raw_s > 0 else max_pos
 
     # Final sell price
-    final_sell_price = None
+    final_sell_price  = None
+    final_sell_window = "24M"
     if qqq_avg_cagr:
-        # Use 12M HH if stock delivered avg CAGR in last 12M, else 24M HH
         hh_12m = max((r["high"] for r in w12m if r["high"]), default=None)
         hh_24m = max((r["high"] for r in w24m if r["high"]), default=None)
-        close_1y = agg.get("close_1y")
+        close_1y = _f(agg.get("close_1y"))
         if close_1y and avg_cagr and (current_price / close_1y - 1) >= avg_cagr:
             hh_ref = hh_12m or hh_24m
             final_sell_window = "12M"
         else:
             hh_ref = hh_24m or hh_12m
-            final_sell_window = "24M"
         if hh_ref:
             final_sell_price = round(hh_ref * (1 + 0.80 * qqq_avg_cagr), 2)
             if raw_sell:
                 raw_sell[-1]["price_level"] = final_sell_price
-    else:
-        final_sell_window = "24M"
 
     return {
-        "symbol": symbol,
-        "market": market,
+        "symbol":        symbol,
+        "market":        market,
         "current_price": current_price,
-        "period_hh": period_hh,
-        "period_ll": period_ll,
-        "low_1y": low_1y,
-        "buy_zones": qualified,
-        "sell_zones": raw_sell,
+        "period_hh":     period_hh,
+        "period_ll":     period_ll,
+        "low_1y":        low_1y,
+        "bucket_size":   bucket_size,
+        "buy_zones":     qualified,
+        "sell_zones":    raw_sell,
         "cagr_summary": {
-            "cagr_1y": round(cagr_1y * 100, 2) if cagr_1y else None,
-            "cagr_3y": round(cagr_3y * 100, 2) if cagr_3y else None,
-            "cagr_5y": round(cagr_5y * 100, 2) if cagr_5y else None,
-            "avg_cagr": round(avg_cagr * 100, 2) if avg_cagr else None,
-            "qqq_avg_cagr": round(qqq_avg_cagr * 100, 2) if qqq_avg_cagr else None,
-            "qqq_gate_price": qqq_gate_price,
+            "cagr_1y":          round(cagr_1y * 100, 2) if cagr_1y else None,
+            "cagr_3y":          round(cagr_3y * 100, 2) if cagr_3y else None,
+            "cagr_5y":          round(cagr_5y * 100, 2) if cagr_5y else None,
+            "avg_cagr":         round(avg_cagr * 100, 2) if avg_cagr else None,
+            "qqq_avg_cagr":     round(qqq_avg_cagr * 100, 2) if qqq_avg_cagr else None,
+            "qqq_gate_price":   qqq_gate_price,
             "final_sell_price": final_sell_price,
             "final_sell_window": final_sell_window,
         },
         "base_pos": base_pos,
-        "max_pos": max_pos,
+        "max_pos":  max_pos,
     }
