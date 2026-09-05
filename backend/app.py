@@ -40,6 +40,8 @@ SCREENER_TABLE = os.environ.get("SCREENER_TABLE", "portfolio-screener-dev")
 INDEX_CONSTITUENTS_TABLE = os.environ.get("INDEX_CONSTITUENTS_TABLE", "portfolio-index-constituents-dev")
 STOCK_HISTORY_TABLE = os.environ.get("STOCK_HISTORY_TABLE", "portfolio-stock-history-dev")
 FUNDAMENTALS_TABLE = os.environ.get("FUNDAMENTALS_TABLE", "portfolio-fundamentals-dev")
+POSITION_PLANS_TABLE = os.environ.get("POSITION_PLANS_TABLE", "portfolio-position-plans-dev")
+SAVED_CHARTS_TABLE = os.environ.get("SAVED_CHARTS_TABLE", "portfolio-saved-charts-dev")
 
 s3 = boto3.client("s3", region_name=REGION)
 ddb = boto3.resource("dynamodb", region_name=REGION)
@@ -3055,6 +3057,324 @@ async def trading_positions(paper: bool = True):
         return get_positions(paper=paper)
     except Exception as e:
         return {"error": str(e)}
+
+
+# ── Zones / Position Plans / Saved Charts ────────────────────────────────────
+
+@app.get("/research/zones/{market}/{symbol}")
+async def get_zones(market: str, symbol: str, base_pos: float = 0.5, max_pos: float = 3.0):
+    """Compute buy/sell zones on-demand from OHLCV history."""
+    from zones import compute_zones
+    result = compute_zones(symbol.upper(), market.upper(), base_pos=base_pos, max_pos=max_pos)
+    if not result:
+        return {"error": f"No history data for {market.upper()}#{symbol.upper()}"}
+    return result
+
+
+# ── Position Plans ────────────────────────────────────────────────────────────
+
+@app.post("/research/plan/{market}/{symbol}")
+async def create_plan(market: str, symbol: str, data: dict):
+    """Create/overwrite a position plan for a stock."""
+    from datetime import datetime, timezone as tz
+    table = ddb.Table(POSITION_PLANS_TABLE)
+    user_id = data.get("user_id")
+    if not user_id:
+        return {"error": "user_id required"}
+    sk = f"{market.upper()}#{symbol.upper()}"
+    item = {
+        "user_id": user_id,
+        "market_symbol": sk,
+        "symbol": symbol.upper(),
+        "market": market.upper(),
+        "created_at": datetime.now(tz.utc).isoformat(),
+        "updated_at": datetime.now(tz.utc).isoformat(),
+        "expiry_enabled": data.get("expiry_enabled", True),
+        "cycle": data.get("cycle", 1),
+        "status": "ACTIVE",
+        **{k: v for k, v in data.items() if k not in ("user_id", "expiry_enabled", "cycle")},
+    }
+    # Convert floats to Decimal for DDB
+    from decimal import Decimal
+    def _to_ddb(obj):
+        if isinstance(obj, float): return Decimal(str(round(obj, 6)))
+        if isinstance(obj, dict):  return {k: _to_ddb(v) for k, v in obj.items()}
+        if isinstance(obj, list):  return [_to_ddb(v) for v in obj]
+        return obj
+    table.put_item(Item=_to_ddb(item))
+    return {"created": sk, "user_id": user_id}
+
+
+@app.get("/research/plan/{market}/{symbol}")
+async def get_plan(market: str, symbol: str, user_id: str):
+    """Get saved position plan."""
+    table = ddb.Table(POSITION_PLANS_TABLE)
+    resp = table.get_item(Key={"user_id": user_id, "market_symbol": f"{market.upper()}#{symbol.upper()}"})
+    item = resp.get("Item")
+    if not item:
+        return {"error": "Plan not found"}
+    return {k: float(v) if hasattr(v, "is_finite") else
+               ([{kk: float(vv) if hasattr(vv, "is_finite") else vv for kk, vv in z.items()} for z in v] if isinstance(v, list) else v)
+            for k, v in item.items()}
+
+
+@app.put("/research/plan/{market}/{symbol}/execute")
+async def execute_zone(market: str, symbol: str, data: dict):
+    """Mark a buy/sell zone as executed. Updates holding_pct, shares_held, avg_cost."""
+    from datetime import datetime, timezone as tz, date
+    from decimal import Decimal
+    user_id = data.get("user_id")
+    if not user_id:
+        return {"error": "user_id required"}
+    table = ddb.Table(POSITION_PLANS_TABLE)
+    sk = f"{market.upper()}#{symbol.upper()}"
+    resp = table.get_item(Key={"user_id": user_id, "market_symbol": sk})
+    plan = resp.get("Item")
+    if not plan:
+        return {"error": "Plan not found"}
+
+    zone_price = data["zone_price"]
+    zone_type  = data["zone_type"]   # BUY or SELL
+    entry_date = data.get("entry_date", date.today().isoformat())
+    now = datetime.now(tz.utc).isoformat()
+
+    ladder_key = "buy_ladder" if zone_type == "BUY" else "sell_ladder"
+    ladder = list(plan.get(ladder_key, []))
+
+    for zone in ladder:
+        zp = float(zone.get("price", 0))
+        if abs(zp - zone_price) / max(zp, 1) < 0.005:  # within 0.5%
+            zone["status"] = "EXECUTED"
+            if zone_type == "BUY":
+                zone["entry_date"]  = entry_date
+                zone["expiry_date"] = _add_months(entry_date, 12)
+                zone["lapse_date"]  = _add_months(entry_date, 24)
+                zone["expiry_status"] = None
+                zone["exit_price_override"] = None
+            elif zone_type == "SELL":
+                # Cancel expiry clocks for all buy zones below this sell price
+                buy_ladder = list(plan.get("buy_ladder", []))
+                for bz in buy_ladder:
+                    if float(bz.get("price", 0)) < zone_price:
+                        bz["expiry_status"] = "CLOCK_CANCELLED"
+                # Update buy_ladder too
+                table.update_item(
+                    Key={"user_id": user_id, "market_symbol": sk},
+                    UpdateExpression="SET buy_ladder = :b",
+                    ExpressionAttributeValues={":b": _to_ddb(buy_ladder)},
+                )
+            break
+
+    def _to_ddb(obj):
+        if isinstance(obj, float): return Decimal(str(round(obj, 6)))
+        if isinstance(obj, dict):  return {k: _to_ddb(v) for k, v in obj.items()}
+        if isinstance(obj, list):  return [_to_ddb(v) for v in obj]
+        return obj
+
+    table.update_item(
+        Key={"user_id": user_id, "market_symbol": sk},
+        UpdateExpression=f"SET {ladder_key} = :l, updated_at = :u",
+        ExpressionAttributeValues={":l": _to_ddb(ladder), ":u": now},
+    )
+    return {"executed": zone_price, "zone_type": zone_type}
+
+
+@app.put("/research/plan/{market}/{symbol}/expiry")
+async def toggle_plan_expiry(market: str, symbol: str, data: dict):
+    """Toggle expiry_enabled for a specific plan."""
+    from datetime import datetime, timezone as tz
+    user_id = data.get("user_id")
+    enabled = data.get("expiry_enabled", True)
+    if not user_id:
+        return {"error": "user_id required"}
+    table = ddb.Table(POSITION_PLANS_TABLE)
+    table.update_item(
+        Key={"user_id": user_id, "market_symbol": f"{market.upper()}#{symbol.upper()}"},
+        UpdateExpression="SET expiry_enabled = :e, updated_at = :u",
+        ExpressionAttributeValues={":e": enabled, ":u": datetime.now(tz.utc).isoformat()},
+    )
+    return {"expiry_enabled": enabled}
+
+
+@app.put("/user/settings/expiry")
+async def toggle_global_expiry(data: dict):
+    """Toggle global expiry_enabled for a user."""
+    from datetime import datetime, timezone as tz
+    user_id = data.get("user_id")
+    enabled = data.get("expiry_enabled", True)
+    if not user_id:
+        return {"error": "user_id required"}
+    users_table = ddb.Table(os.environ.get("USERS_TABLE", "portfolio-users-dev"))
+    users_table.update_item(
+        Key={"user_id": user_id},
+        UpdateExpression="SET expiry_enabled = :e",
+        ExpressionAttributeValues={":e": enabled},
+    )
+    return {"expiry_enabled": enabled}
+
+
+@app.get("/research/plans/{user_id}")
+async def list_plans(user_id: str):
+    """List all position plans for a user."""
+    table = ddb.Table(POSITION_PLANS_TABLE)
+    resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    items = resp.get("Items", [])
+    result = []
+    for item in items:
+        result.append({
+            "market_symbol": item["market_symbol"],
+            "symbol": item.get("symbol"),
+            "market": item.get("market"),
+            "status": item.get("status"),
+            "cycle": item.get("cycle"),
+            "expiry_enabled": item.get("expiry_enabled", True),
+            "updated_at": item.get("updated_at"),
+        })
+    return result
+
+
+# ── Saved Charts ──────────────────────────────────────────────────────────────
+
+@app.get("/research/charts/{user_id}")
+async def list_charts(user_id: str):
+    """List all saved charts for a user."""
+    table = ddb.Table(SAVED_CHARTS_TABLE)
+    resp = table.query(KeyConditionExpression=Key("user_id").eq(user_id))
+    return [{
+        "market_symbol": i["market_symbol"],
+        "symbol": i.get("symbol"),
+        "market": i.get("market"),
+        "last_refreshed_date": i.get("last_refreshed_date"),
+        "created_at": i.get("created_at"),
+    } for i in resp.get("Items", [])]
+
+
+@app.post("/research/charts/{market}/{symbol}")
+async def save_chart(market: str, symbol: str, data: dict):
+    """Save a chart (initial compute + cache)."""
+    from datetime import datetime, timezone as tz, date
+    from decimal import Decimal
+    from zones import compute_zones
+
+    user_id = data.get("user_id")
+    if not user_id:
+        return {"error": "user_id required"}
+
+    base_pos = data.get("base_pos", 0.5)
+    max_pos  = data.get("max_pos", 3.0)
+    zones_data = compute_zones(symbol.upper(), market.upper(), base_pos=base_pos, max_pos=max_pos)
+    if not zones_data:
+        return {"error": f"No data for {market}#{symbol}"}
+
+    # Fetch OHLCV for chart (all daily records)
+    from zones import _fetch_ohlcv
+    daily, _ = _fetch_ohlcv(market.upper(), symbol.upper())
+
+    today = date.today().isoformat()
+    table = ddb.Table(SAVED_CHARTS_TABLE)
+
+    def _to_ddb(obj):
+        if isinstance(obj, float): return Decimal(str(round(obj, 6)))
+        if isinstance(obj, dict):  return {k: _to_ddb(v) for k, v in obj.items()}
+        if isinstance(obj, list):  return [_to_ddb(v) for v in obj]
+        return obj
+
+    table.put_item(Item=_to_ddb({
+        "user_id": user_id,
+        "market_symbol": f"{market.upper()}#{symbol.upper()}",
+        "symbol": symbol.upper(),
+        "market": market.upper(),
+        "created_at": datetime.now(tz.utc).isoformat(),
+        "last_refreshed_date": today,
+        "base_pos": base_pos,
+        "max_pos": max_pos,
+        "cached_zones": zones_data,
+        "cached_ohlcv": daily,
+    }))
+    return {"saved": f"{market.upper()}#{symbol.upper()}", "ohlcv_records": len(daily)}
+
+
+@app.get("/research/charts/{market}/{symbol}")
+async def get_chart(market: str, symbol: str, user_id: str):
+    """Get saved chart. Serves from cache."""
+    table = ddb.Table(SAVED_CHARTS_TABLE)
+    resp = table.get_item(Key={"user_id": user_id, "market_symbol": f"{market.upper()}#{symbol.upper()}"})
+    item = resp.get("Item")
+    if not item:
+        return {"error": "Chart not found"}
+
+    def _from_ddb(obj):
+        if hasattr(obj, "is_finite"): return float(obj)
+        if isinstance(obj, dict):     return {k: _from_ddb(v) for k, v in obj.items()}
+        if isinstance(obj, list):     return [_from_ddb(v) for v in obj]
+        return obj
+    return _from_ddb(dict(item))
+
+
+@app.put("/research/charts/{market}/{symbol}/refresh")
+async def refresh_chart(market: str, symbol: str, data: dict):
+    """Refresh chart if not already refreshed today."""
+    from datetime import datetime, timezone as tz, date
+    from decimal import Decimal
+    from zones import compute_zones, _fetch_ohlcv
+
+    user_id = data.get("user_id")
+    if not user_id:
+        return {"error": "user_id required"}
+
+    table = ddb.Table(SAVED_CHARTS_TABLE)
+    sk = f"{market.upper()}#{symbol.upper()}"
+    resp = table.get_item(Key={"user_id": user_id, "market_symbol": sk})
+    item = resp.get("Item")
+    if not item:
+        return {"error": "Chart not found"}
+
+    today = date.today().isoformat()
+    if item.get("last_refreshed_date") == today:
+        return {"refreshed": False, "reason": "already refreshed today"}
+
+    base_pos = float(item.get("base_pos", 0.5))
+    max_pos  = float(item.get("max_pos", 3.0))
+    zones_data = compute_zones(symbol.upper(), market.upper(), base_pos=base_pos, max_pos=max_pos)
+    if not zones_data:
+        return {"error": "Recompute failed"}
+
+    daily, _ = _fetch_ohlcv(market.upper(), symbol.upper())
+
+    def _to_ddb(obj):
+        if isinstance(obj, float): return Decimal(str(round(obj, 6)))
+        if isinstance(obj, dict):  return {k: _to_ddb(v) for k, v in obj.items()}
+        if isinstance(obj, list):  return [_to_ddb(v) for v in obj]
+        return obj
+
+    table.update_item(
+        Key={"user_id": user_id, "market_symbol": sk},
+        UpdateExpression="SET last_refreshed_date = :d, cached_zones = :z, cached_ohlcv = :o",
+        ExpressionAttributeValues={
+            ":d": today,
+            ":z": _to_ddb(zones_data),
+            ":o": _to_ddb(daily),
+        },
+    )
+    return {"refreshed": True, "ohlcv_records": len(daily)}
+
+
+@app.delete("/research/charts/{market}/{symbol}")
+async def delete_chart(market: str, symbol: str, user_id: str):
+    """Delete a saved chart."""
+    table = ddb.Table(SAVED_CHARTS_TABLE)
+    table.delete_item(Key={"user_id": user_id, "market_symbol": f"{market.upper()}#{symbol.upper()}"})
+    return {"deleted": f"{market.upper()}#{symbol.upper()}"}
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+def _add_months(date_str, months):
+    """Add N months to a date string. Returns ISO date string."""
+    from datetime import date
+    from dateutil.relativedelta import relativedelta
+    d = date.fromisoformat(date_str)
+    return (d + relativedelta(months=months)).isoformat()
 
 
 # Lambda handler via Mangum
