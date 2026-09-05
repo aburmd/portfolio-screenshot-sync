@@ -243,7 +243,7 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
                 continue
             group = [p]
             for j in range(i + 1, len(prices)):
-                if prices[j] - prices[group[0]] <= bucket_size * 2:
+                if prices[j] - group[0] <= bucket_size * 2:
                     group.append(prices[j])
                     skip.add(prices[j])
                 else:
