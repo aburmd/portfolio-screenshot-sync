@@ -345,8 +345,9 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
 
     # ── build sell zones ──────────────────────────────────────────────────────
     raw_sell = []
+    min_sell_price = current_price * 1.05  # exclude zones within 5% of current price
     for price_level, wins in sell_zone_windows.items():
-        if price_level <= current_price:
+        if price_level <= min_sell_price:
             continue
         level_count = len(wins)
         vol_pct     = _vol_at_zone(price_level, primary, bucket_size)
