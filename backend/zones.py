@@ -362,10 +362,14 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
     raw_sell.sort(key=lambda x: x["price_level"])  # low→high
 
     # Select best N sell zones spread across full range (current_price → HH)
-    # Use dynamic gap so zones distribute evenly, not cluster near current price
+    # Try dynamic gap first; fall back to smaller gap if too few zones returned
     sell_range = period_hh - current_price
     sell_min_gap = max(min_gap, sell_range / (max_sell_zones + 1))
-    raw_sell = _select_zones(raw_sell, max_sell_zones, quality_key, sell_min_gap)
+    selected_sell = _select_zones(raw_sell, max_sell_zones, quality_key, sell_min_gap)
+    if len(selected_sell) < min(max_sell_zones, len(raw_sell)):
+        # Fall back to standard min_gap
+        selected_sell = _select_zones(raw_sell, max_sell_zones, quality_key, min_gap)
+    raw_sell = selected_sell
     raw_sell.sort(key=lambda x: x["price_level"])
 
     # Sell zone sizing
