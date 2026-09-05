@@ -172,7 +172,8 @@ def _vol_at_zone(zone_price, records, bucket_size):
 
 # ── main compute ──────────────────────────────────────────────────────────────
 
-def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0):
+def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
+                  max_buy_zones=5, max_sell_zones=5):
     market = market.upper()
     symbol = symbol.upper()
 
@@ -230,29 +231,26 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0):
         for z in _cluster_zones(highs, bucket_size):
             sell_zone_windows[round(z["price_level"], 2)].add(wname)
 
-    # ── merge nearby zones (within 1 bucket of each other) ───────────────────
+
+    # ── merge nearby zones ───────────────────────────────────────────────────────────────────
     def _merge_nearby(zone_dict):
-        """Merge zones within 1 bucket_size of each other — keep strongest."""
+        """Within 2x bucket_size keep the strongest zone, discard weaker ones."""
         prices = sorted(zone_dict.keys())
         merged = {}
         skip   = set()
         for i, p in enumerate(prices):
             if p in skip:
                 continue
-            group = {p}
+            group = [p]
             for j in range(i + 1, len(prices)):
-                if prices[j] - p <= bucket_size:
-                    group.add(prices[j])
+                if prices[j] - prices[group[0]] <= bucket_size * 2:
+                    group.append(prices[j])
                     skip.add(prices[j])
                 else:
                     break
-            # Representative = price with most window confirmations
-            best = max(group, key=lambda x: len(zone_dict[x]))
-            # Union of all windows in group
-            all_wins = set()
-            for gp in group:
-                all_wins |= zone_dict[gp]
-            merged[round(sum(group) / len(group), 2)] = all_wins
+            # Keep strongest: most window confirmations, break ties by higher price
+            best = max(group, key=lambda x: (len(zone_dict[x]), x))
+            merged[best] = zone_dict[best]
         return merged
 
     buy_zone_windows  = _merge_nearby(buy_zone_windows)
@@ -276,9 +274,9 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0):
             "in_zone_now":   abs(current_price - price_level) / price_level <= 0.03,
         })
 
-    # Sort high→low (nearest first), exclude below 1Y low
+    # Sort high→low (nearest first), exclude below 1Y low and above current price
     raw_buy.sort(key=lambda x: -x["price_level"])
-    raw_buy = [z for z in raw_buy if z["price_level"] >= low_1y]
+    raw_buy = [z for z in raw_buy if z["price_level"] >= low_1y and z["price_level"] < current_price]
 
     # QQQ gate
     if qqq_avg_cagr:
@@ -289,8 +287,33 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0):
         for z in raw_buy:
             z["qqq_gate_qualified"] = True
 
+    # ── select best N zones with minimum spacing ───────────────────────────
+    def _select_zones(zones, max_n, sort_key_fn, min_gap):
+        """Pick best max_n zones sorted by quality, enforcing min_gap between them."""
+        # Sort by quality: level_count desc, then vol_pct desc
+        candidates = sorted(zones, key=sort_key_fn, reverse=True)
+        selected = []
+        for z in candidates:
+            # Check min gap against already selected zones
+            too_close = any(
+                abs(z["price_level"] - s["price_level"]) < min_gap
+                for s in selected
+            )
+            if not too_close:
+                selected.append(z)
+            if len(selected) >= max_n:
+                break
+        return selected
+
+    # Min gap = 2 buckets between zones
+    min_gap = bucket_size * 2
+    quality_key = lambda z: (z["level_count"], z["vol_pct"])
+
     # ── position sizing ───────────────────────────────────────────────────────
-    qualified = [z for z in raw_buy if z["cagr_qualified"] and z["qqq_gate_qualified"]]
+    qualified_all = [z for z in raw_buy if z["cagr_qualified"] and z["qqq_gate_qualified"]]
+    qualified = _select_zones(qualified_all, max_buy_zones, quality_key, min_gap)
+    # Re-sort high→low (nearest first) after selection
+    qualified.sort(key=lambda x: -x["price_level"])
     n = len(qualified)
 
     if n > 0:
@@ -338,6 +361,10 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0):
 
     raw_sell.sort(key=lambda x: x["price_level"])  # low→high
 
+    # Select best N sell zones with spacing, then re-sort low→high
+    raw_sell = _select_zones(raw_sell, max_sell_zones, quality_key, min_gap)
+    raw_sell.sort(key=lambda x: x["price_level"])
+
     # Sell zone sizing
     ns = len(raw_sell)
     if ns > 0:
@@ -355,11 +382,15 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0):
                 z["total_target_pct"] = 0.25
                 z["note"] = "just below HH"
             else:
+                # trim_to decreases as price rises: nearest sell = max_pos, highest = 0.25
                 rel_vol = z["vol_pct"] / max_vol_s
-                raw     = (ns - 1 - i) * rel_vol
+                rank = ns - 2 - i  # 0 at second-to-last, ns-2 at first
+                raw = rank * rel_vol
                 z["total_target_pct"] = round(
                     0.25 + (raw / max_raw_s) * (max_pos - 0.25), 2
                 ) if max_raw_s > 0 else max_pos
+                # Cap at max_pos
+                z["total_target_pct"] = min(z["total_target_pct"], max_pos)
 
     # Final sell price
     final_sell_price  = None
@@ -400,4 +431,6 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0):
         },
         "base_pos": base_pos,
         "max_pos":  max_pos,
+        "max_buy_zones":  max_buy_zones,
+        "max_sell_zones": max_sell_zones,
     }

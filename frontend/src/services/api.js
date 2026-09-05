@@ -301,8 +301,8 @@ export async function fetchMissingSymbols(userId) {
 }
 
 // --- Zones ---
-export async function fetchZones(market, symbol, basePos = 0.5, maxPos = 3.0) {
-  const res = await fetch(`${API_BASE}/research/zones/${market}/${encodeURIComponent(symbol)}?base_pos=${basePos}&max_pos=${maxPos}`);
+export async function fetchZones(market, symbol, basePos = 0.5, maxPos = 3.0, maxBuyZones = 5, maxSellZones = 5) {
+  const res = await fetch(`${API_BASE}/research/zones/${market}/${encodeURIComponent(symbol)}?base_pos=${basePos}&max_pos=${maxPos}&max_buy_zones=${maxBuyZones}&max_sell_zones=${maxSellZones}`);
   if (!res.ok) throw new Error("Failed to fetch zones");
   return res.json();
 }

@@ -23,8 +23,10 @@ const levelBadge = (n) => {
 export default function ZonesTab({ userId }) {
   const [symbol, setSymbol]     = useState("");
   const [market, setMarket]     = useState("US");
-  const [basePos, setBasePos]   = useState(0.5);
-  const [maxPos, setMaxPos]     = useState(3.0);
+  const [basePos, setBasePos]             = useState(0.5);
+  const [maxPos, setMaxPos]               = useState(3.0);
+  const [maxBuyZones, setMaxBuyZones]     = useState(5);
+  const [maxSellZones, setMaxSellZones]   = useState(5);
   const [data, setData]         = useState(null);
   const [loading, setLoading]   = useState(false);
   const [saving, setSaving]     = useState(false);
@@ -35,7 +37,7 @@ export default function ZonesTab({ userId }) {
     if (!symbol.trim()) return;
     setLoading(true); setError(null); setData(null); setSaved(false);
     try {
-      const result = await fetchZones(market, symbol.trim().toUpperCase(), basePos, maxPos);
+      const result = await fetchZones(market, symbol.trim().toUpperCase(), basePos, maxPos, maxBuyZones, maxSellZones);
       if (result.error) setError(result.error);
       else setData(result);
     } catch (e) { setError(e.message); }
@@ -46,7 +48,7 @@ export default function ZonesTab({ userId }) {
     if (!data || !userId) return;
     setSaving(true);
     try {
-      await saveChart(data.market, data.symbol, { user_id: userId, base_pos: basePos, max_pos: maxPos });
+      await saveChart(data.market, data.symbol, { user_id: userId, base_pos: basePos, max_pos: maxPos, max_buy_zones: maxBuyZones, max_sell_zones: maxSellZones });
       setSaved(true);
     } catch (e) { setError(e.message); }
     setSaving(false);
@@ -77,6 +79,14 @@ export default function ZonesTab({ userId }) {
         <label style={{ fontSize: 12 }}>Max%<br />
           <input type="number" value={maxPos} onChange={e => setMaxPos(parseFloat(e.target.value) || 3.0)}
             step={0.5} style={{ padding: 6, width: 60 }} />
+        </label>
+        <label style={{ fontSize: 12 }}>Buy Zones<br />
+          <input type="number" value={maxBuyZones} onChange={e => setMaxBuyZones(parseInt(e.target.value) || 5)}
+            min={1} max={20} style={{ padding: 6, width: 55 }} />
+        </label>
+        <label style={{ fontSize: 12 }}>Sell Zones<br />
+          <input type="number" value={maxSellZones} onChange={e => setMaxSellZones(parseInt(e.target.value) || 5)}
+            min={1} max={20} style={{ padding: 6, width: 55 }} />
         </label>
         <button style={btn()} onClick={handleSearch} disabled={loading}>
           {loading ? "Computing..." : "🔍 Compute Zones"}
