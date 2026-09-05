@@ -264,8 +264,7 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0):
         level_count    = len(wins)
         vol_pct        = _vol_at_zone(price_level, primary, bucket_size)
         pct_from_hh    = round((price_level - period_hh) / period_hh * 100, 2)
-        potential_gain = round((current_price - price_level) / price_level * 100, 2) \
-                         if price_level < current_price else 0
+        potential_gain = round((period_hh - price_level) / price_level * 100, 2)
         cagr_qualified = avg_cagr is not None and potential_gain >= avg_cagr * 100
         raw_buy.append({
             "price_level":   price_level,
