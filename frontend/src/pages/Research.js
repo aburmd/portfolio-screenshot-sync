@@ -1,6 +1,8 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Cell } from "recharts";
 import { fetchFundamentals, fetchScreenerResults, runScreener, runMaScanner, fetchBuyCandidates, fetchPullbackBuys, fetchValueEntry, fetchPositionMonitor, checkStock, refreshIndexes, fetchCustomSymbols, addCustomSymbol, deleteCustomSymbol, scanSymbol, fetchMissingSymbols } from "../services/api";
+import ZonesTab from "./ZonesTab";
+import ChartsTab from "./ChartsTab";
 import "../styles/research.css";
 
 const btnPrimary = { padding: "6px 16px", cursor: "pointer", borderRadius: 4, fontSize: 13, background: "#1976d2", color: "#fff", border: "none" };
@@ -55,6 +57,8 @@ export default function Research({ user }) {
         <button style={tabBtn(tab === "value", "#e65100")} onClick={() => setTab("value")}>🎯 Value Entry</button>
         <button style={tabBtn(tab === "monitor", "#c62828")} onClick={() => setTab("monitor")}>🚦 Position Monitor</button>
         <button style={tabBtn(tab === "fundamentals")} onClick={() => setTab("fundamentals")}>Fundamentals</button>
+        <button style={tabBtn(tab === "zones", "#6a1b9a")} onClick={() => setTab("zones")}>📐 Zones</button>
+        <button style={tabBtn(tab === "charts", "#00695c")} onClick={() => setTab("charts")}>📈 Charts</button>
         <button style={tabBtn(tab === "settings", "#616161")} onClick={() => setTab("settings")}>⚙️ Settings</button>
       </div>
       {tab === "screener" && <ScreenerSection />}
@@ -63,6 +67,8 @@ export default function Research({ user }) {
       {tab === "value" && <ValueEntrySection />}
       {tab === "monitor" && <PositionMonitorSection userId={userId} />}
       {tab === "fundamentals" && <FundamentalsSection />}
+      {tab === "zones" && <ZonesTab userId={userId} />}
+      {tab === "charts" && <ChartsTab userId={userId} />}
       {tab === "settings" && <SettingsSection userId={userId} />}
     </div>
   );

@@ -299,3 +299,69 @@ export async function fetchMissingSymbols(userId) {
   if (!res.ok) return { US: [], IN: [] };
   return res.json();
 }
+
+// --- Zones ---
+export async function fetchZones(market, symbol, basePos = 0.5, maxPos = 3.0) {
+  const res = await fetch(`${API_BASE}/research/zones/${market}/${encodeURIComponent(symbol)}?base_pos=${basePos}&max_pos=${maxPos}`);
+  if (!res.ok) throw new Error("Failed to fetch zones");
+  return res.json();
+}
+
+// --- Position Plans ---
+export async function createPlan(market, symbol, data) {
+  const res = await fetch(`${API_BASE}/research/plan/${market}/${encodeURIComponent(symbol)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+  return res.json();
+}
+export async function fetchPlan(market, symbol, userId) {
+  const res = await fetch(`${API_BASE}/research/plan/${market}/${encodeURIComponent(symbol)}?user_id=${userId}`);
+  return res.json();
+}
+export async function executeZone(market, symbol, data) {
+  const res = await fetch(`${API_BASE}/research/plan/${market}/${encodeURIComponent(symbol)}/execute`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+  return res.json();
+}
+export async function togglePlanExpiry(market, symbol, userId, enabled) {
+  const res = await fetch(`${API_BASE}/research/plan/${market}/${encodeURIComponent(symbol)}/expiry`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId, expiry_enabled: enabled }),
+  });
+  return res.json();
+}
+export async function fetchPlans(userId) {
+  const res = await fetch(`${API_BASE}/research/plans/${userId}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+// --- Saved Charts ---
+export async function fetchSavedCharts(userId) {
+  const res = await fetch(`${API_BASE}/research/charts/${userId}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+export async function saveChart(market, symbol, data) {
+  const res = await fetch(`${API_BASE}/research/charts/${market}/${encodeURIComponent(symbol)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+  return res.json();
+}
+export async function fetchSavedChart(market, symbol, userId) {
+  const res = await fetch(`${API_BASE}/research/charts/${market}/${encodeURIComponent(symbol)}?user_id=${userId}`);
+  if (!res.ok) throw new Error("Chart not found");
+  return res.json();
+}
+export async function refreshChart(market, symbol, userId) {
+  const res = await fetch(`${API_BASE}/research/charts/${market}/${encodeURIComponent(symbol)}/refresh`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId }),
+  });
+  return res.json();
+}
+export async function deleteChart(market, symbol, userId) {
+  const res = await fetch(`${API_BASE}/research/charts/${market}/${encodeURIComponent(symbol)}?user_id=${userId}`, { method: "DELETE" });
+  return res.json();
+}
