@@ -361,8 +361,11 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
 
     raw_sell.sort(key=lambda x: x["price_level"])  # low→high
 
-    # Select best N sell zones with spacing, then re-sort low→high
-    raw_sell = _select_zones(raw_sell, max_sell_zones, quality_key, min_gap)
+    # Select best N sell zones spread across full range (current_price → HH)
+    # Use dynamic gap so zones distribute evenly, not cluster near current price
+    sell_range = period_hh - current_price
+    sell_min_gap = max(min_gap, sell_range / (max_sell_zones + 1))
+    raw_sell = _select_zones(raw_sell, max_sell_zones, quality_key, sell_min_gap)
     raw_sell.sort(key=lambda x: x["price_level"])
 
     # Sell zone sizing
