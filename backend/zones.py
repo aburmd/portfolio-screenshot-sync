@@ -17,7 +17,12 @@ ddb = boto3.resource("dynamodb", region_name=REGION)
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _f(v):
-    return float(v) if hasattr(v, "is_finite") else (float(v) if v is not None else None)
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _fetch_ohlcv(market, symbol):
@@ -115,9 +120,12 @@ def _vol_at_zone(zone_price, records, bucket_pct=0.015):
 
 
 def _cagr(current, past_price, years):
-    if not past_price or past_price <= 0 or years <= 0:
+    if not current or not past_price or past_price <= 0 or years <= 0:
         return None
-    return round((current / past_price) ** (1 / years) - 1, 4)
+    try:
+        return round((current / past_price) ** (1 / years) - 1, 4)
+    except (TypeError, ZeroDivisionError):
+        return None
 
 
 # ── main compute ─────────────────────────────────────────────────────────────
