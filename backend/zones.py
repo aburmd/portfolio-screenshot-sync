@@ -71,8 +71,13 @@ def _fetch_ohlcv(market, symbol):
 
 
 def _get_current_price(market, symbol, daily, agg):
-    """Get current price: screener table → last daily close → AGG field."""
-    # 1. Try screener table (most up-to-date)
+    """Get current price: last daily close (most reliable) → screener → AGG."""
+    # 1. Last daily close — always fresh from daily scanner backfill
+    if daily:
+        p = _f(daily[-1].get("close"))
+        if p and p > 0:
+            return p
+    # 2. Screener table
     try:
         resp = ddb.Table(SCREENER_TABLE).get_item(
             Key={"market": market, "symbol": symbol})
@@ -81,29 +86,30 @@ def _get_current_price(market, symbol, daily, agg):
             return _f(item["current_price"])
     except Exception:
         pass
-    # 2. Last daily close
-    if daily:
-        return _f(daily[-1].get("close"))
     # 3. AGG field
     return _f(agg.get("current_price")) if agg else None
 
 
 def _get_qqq_cagr():
-    """Get QQQ avg CAGR from screener + history tables."""
+    """Get QQQ avg CAGR from history table (last daily close + AGG)."""
     try:
-        # Current price from screener
-        resp = ddb.Table(SCREENER_TABLE).get_item(Key={"market": "US", "symbol": "QQQ"})
-        item = resp.get("Item")
-        qqq_price = _f(item.get("current_price")) if item else None
-
-        # Historical closes from AGG
-        resp2 = ddb.Table(HISTORY_TABLE).get_item(
-            Key={"market_symbol": "US#QQQ", "date": "AGG"})
-        agg = resp2.get("Item", {})
-
+        hist_table = ddb.Table(HISTORY_TABLE)
+        # Current price from last daily record
+        resp = hist_table.query(
+            KeyConditionExpression=Key("market_symbol").eq("US#QQQ"),
+            ScanIndexForward=False, Limit=5,
+        )
+        qqq_price = None
+        for item in resp.get("Items", []):
+            d = item.get("date", "")
+            if d[:1].isdigit() and item.get("close"):
+                qqq_price = _f(item["close"])
+                break
         if not qqq_price:
             return None
-
+        # Historical closes from AGG
+        resp2 = hist_table.get_item(Key={"market_symbol": "US#QQQ", "date": "AGG"})
+        agg = resp2.get("Item", {})
         qc1 = _cagr(qqq_price, _f(agg.get("close_1y")), 1)
         qc3 = _cagr(qqq_price, _f(agg.get("close_3y")), 3)
         qc5 = _cagr(qqq_price, _f(agg.get("close_5y")), 5)
