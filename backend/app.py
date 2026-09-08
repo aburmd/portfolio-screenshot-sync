@@ -3539,18 +3539,16 @@ async def list_triggers(user_id: str):
 @app.delete("/research/trigger/{trigger_id}")
 async def delete_trigger(trigger_id: str, user_id: str):
     """Delete a trigger. Disables min1_enabled for the symbol if no active triggers remain."""
-    from boto3.dynamodb.conditions import Key as _Key, Attr as _Attr
+    from boto3.dynamodb.conditions import Key as _Key
 
     table = ddb.Table(TRIGGERS_TABLE)
-    resp = table.query(
-        KeyConditionExpression=_Key("user_id").eq(user_id),
-        FilterExpression=_Attr("trigger_id").eq(trigger_id),
-    )
-    items = resp.get("Items", [])
-    if not items:
+
+    # Direct get_item — user_id (PK) + trigger_id (SK) is the full key
+    resp = table.get_item(Key={"user_id": user_id, "trigger_id": trigger_id})
+    item = resp.get("Item")
+    if not item:
         return {"error": "Trigger not found"}
 
-    item = items[0]
     mkt, sym = item["market"], item["symbol"]
     table.delete_item(Key={"user_id": user_id, "trigger_id": trigger_id})
 
