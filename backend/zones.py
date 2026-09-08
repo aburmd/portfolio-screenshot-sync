@@ -51,23 +51,24 @@ def _fetch_ohlcv(market, symbol):
 
 
 def _fetch_ohlcv_s3(market, symbol):
-    """Read daily.parquet from S3. Returns sorted list or None on miss."""
+    """Read daily.csv.gz from S3. Returns sorted list or None on miss."""
     try:
-        import pandas as pd
-        key = f"ohlcv/{market}/{symbol}/daily.parquet"
+        import csv, gzip
+        key = f"ohlcv/{market}/{symbol}/daily.csv.gz"
         obj = s3.get_object(Bucket=OHLCV_BUCKET, Key=key)
-        df  = pd.read_parquet(io.BytesIO(obj["Body"].read()))
-        return [
-            {
-                "date":   row["date"],
-                "open":   float(row["open"])   if row["open"]   is not None else None,
-                "high":   float(row["high"])   if row["high"]   is not None else None,
-                "low":    float(row["low"])    if row["low"]    is not None else None,
-                "close":  float(row["close"])  if row["close"]  is not None else None,
-                "volume": int(row["volume"])   if row["volume"] is not None else 0,
-            }
-            for _, row in df.iterrows()
-        ]
+        with gzip.open(io.BytesIO(obj["Body"].read()), "rt") as f:
+            reader = csv.DictReader(f)
+            return [
+                {
+                    "date":   row["date"],
+                    "open":   float(row["open"])   if row["open"]   else None,
+                    "high":   float(row["high"])   if row["high"]   else None,
+                    "low":    float(row["low"])    if row["low"]    else None,
+                    "close":  float(row["close"])  if row["close"]  else None,
+                    "volume": int(float(row["volume"])) if row["volume"] else 0,
+                }
+                for row in reader
+            ]
     except Exception:
         return None
 

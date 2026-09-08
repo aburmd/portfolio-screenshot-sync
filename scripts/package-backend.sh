@@ -31,6 +31,10 @@ cp "$BACKEND_DIR/daily_scanner.py" "$BUILD_DIR/backend-package/"
 cp "$BACKEND_DIR/alpaca_client.py" "$BUILD_DIR/backend-package/"
 cp "$BACKEND_DIR/zones.py" "$BUILD_DIR/backend-package/"
 
+echo "Stripping pandas/numpy/pyarrow (provided by Lambda Layer)..."
+cd "$BUILD_DIR/backend-package"
+rm -rf pandas pandas-*.dist-info numpy numpy-*.dist-info numpy.libs pyarrow pyarrow-*.dist-info
+
 echo "Creating zip..."
 cd "$BUILD_DIR/backend-package"
 zip -r "$BUILD_DIR/$ZIP_NAME" . -q

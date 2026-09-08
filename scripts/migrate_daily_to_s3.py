@@ -1,9 +1,9 @@
-"""Migrate daily OHLCV records from DDB (portfolio-stock-history-dev) to S3 Parquet.
+"""Migrate daily OHLCV records from DDB (portfolio-stock-history-dev) to S3 as gzipped CSV.
 
-S3 path: ohlcv/{market}/{symbol}/daily.parquet
+S3 path: ohlcv/{market}/{symbol}/daily.csv.gz
 - Exactly 5000 rows max (trim oldest if more)
 - Non-destructive: DDB records are NOT deleted
-- Skips symbols that already have an up-to-date S3 file (unless --overwrite)
+- Skips symbols that already have an S3 file (unless --overwrite)
 
 Usage:
   python scripts/migrate_daily_to_s3.py --market US
@@ -13,17 +13,17 @@ Usage:
 """
 
 import argparse
+import csv
+import gzip
 import io
-from decimal import Decimal
 
 import boto3
 from boto3.dynamodb.conditions import Key
-import pandas as pd
 
 REGION        = "us-west-1"
 HISTORY_TABLE = "portfolio-stock-history-dev"
 INDEX_TABLE   = "portfolio-index-constituents-dev"
-S3_BUCKET     = "portfolio-screenshots-dev"   # reuse existing bucket (ohlcv/ prefix)
+S3_BUCKET     = "portfolio-screenshots-dev"
 DAILY_CAP     = 5000
 
 ddb = boto3.resource("dynamodb", region_name=REGION)
@@ -43,10 +43,9 @@ def get_all_symbols(market):
 
 def fetch_daily_from_ddb(market, symbol):
     """Return list of daily OHLCV dicts sorted oldest→newest."""
-    table = ddb.Table(HISTORY_TABLE)
-    pk    = f"{market}#{symbol}"
-    rows  = []
-
+    table  = ddb.Table(HISTORY_TABLE)
+    pk     = f"{market}#{symbol}"
+    rows   = []
     kwargs = {
         "KeyConditionExpression": Key("market_symbol").eq(pk) & Key("date").begins_with("2"),
         "ProjectionExpression": "#d, #o, high, low, #c, volume",
@@ -66,41 +65,37 @@ def fetch_daily_from_ddb(market, symbol):
         if "LastEvaluatedKey" not in resp:
             break
         kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
-
     rows.sort(key=lambda x: x["date"])
     return rows
 
 
 def s3_key(market, symbol):
-    return f"ohlcv/{market}/{symbol}/daily.parquet"
+    return f"ohlcv/{market}/{symbol}/daily.csv.gz"
 
 
 def s3_file_exists(market, symbol):
     try:
         s3.head_object(Bucket=S3_BUCKET, Key=s3_key(market, symbol))
         return True
-    except s3.exceptions.ClientError:
-        return False
     except Exception:
         return False
 
 
-def write_parquet_to_s3(market, symbol, rows):
-    """Trim to DAILY_CAP, write as Parquet to S3."""
+def write_csv_gz_to_s3(market, symbol, rows):
+    """Trim to DAILY_CAP, write as gzipped CSV to S3."""
     if len(rows) > DAILY_CAP:
         rows = rows[-DAILY_CAP:]
-
-    df  = pd.DataFrame(rows)
     buf = io.BytesIO()
-    df.to_parquet(buf, index=False, engine="pyarrow")
+    with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
+        writer = csv.DictWriter(
+            io.TextIOWrapper(gz, write_through=True),
+            fieldnames=["date", "open", "high", "low", "close", "volume"]
+        )
+        writer.writeheader()
+        writer.writerows(rows)
     buf.seek(0)
-
-    s3.put_object(
-        Bucket=S3_BUCKET,
-        Key=s3_key(market, symbol),
-        Body=buf.getvalue(),
-        ContentType="application/octet-stream",
-    )
+    s3.put_object(Bucket=S3_BUCKET, Key=s3_key(market, symbol),
+                  Body=buf.getvalue(), ContentType="application/gzip")
     return len(rows)
 
 
@@ -109,17 +104,14 @@ def migrate_symbol(market, symbol, dry_run=False, overwrite=False):
     if not rows:
         print(f"  {symbol}: no daily records in DDB — skip")
         return 0
-
     if not overwrite and s3_file_exists(market, symbol):
         print(f"  {symbol}: S3 file exists — skip (use --overwrite to force)")
         return 0
-
     n = min(len(rows), DAILY_CAP)
     if dry_run:
         print(f"  {symbol}: {len(rows)} DDB rows → would write {n} rows to s3://{S3_BUCKET}/{s3_key(market, symbol)}")
         return n
-
-    written = write_parquet_to_s3(market, symbol, rows)
+    written = write_csv_gz_to_s3(market, symbol, rows)
     print(f"  {symbol}: {len(rows)} DDB rows → {written} rows written to S3")
     return written
 
