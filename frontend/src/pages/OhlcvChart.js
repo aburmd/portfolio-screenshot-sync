@@ -95,16 +95,17 @@ function CandleChart({ ohlcv, intraday, cur, triggers, onChartClick }) {
         if (tooltip) tooltip.style.display = "none";
         return;
       }
-      const data = param.seriesData.get(candleSeries);
+      // Use first entry from seriesData map (candlestick series)
+      const data = param.seriesData.get(candleSeries) || [...param.seriesData.values()][0];
       // Store the exact price under cursor via coordinateToPrice
       const hoverPrice = candleSeries.coordinateToPrice(param.point.y);
       if (hoverPrice != null && hoverPrice > 0) lastPriceRef.current = hoverPrice;
-      if (!data) { if (tooltip) tooltip.style.display = "none"; return; }
+      if (!data || data.open == null) { if (tooltip) tooltip.style.display = "none"; return; }
       const { open, high, low, close } = data;
       const up = close >= open;
       if (tooltip) {
         tooltip.innerHTML = [
-          `<span style="color:#999;font-size:10px">${param.time}</span>`,
+          `<span style="color:#999;font-size:10px">${typeof param.time === "object" ? `${param.time.year}-${String(param.time.month).padStart(2,"0")}-${String(param.time.day).padStart(2,"0")}` : param.time}</span>`,
           `<span>O <b>${cur}${open?.toFixed(2)}</b></span>`,
           `<span>H <b>${cur}${high?.toFixed(2)}</b></span>`,
           `<span>L <b>${cur}${low?.toFixed(2)}</b></span>`,
