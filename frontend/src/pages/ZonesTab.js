@@ -28,7 +28,7 @@ export default function ZonesTab({ userId }) {
   const [maxBuyZones, setMaxBuyZones]     = useState(5);
   const [maxSellZones, setMaxSellZones]   = useState(5);
   const [hhTrimPct, setHhTrimPct]         = useState(0.25);
-  const [currentHoldingPct, setCurrentHoldingPct] = useState(0.0);
+  const [currentHoldingPct, setCurrentHoldingPct] = useState("");
   const [data, setData]         = useState(null);
   const [loading, setLoading]   = useState(false);
   const [saving, setSaving]     = useState(false);
@@ -39,7 +39,7 @@ export default function ZonesTab({ userId }) {
     if (!symbol.trim()) return;
     setLoading(true); setError(null); setData(null); setSaved(false);
     try {
-      const result = await fetchZones(market, symbol.trim().toUpperCase(), basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct);
+      const result = await fetchZones(market, symbol.trim().toUpperCase(), basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct === "" ? 0.0 : currentHoldingPct);
       if (result.error) setError(result.error);
       else setData(result);
     } catch (e) { setError(e.message); }
@@ -94,8 +94,8 @@ export default function ZonesTab({ userId }) {
         </label>
         <label style={{ fontSize: 12 }}>Holding%<br />
           <input type="number" value={currentHoldingPct}
-            onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setCurrentHoldingPct(v); }}
-            step={0.1} min={0} style={{ padding: 6, width: 65 }} />
+            onChange={e => { const v = e.target.value; setCurrentHoldingPct(v === "" ? "" : (isNaN(parseFloat(v)) ? "" : parseFloat(v))); }}
+            placeholder="0" step={0.1} min={0} style={{ padding: 6, width: 65 }} />
         </label>
         <label style={{ fontSize: 12 }}>HH Trim%<br />
           <input type="number" value={hhTrimPct}
