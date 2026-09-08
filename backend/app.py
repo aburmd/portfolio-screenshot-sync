@@ -41,7 +41,8 @@ INDEX_CONSTITUENTS_TABLE = os.environ.get("INDEX_CONSTITUENTS_TABLE", "portfolio
 STOCK_HISTORY_TABLE = os.environ.get("STOCK_HISTORY_TABLE", "portfolio-stock-history-dev")
 FUNDAMENTALS_TABLE = os.environ.get("FUNDAMENTALS_TABLE", "portfolio-fundamentals-dev")
 POSITION_PLANS_TABLE = os.environ.get("POSITION_PLANS_TABLE", "portfolio-position-plans-dev")
-SAVED_CHARTS_TABLE = os.environ.get("SAVED_CHARTS_TABLE", "portfolio-saved-charts-dev")
+SAVED_CHARTS_TABLE   = os.environ.get("SAVED_CHARTS_TABLE",   "portfolio-saved-charts-dev")
+UNIVERSE_TABLE       = os.environ.get("UNIVERSE_TABLE",       "portfolio-universe-dev")
 
 s3 = boto3.client("s3", region_name=REGION)
 ddb = boto3.resource("dynamodb", region_name=REGION)
@@ -3072,6 +3073,67 @@ async def get_zones(market: str, symbol: str, base_pos: float = 0.5, max_pos: fl
     if not result:
         return {"error": f"No history data for {market.upper()}#{symbol.upper()}"}
     return result
+
+
+@app.get("/research/ohlcv/{market}/{symbol}")
+async def get_ohlcv(market: str, symbol: str):
+    """
+    Return OHLCV rows for a symbol from S3 csv.gz.
+    If not found in S3:
+      1. Fetch via yfinance (max history) and write to S3
+      2. Upsert symbol into portfolio-universe-dev with daily_enabled=True
+    Returns: {"symbol", "market", "rows": [{date,open,high,low,close,volume}], "source": "s3"|"fetched"}
+    """
+    import gzip
+    from eod_scanner import _read_s3, _write_s3, _update_agg, DAILY_CAP
+    import yfinance as yf
+
+    mkt = market.upper()
+    sym = symbol.upper()
+    yf_sym = f"{sym}.NS" if mkt == "IN" else sym
+
+    # Try S3 first
+    rows = _read_s3(mkt, sym)
+    source = "s3"
+
+    if not rows:
+        # Fetch full history from yfinance
+        try:
+            hist = yf.Ticker(yf_sym).history(period="max")
+        except Exception as e:
+            return {"error": f"yfinance error: {e}"}
+        if hist is None or hist.empty:
+            return {"error": f"No data found for {sym}"}
+
+        rows = []
+        for idx, row in hist.iterrows():
+            rows.append({
+                "date":   idx.strftime("%Y-%m-%d"),
+                "open":   round(float(row["Open"]),   2),
+                "high":   round(float(row["High"]),   2),
+                "low":    round(float(row["Low"]),    2),
+                "close":  round(float(row["Close"]),  2),
+                "volume": int(row["Volume"]),
+            })
+        # Trim to cap and write to S3
+        if len(rows) > DAILY_CAP:
+            rows = rows[-DAILY_CAP:]
+        _write_s3(mkt, sym, rows)
+        _update_agg(mkt, sym, rows)
+        source = "fetched"
+
+        # Register in universe table with daily_enabled=True
+        try:
+            ddb.Table(UNIVERSE_TABLE).put_item(Item={
+                "market":        mkt,
+                "symbol":        sym,
+                "daily_enabled": True,
+                "min1_enabled":  False,
+            })
+        except Exception:
+            pass
+
+    return {"symbol": sym, "market": mkt, "rows": rows, "source": source}
 
 
 # ── Position Plans ────────────────────────────────────────────────────────────

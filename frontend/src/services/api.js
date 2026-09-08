@@ -307,6 +307,12 @@ export async function fetchZones(market, symbol, basePos = 0.5, maxPos = 3.0, ma
   return res.json();
 }
 
+export async function fetchOhlcv(market, symbol) {
+  const res = await fetch(`${API_BASE}/research/ohlcv/${market}/${encodeURIComponent(symbol)}`);
+  if (!res.ok) throw new Error("Failed to fetch OHLCV");
+  return res.json();
+}
+
 // --- Position Plans ---
 export async function createPlan(market, symbol, data) {
   const res = await fetch(`${API_BASE}/research/plan/${market}/${encodeURIComponent(symbol)}`, {
