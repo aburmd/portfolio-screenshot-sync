@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { createChart, CrosshairMode, LineStyle } from "lightweight-charts";
+import { createChart, CandlestickSeries, HistogramSeries, CrosshairMode, LineStyle } from "lightweight-charts";
 import { fetchSavedCharts, fetchSavedChart, refreshChart, deleteChart } from "../services/api";
 
 const btn = (color = "#1976d2", disabled = false) => ({
@@ -45,8 +45,8 @@ function CandleChart({ ohlcv, zones, cur }) {
     });
     chartRef.current = chart;
 
-    // Candlestick series
-    const candleSeries = chart.addCandlestickSeries({
+    // Candlestick series (v5 API)
+    const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor:          "#2e7d32",
       downColor:        "#c62828",
       borderUpColor:    "#2e7d32",
@@ -65,10 +65,10 @@ function CandleChart({ ohlcv, zones, cur }) {
     })).filter(d => d.close != null);
     candleSeries.setData(candleData);
 
-    // Volume series (histogram on separate pane)
-    const volumeSeries = chart.addHistogramSeries({
-      color:       "#90caf9",
-      priceFormat: { type: "volume" },
+    // Volume series (histogram on separate pane, v5 API)
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      color:        "#90caf9",
+      priceFormat:  { type: "volume" },
       priceScaleId: "volume",
     });
     chart.priceScale("volume").applyOptions({
