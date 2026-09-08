@@ -3602,6 +3602,51 @@ async def remove_subscription(sub_type: str, user_id: str):
     return {"removed": user_id}
 
 
+@app.get("/research/intraday/{market}/{symbol}")
+async def get_intraday(market: str, symbol: str):
+    """
+    Fetch today's intraday bars (5-min) via yfinance on-demand (Option C).
+    Returns bars with unix timestamps so lightweight-charts can append them
+    after the daily (date-string) S3 series.
+
+    Option B (future — switch when multiple symbols need intraday view):
+      1. In intraday_scanner._write_5min_bar, after writing the 5-min bar,
+         also upsert Key={market_symbol, timestamp='TODAY'} with:
+           open  = first open of the day (only set if not already set)
+           high  = max(existing_high, bar.high)
+           low   = min(existing_low,  bar.low)
+           close = bar.close
+           volume += bar.volume
+         Use a conditional UpdateExpression with ADD for volume, SET for close,
+         and SET high/low only when they exceed current values.
+      2. This endpoint becomes: ddb.get_item(Key={market_symbol, 'TODAY'})
+         — 1 DDB read, zero yfinance latency, works for all min1_enabled symbols.
+      3. TTL on the TODAY row = same EOD TTL as 5-min bars (auto-cleanup).
+    """
+    import yfinance as yf
+    mkt = market.upper()
+    sym = symbol.upper()
+    yf_sym = f"{sym}.NS" if mkt == "IN" else sym
+    try:
+        hist = yf.Ticker(yf_sym).history(period="1d", interval="5m")
+    except Exception as e:
+        return {"error": str(e), "bars": []}
+    if hist is None or hist.empty:
+        return {"bars": []}
+    bars = []
+    for idx, row in hist.iterrows():
+        ts = int(idx.timestamp())
+        bars.append({
+            "time":   ts,
+            "open":   round(float(row["Open"]),   2),
+            "high":   round(float(row["High"]),   2),
+            "low":    round(float(row["Low"]),    2),
+            "close":  round(float(row["Close"]),  2),
+            "volume": int(row["Volume"]),
+        })
+    return {"symbol": sym, "market": mkt, "bars": bars}
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _add_months(date_str, months):

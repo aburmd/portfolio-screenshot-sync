@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, CrosshairMode, LineStyle } from "lightweight-charts";
-import { fetchOhlcv, addTrigger, listTriggers, deleteTrigger } from "../services/api";
+import { fetchOhlcv, fetchIntraday, addTrigger, listTriggers, deleteTrigger } from "../services/api";
 import { fetchAuthSession, fetchUserAttributes } from "aws-amplify/auth";
 
 const RANGES = ["6M", "1Y", "2Y", "5Y", "All"];
@@ -14,7 +14,7 @@ function filterByRange(rows, range) {
   return rows.filter(r => r.date >= cutoffStr);
 }
 
-function CandleChart({ ohlcv, cur, triggers, onChartClick }) {
+function CandleChart({ ohlcv, intraday, cur, triggers, onChartClick }) {
   const containerRef    = useRef(null);
   const chartRef        = useRef(null);
   const candleRef       = useRef(null);
@@ -50,6 +50,18 @@ function CandleChart({ ohlcv, cur, triggers, onChartClick }) {
       time: d.date, open: d.open ?? d.close, high: d.high ?? d.close,
       low: d.low ?? d.close, close: d.close,
     })).filter(d => d.close != null));
+
+    // Append today's intraday bars (unix timestamps) after daily data
+    if (intraday?.length) {
+      const intradaySeries = chart.addSeries(CandlestickSeries, {
+        upColor: "#43a047", downColor: "#e53935",
+        borderUpColor: "#43a047", borderDownColor: "#e53935",
+        wickUpColor: "#43a047", wickDownColor: "#e53935",
+      });
+      intradaySeries.setData(intraday.map(b => ({
+        time: b.time, open: b.open, high: b.high, low: b.low, close: b.close,
+      })));
+    }
 
     // Draw trigger price lines
     (triggers || []).forEach(t => {
@@ -133,7 +145,7 @@ function CandleChart({ ohlcv, cur, triggers, onChartClick }) {
     });
     ro.observe(containerRef.current);
     return () => { ro.disconnect(); chart.remove(); chartRef.current = null; containerRef.current?.removeEventListener("click", handleDomClick); };
-  }, [ohlcv, cur, triggers]);
+  }, [ohlcv, cur, triggers, intraday]);
 
   return (
     <div style={{ position: "relative", width: "100%" }}>
@@ -354,10 +366,12 @@ export default function OhlcvChart() {
   const [data,         setData]         = useState(null);
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState(null);
-  const [clickedPrice, setClickedPrice] = useState(null);
-  const [triggers,     setTriggers]     = useState([]);
-  const [userId,       setUserId]       = useState(null);
-  const [isAdmin,      setIsAdmin]      = useState(false);
+  const [clickedPrice,  setClickedPrice]  = useState(null);
+  const [triggers,      setTriggers]      = useState([]);
+  const [userId,        setUserId]        = useState(null);
+  const [isAdmin,       setIsAdmin]       = useState(false);
+  const [intradayBars,  setIntradayBars]  = useState([]);
+  const [intradayLoad,  setIntradayLoad]  = useState(false);
 
   // Fetch current user id and role once
   useEffect(() => {
@@ -376,16 +390,26 @@ export default function OhlcvChart() {
     } catch (_) {}
   }, [userId]);
 
+  const loadIntraday = useCallback(async (sym, mkt) => {
+    setIntradayLoad(true);
+    try {
+      const res = await fetchIntraday(mkt, sym);
+      setIntradayBars(res.bars || []);
+    } catch (_) { setIntradayBars([]); }
+    setIntradayLoad(false);
+  }, []);
+
   const handleSearch = async (sym = symbol, mkt = market) => {
     const s = sym.trim().toUpperCase();
     if (!s) return;
-    setLoading(true); setError(null); setData(null); setClickedPrice(null);
+    setLoading(true); setError(null); setData(null); setClickedPrice(null); setIntradayBars([]);
     try {
       const result = await fetchOhlcv(mkt, s);
       if (result.error) { setError(result.error); }
       else {
         setData(result);
         await loadTriggers(s, mkt);
+        loadIntraday(s, mkt);  // fire-and-forget, shows when ready
       }
     } catch (e) { setError(e.message); }
     setLoading(false);
@@ -455,6 +479,14 @@ export default function OhlcvChart() {
               </span>
             )}
             <span style={{ fontSize: 11, color: "#999" }}>{data.rows?.length} daily bars</span>
+            {intradayLoad && (
+              <span style={{ fontSize: 11, color: "#1976d2" }}>⏳ loading today…</span>
+            )}
+            {!intradayLoad && intradayBars.length > 0 && (
+              <span style={{ fontSize: 11, background: "#e3f2fd", color: "#1565c0", padding: "2px 8px", borderRadius: 4 }}>
+                📈 +{intradayBars.length} intraday bars (today)
+              </span>
+            )}
 
             {/* Range selector */}
             <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
@@ -479,6 +511,7 @@ export default function OhlcvChart() {
           {filtered.length > 0
             ? <CandleChart
                 ohlcv={filtered}
+                intraday={intradayBars}
                 cur={cur}
                 triggers={triggers}
                 onChartClick={setClickedPrice}

@@ -312,6 +312,11 @@ export async function fetchOhlcv(market, symbol) {
   if (!res.ok) throw new Error("Failed to fetch OHLCV");
   return res.json();
 }
+export async function fetchIntraday(market, symbol) {
+  const res = await fetch(`${API_BASE}/research/intraday/${market}/${encodeURIComponent(symbol)}`);
+  if (!res.ok) return { bars: [] };
+  return res.json();
+}
 
 // --- Position Plans ---
 export async function createPlan(market, symbol, data) {
