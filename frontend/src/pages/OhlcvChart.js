@@ -119,12 +119,20 @@ function CandleChart({ ohlcv, cur, triggers, onChartClick }) {
       if (price != null && price > 0) onChartClickRef.current(parseFloat(price.toFixed(2)));
     });
 
+    // Fallback: plain DOM click on container
+    const handleDomClick = () => {
+      const price = lastPriceRef.current;
+      console.log("DOM click fallback: price=", price);
+      if (price != null && price > 0) onChartClickRef.current(parseFloat(price.toFixed(2)));
+    };
+    containerRef.current.addEventListener("click", handleDomClick);
+
     const ro = new ResizeObserver(() => {
       if (containerRef.current && chartRef.current)
         chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
     });
     ro.observe(containerRef.current);
-    return () => { ro.disconnect(); chart.remove(); chartRef.current = null; };
+    return () => { ro.disconnect(); chart.remove(); chartRef.current = null; containerRef.current?.removeEventListener("click", handleDomClick); };
   }, [ohlcv, cur, triggers]);
 
   return (
