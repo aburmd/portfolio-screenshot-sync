@@ -20,10 +20,9 @@ function CandleChart({ ohlcv, cur, triggers, onChartClick }) {
   const candleRef       = useRef(null);
   const tooltipRef      = useRef(null);
   const onChartClickRef = useRef(onChartClick);
+  const lastPriceRef    = useRef(null);  // tracks price under crosshair
   // keep ref current so click handler never goes stale
   useEffect(() => { onChartClickRef.current = onChartClick; }, [onChartClick]);
-  // keep refs to trigger lines so we can update them without remounting
-  const triggerLinesRef = useRef([]);
 
   useEffect(() => {
     if (!containerRef.current || !ohlcv?.length) return;
@@ -80,35 +79,43 @@ function CandleChart({ ohlcv, cur, triggers, onChartClick }) {
 
     chart.timeScale().fitContent();
 
-    // OHLC tooltip on hover
+    // Track price under crosshair (most reliable way to get price at cursor)
     chart.subscribeCrosshairMove(param => {
       const tooltip = tooltipRef.current;
-      if (!tooltip) return;
       if (!param.time || !param.point || param.point.x < 0 || param.point.y < 0) {
-        tooltip.style.display = "none"; return;
+        if (tooltip) tooltip.style.display = "none";
+        return;
       }
       const data = param.seriesData.get(candleSeries);
-      if (!data) { tooltip.style.display = "none"; return; }
+      // Store the exact price under cursor via coordinateToPrice
+      const hoverPrice = candleSeries.coordinateToPrice(param.point.y);
+      if (hoverPrice != null && hoverPrice > 0) lastPriceRef.current = hoverPrice;
+      if (!data) { if (tooltip) tooltip.style.display = "none"; return; }
       const { open, high, low, close } = data;
       const up = close >= open;
-      tooltip.innerHTML = [
-        `<span style="color:#999;font-size:10px">${param.time}</span>`,
-        `<span>O <b>${cur}${open?.toFixed(2)}</b></span>`,
-        `<span>H <b>${cur}${high?.toFixed(2)}</b></span>`,
-        `<span>L <b>${cur}${low?.toFixed(2)}</b></span>`,
-        `<span>C <b style="color:${up ? "#2e7d32" : "#c62828"}">${cur}${close?.toFixed(2)}</b></span>`,
-      ].join("  ");
-      const flipX = param.point.x > containerRef.current.clientWidth - 220;
-      tooltip.style.left    = flipX ? `${param.point.x - 220}px` : `${param.point.x + 12}px`;
-      tooltip.style.top     = "8px";
-      tooltip.style.display = "flex";
+      if (tooltip) {
+        tooltip.innerHTML = [
+          `<span style="color:#999;font-size:10px">${param.time}</span>`,
+          `<span>O <b>${cur}${open?.toFixed(2)}</b></span>`,
+          `<span>H <b>${cur}${high?.toFixed(2)}</b></span>`,
+          `<span>L <b>${cur}${low?.toFixed(2)}</b></span>`,
+          `<span>C <b style="color:${up ? "#2e7d32" : "#c62828"}">${cur}${close?.toFixed(2)}</b></span>`,
+        ].join("  ");
+        const flipX = param.point.x > containerRef.current.clientWidth - 220;
+        tooltip.style.left    = flipX ? `${param.point.x - 220}px` : `${param.point.x + 12}px`;
+        tooltip.style.top     = "8px";
+        tooltip.style.display = "flex";
+      }
     });
 
-    // Click → pass price to parent for trigger creation
+    // Click → use last known crosshair price (set by subscribeCrosshairMove above)
     chart.subscribeClick(param => {
       if (!param.point) return;
-      const price = candleSeries.coordinateToPrice(param.point.y);
-      console.log("chart click param.point:", param.point, "price:", price);
+      // Primary: use lastPriceRef set by crosshair move (exact cursor price)
+      // Fallback: coordinateToPrice directly
+      let price = lastPriceRef.current;
+      if (price == null) price = candleSeries.coordinateToPrice(param.point.y);
+      console.log("chart click: price=", price, "point=", param.point);
       if (price != null && price > 0) onChartClickRef.current(parseFloat(price.toFixed(2)));
     });
 
