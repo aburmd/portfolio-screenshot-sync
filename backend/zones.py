@@ -203,7 +203,7 @@ def _vol_pct(zone_price, band_lo, band_hi, records):
 # ── main compute ──────────────────────────────────────────────────────────────
 
 def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
-                  max_buy_zones=5, max_sell_zones=5, hh_trim_pct=0.25):
+                  max_buy_zones=5, max_sell_zones=5, hh_trim_pct=0.25, current_holding_pct=0.0):
     market = market.upper()
     symbol = symbol.upper()
 
@@ -397,15 +397,16 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
         "note": "final exit = HH x (1 + 0.8 x stock_avg_CAGR)",
     })
 
-    # ── sell zone sizing: trim-to % ladder downward from base_pos → hh_trim_pct ──
+    # ── sell zone sizing: trim-to % ladder downward from holding → hh_trim_pct ──
     # total_target_pct = what % of portfolio to KEEP after trimming at that level
-    # nearest sell zone → keep base_pos, furthest intermediate → keep hh_trim_pct
-    # vol-weighted: higher vol at a level = trim more aggressively (keep less)
+    # anchor = current_holding_pct if user already holds, else base_pos
+    # nearest sell zone → keep anchor, furthest intermediate → keep hh_trim_pct
+    # vol-weighted: higher vol = trim more aggressively (keep less)
     intermediate = [z for z in raw_sell if z.get("note") is None]
     ns = len(intermediate)
     if ns > 0:
         max_vol_s = max(z["vol_pct"] for z in intermediate) or 1
-        hi = base_pos
+        hi = current_holding_pct if current_holding_pct > 0 else base_pos
         lo = hh_trim_pct
         for i, z in enumerate(intermediate):
             t       = i / (ns - 1) if ns > 1 else 0.0
@@ -433,6 +434,7 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
         },
         "base_pos":       base_pos,
         "max_pos":        max_pos,
+        "current_holding_pct": current_holding_pct,
         "max_buy_zones":  max_buy_zones,
         "max_sell_zones": max_sell_zones,
     }

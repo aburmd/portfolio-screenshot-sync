@@ -3063,11 +3063,12 @@ async def trading_positions(paper: bool = True):
 
 @app.get("/research/zones/{market}/{symbol}")
 async def get_zones(market: str, symbol: str, base_pos: float = 0.5, max_pos: float = 3.0,
-                    max_buy_zones: int = 5, max_sell_zones: int = 5, hh_trim_pct: float = 0.25):
+                    max_buy_zones: int = 5, max_sell_zones: int = 5, hh_trim_pct: float = 0.25, current_holding_pct: float = 0.0):
     """Compute buy/sell zones on-demand from OHLCV history."""
     from zones import compute_zones
     result = compute_zones(symbol.upper(), market.upper(), base_pos=base_pos, max_pos=max_pos,
-                           max_buy_zones=max_buy_zones, max_sell_zones=max_sell_zones, hh_trim_pct=hh_trim_pct)
+                           max_buy_zones=max_buy_zones, max_sell_zones=max_sell_zones,
+                           hh_trim_pct=hh_trim_pct, current_holding_pct=current_holding_pct)
     if not result:
         return {"error": f"No history data for {market.upper()}#{symbol.upper()}"}
     return result
@@ -3267,8 +3268,10 @@ async def save_chart(market: str, symbol: str, data: dict):
     max_buy_zones  = data.get("max_buy_zones", 5)
     max_sell_zones = data.get("max_sell_zones", 5)
     hh_trim_pct    = float(data.get("hh_trim_pct", 0.25))
+    current_holding_pct = float(data.get("current_holding_pct", 0.0))
     zones_data = compute_zones(symbol.upper(), market.upper(), base_pos=base_pos, max_pos=max_pos,
-                               max_buy_zones=max_buy_zones, max_sell_zones=max_sell_zones, hh_trim_pct=hh_trim_pct)
+                               max_buy_zones=max_buy_zones, max_sell_zones=max_sell_zones,
+                               hh_trim_pct=hh_trim_pct, current_holding_pct=current_holding_pct)
     if not zones_data:
         return {"error": f"No data for {market}#{symbol}"}
 
@@ -3344,8 +3347,10 @@ async def refresh_chart(market: str, symbol: str, data: dict):
     max_buy_zones  = int(item.get("max_buy_zones", 5))
     max_sell_zones = int(item.get("max_sell_zones", 5))
     hh_trim_pct    = float(item.get("hh_trim_pct", 0.25))
+    current_holding_pct = float(item.get("current_holding_pct", 0.0))
     zones_data = compute_zones(symbol.upper(), market.upper(), base_pos=base_pos, max_pos=max_pos,
-                               max_buy_zones=max_buy_zones, max_sell_zones=max_sell_zones, hh_trim_pct=hh_trim_pct)
+                               max_buy_zones=max_buy_zones, max_sell_zones=max_sell_zones,
+                               hh_trim_pct=hh_trim_pct, current_holding_pct=current_holding_pct)
     if not zones_data:
         return {"error": "Recompute failed"}
 
