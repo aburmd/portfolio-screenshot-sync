@@ -142,30 +142,8 @@ def _buy_fib_bands(hh, ll, n_levels):
 
 
 def _sell_fib_bands(hh, ll, n_levels):
-    """
-    Sell zones: fib extension levels above HH (LL + ext*(HH-LL) for ext > 1.0)
-    plus base fib levels that happen to be above current price.
-    Priority order same as buy: 0.618→0.236→0.786→0.500→0.382 mapped to extensions.
-    """
-    price_range = hh - ll
-    ext_levels = [1.618, 1.236, 1.786, 1.500, 1.382]  # mirrors FIB_LEVELS priority order
-    all_levels = [(e, round(ll + e * price_range, 4)) for e in ext_levels]
-    # Sort low→high, assign bands as midpoints between adjacent levels
-    all_levels.sort(key=lambda x: x[1])
-    sentinel_lo = hh  # bottom sentinel = HH (sell zones start above HH)
-    sentinel_hi = round(ll + 2.5 * price_range, 4)  # top sentinel
-    prices_only = [sentinel_lo] + [fp for _, fp in all_levels] + [sentinel_hi]
-    bands = []
-    for i, (fib_ratio, fib_price) in enumerate(all_levels):
-        band_lo = round((prices_only[i] + fib_price) / 2, 4)
-        band_hi = round((fib_price + prices_only[i + 2]) / 2, 4)
-        priority = ext_levels.index(fib_ratio) + 1
-        bands.append({
-            "fib": fib_ratio, "fib_price": fib_price,
-            "band_lo": band_lo, "band_hi": band_hi,
-            "priority": priority,
-        })
-    return sorted(bands, key=lambda x: x["priority"])[:n_levels]
+    """Same fib retracement levels as buy, returned for filtering above current price."""
+    return _buy_fib_bands(hh, ll, n_levels)
 
 
 def _count_touches(records, band_lo, band_hi, zone_type):
@@ -341,12 +319,13 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
                 z["reserved_pct"]        = 0
 
     # ── BUILD SELL ZONES ──────────────────────────────────────────────────────
-    # Only fib levels above current price qualify as sell zones
+    # Fib levels above current price + 2 fixed zones (near HH + final exit)
     raw_sell = []
     for band in sell_bands:
         if band["fib_price"] <= current_price:
-            continue  # below or at current price → skip
+            continue  # below current price → buy side, skip
 
+        # Touch counting: tiebreaker = Low touches (price dipped to resistance)
         best_total, best_primary, best_records = 0, 0, w6m
         for wrecs in [w6m, w12m, w24m]:
             if len(wrecs) < 10:
@@ -375,32 +354,18 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
 
     raw_sell.sort(key=lambda x: x["price_level"])  # low→high
 
-    # ── sell zone sizing ──────────────────────────────────────────────────────
-    ns = len(raw_sell)
-    if ns > 0:
-        max_vol_s = max(z["vol_pct"] for z in raw_sell) or 1
-        max_raw_s = max(
-            i * (raw_sell[i]["vol_pct"] / max_vol_s) for i in range(1, ns)
-        ) if ns > 1 else 1
-
-        for i, z in enumerate(raw_sell):
-            if i == ns - 1:
-                z["total_target_pct"] = 0.0
-                z["note"] = "final exit = HH x (1 + 0.8 x QQQ_CAGR)"
-            elif i == ns - 2:
-                z["total_target_pct"] = 0.25
-                z["note"] = "just below HH"
-            else:
-                rel_vol = z["vol_pct"] / max_vol_s
-                rank    = ns - 2 - i
-                raw     = rank * rel_vol
-                z["total_target_pct"] = min(
-                    round(0.25 + (raw / max_raw_s) * (max_pos - 0.25), 2)
-                    if max_raw_s > 0 else max_pos,
-                    max_pos
-                )
-
-    # ── final sell price ──────────────────────────────────────────────────────
+    # Always append 2 fixed zones
+    # 1) Near HH → trim to 0.25%
+    raw_sell.append({
+        "price_level": period_hh,
+        "fib": None, "fib_price": period_hh,
+        "priority": 99, "touch_count": 0, "primary_touches": 0,
+        "vol_pct": 0.0,
+        "pct_from_ll": round((period_hh - period_ll) / period_ll * 100, 2),
+        "total_target_pct": 0.25,
+        "note": "just below HH",
+    })
+    # 2) Final exit above HH
     final_sell_price  = None
     final_sell_window = "24M"
     if qqq_avg_cagr:
@@ -413,8 +378,33 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
             hh_ref = hh_24m or hh_12m
         if hh_ref:
             final_sell_price = round(hh_ref * (1 + 0.80 * qqq_avg_cagr), 2)
-            if raw_sell:
-                raw_sell[-1]["price_level"] = final_sell_price
+    raw_sell.append({
+        "price_level": final_sell_price or round(period_hh * (1 + 0.80 * (qqq_avg_cagr or 0.20)), 2),
+        "fib": None, "fib_price": None,
+        "priority": 100, "touch_count": 0, "primary_touches": 0,
+        "vol_pct": 0.0,
+        "pct_from_ll": round(((final_sell_price or period_hh) - period_ll) / period_ll * 100, 2),
+        "total_target_pct": 0.0,
+        "note": "final exit = HH x (1 + 0.8 x QQQ_CAGR)",
+    })
+
+    # ── sell zone sizing (intermediate zones only) ────────────────────────────
+    intermediate = [z for z in raw_sell if z.get("note") is None]
+    ns = len(intermediate)
+    if ns > 0:
+        max_vol_s = max(z["vol_pct"] for z in intermediate) or 1
+        max_raw_s = max(
+            i * (intermediate[i]["vol_pct"] / max_vol_s) for i in range(1, ns)
+        ) if ns > 1 else 1
+        for i, z in enumerate(intermediate):
+            rel_vol = z["vol_pct"] / max_vol_s
+            rank    = ns - 1 - i  # highest rank = nearest to current price
+            raw     = rank * rel_vol
+            z["total_target_pct"] = min(
+                round(0.25 + (raw / max_raw_s) * (max_pos - 0.25), 2)
+                if max_raw_s > 0 else max_pos,
+                max_pos
+            )
 
     return {
         "symbol":        symbol,
