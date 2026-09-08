@@ -11,6 +11,7 @@ import SharedWithMe from "./pages/SharedWithMe";
 import PositionTracker from "./pages/PositionTracker";
 import Research from "./pages/Research";
 import Trading from "./pages/Trading";
+import OhlcvChart from "./pages/OhlcvChart";
 
 Amplify.configure(awsConfig);
 
@@ -48,6 +49,7 @@ function AppContent({ signOut, user }) {
       <nav className="app-nav">
         <button style={tabStyle(page === "dashboard")} onClick={() => setPage("dashboard")}>Dashboard</button>
         <button style={tabStyle(page === "shared")} onClick={() => setPage("shared")}>Shared With Me</button>
+        <button style={tabStyle(page === "ohlcv")} onClick={() => setPage("ohlcv")}>📉 Chart</button>
         {isAdmin && <button style={tabStyle(page === "admin")} onClick={() => setPage("admin")}>Admin</button>}
         {isAdmin && <button style={tabStyle(page === "tracker")} onClick={() => setPage("tracker")}>Position Tracker</button>}
         {isAdmin && <button style={tabStyle(page === "research")} onClick={() => setPage("research")}>Research</button>}
@@ -56,6 +58,7 @@ function AppContent({ signOut, user }) {
 
       {page === "dashboard" && <Dashboard user={user} />}
       {page === "shared" && <SharedWithMe user={user} />}
+      {page === "ohlcv" && <OhlcvChart />}
       {page === "admin" && isAdmin && <AdminPage />}
       {page === "tracker" && isAdmin && <PositionTracker user={user} />}
       {page === "research" && isAdmin && <Research user={user} />}
