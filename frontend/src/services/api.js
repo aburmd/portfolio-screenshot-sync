@@ -423,5 +423,9 @@ export async function sendNotification(subject, message) {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ subject, message }),
   });
+  if (!res.ok) {
+    const text = await res.text();
+    return { error: `Server error ${res.status}: ${text.slice(0, 200)}` };
+  }
   return res.json();
 }

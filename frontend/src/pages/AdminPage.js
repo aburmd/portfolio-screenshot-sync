@@ -434,8 +434,8 @@ function NotifyTab() {
       if (res.error) {
         setResult({ type: "error", text: res.error });
       } else {
-        setResult({ type: "ok", sent: res.sent, failed: res.failed, detail: res.detail || [] });
-        if (res.sent > 0) { setSubject(""); setMessage(""); }
+        setResult({ type: "ok", sent: res.sent ?? 0, failed: res.failed ?? 0, detail: Array.isArray(res.detail) ? res.detail : [] });
+        if ((res.sent ?? 0) > 0) { setSubject("📊 Portfolio Alert"); setMessage(""); }
       }
     } catch (e) { setResult({ type: "error", text: e.message }); }
     setSending(false);

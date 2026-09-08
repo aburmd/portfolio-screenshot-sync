@@ -31,7 +31,7 @@ def decode_token(token: str) -> dict:
             token,
             jwks,
             algorithms=["RS256"],
-            options={"verify_at_hash": False},
+            options={"verify_at_hash": False, "verify_aud": False},
         )
         return claims
     except JWTError as e:
