@@ -299,24 +299,22 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
 
     n = len(buy_zones)
     if n > 0:
-        max_vol = max(z["vol_pct"] for z in buy_zones) or 1
-        # total ladder size = skipped + remaining; size each zone as if it's
-        # at position (skipped + i) in a full (skipped + n) zone ladder
-        total_n = skipped_count + n
-        max_raw = max(
-            (skipped_count + i) * (buy_zones[i]["vol_pct"] / max_vol)
-            for i in range(1, n)
-        ) if n > 1 else (skipped_count + 1)
+        max_vol    = max(z["vol_pct"] for z in buy_zones) or 1
+        deepest_pos = skipped_count + n - 1
 
         for i, z in enumerate(buy_zones):
-            ladder_pos = skipped_count + i  # position in full ladder
-            if i == n - 1:  # last remaining zone always gets max_pos
-                z["total_target_pct"] = max_pos
-            else:
-                rel_vol = z["vol_pct"] / max_vol
-                raw     = ladder_pos * rel_vol
-                z["total_target_pct"] = min(round(
-                    base_pos + (raw / max_raw) * (max_pos - base_pos), 2), max_pos)
+            ladder_pos = skipped_count + i
+            rel_vol    = z["vol_pct"] / max_vol
+            t = (ladder_pos / deepest_pos) * rel_vol if deepest_pos > 0 else 1.0
+            z["total_target_pct"] = min(
+                round(base_pos + t * (max_pos - base_pos), 2), max_pos
+            )
+        # deepest zone always anchors at max_pos
+        buy_zones[-1]["total_target_pct"] = max_pos
+        # monotonic: deeper zones never less than shallower ones
+        for i in range(1, n):
+            if buy_zones[i]["total_target_pct"] < buy_zones[i-1]["total_target_pct"]:
+                buy_zones[i]["total_target_pct"] = buy_zones[i-1]["total_target_pct"]
 
         # 50% missed entry rule: only applies when no meaningful position held yet
         # If current_holding_pct >= base_pos, user already has a position — skip rule
