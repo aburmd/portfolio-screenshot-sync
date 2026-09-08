@@ -3480,6 +3480,8 @@ async def add_trigger(market: str, symbol: str, data: dict):
     import uuid as _uuid
     from datetime import datetime, timezone as tz
     from decimal import Decimal
+
+    user_id       = data.get("user_id")
     trigger_price = data.get("trigger_price")
     direction     = data.get("direction", "below")
     repeat        = bool(data.get("repeat", False))
