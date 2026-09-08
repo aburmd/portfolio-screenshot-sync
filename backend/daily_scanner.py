@@ -242,6 +242,61 @@ def store_stock(table, market, sym, data, now):
     table.put_item(Item=item)
 
 
+DAILY_CAP = 5000
+WEEKLY_CAP = 1000
+
+
+def _get_sorted_records(history_table, pk, prefix):
+    """Return sorted list of (date_str, item) for a given SK prefix (daily=digits, weekly=W#)."""
+    resp = history_table.query(
+        KeyConditionExpression=Key("market_symbol").eq(pk) & Key("date").begins_with(prefix),
+        ProjectionExpression="#d",
+        ExpressionAttributeNames={"#d": "date"},
+    )
+    return sorted(item["date"] for item in resp.get("Items", []))
+
+
+def _compress_to_weekly(history_table, pk, oldest_daily_keys):
+    """Fetch 5 oldest daily records, compress into 1 weekly OHLC, delete the 5 dailies."""
+    items = []
+    for dk in oldest_daily_keys:
+        item = history_table.get_item(Key={"market_symbol": pk, "date": dk}).get("Item")
+        if item:
+            items.append(item)
+    if not items:
+        return
+
+    week_end = items[-1]["date"]  # last day of the week
+    weekly = {
+        "market_symbol": pk,
+        "date": f"W#{week_end}",
+        "open": items[0].get("open"),
+        "high": max(float(i["high"]) for i in items if i.get("high")),
+        "low": min(float(i["low"]) for i in items if i.get("low")),
+        "close": items[-1].get("close"),
+        "volume": sum(int(i["volume"]) for i in items if i.get("volume")),
+        "week_start": items[0]["date"],
+        "week_end": week_end,
+    }
+    weekly = {k: (Decimal(str(round(v, 2))) if isinstance(v, float) else v)
+              for k, v in weekly.items() if v is not None}
+    history_table.put_item(Item=weekly)
+
+    with history_table.batch_writer() as batch:
+        for dk in oldest_daily_keys:
+            batch.delete_item(Key={"market_symbol": pk, "date": dk})
+
+
+def _enforce_weekly_cap(history_table, pk):
+    """If weekly records exceed WEEKLY_CAP, delete oldest."""
+    weekly_keys = _get_sorted_records(history_table, pk, "W#")
+    if len(weekly_keys) > WEEKLY_CAP:
+        to_delete = weekly_keys[:len(weekly_keys) - WEEKLY_CAP]
+        with history_table.batch_writer() as batch:
+            for wk in to_delete:
+                batch.delete_item(Key={"market_symbol": pk, "date": wk})
+
+
 def store_history(market, sym, hist, data=None, screener_item=None):
     """Store today's OHLC + fundamentals snapshot + AGG reference prices + earnings archive."""
     if hist is None or hist.empty:
@@ -250,9 +305,8 @@ def store_history(market, sym, hist, data=None, screener_item=None):
     pk = f"{market}#{sym}"
     close = hist["Close"]
     today_idx = hist.index[-1]
-    ttl_90 = int((datetime.now(timezone.utc) + timedelta(days=90)).timestamp())
 
-    # Store today's OHLC + fundamentals snapshot
+    # Store today's OHLC + fundamentals snapshot (no TTL)
     try:
         today_date = today_idx.strftime("%Y-%m-%d")
         daily = {
@@ -261,9 +315,8 @@ def store_history(market, sym, hist, data=None, screener_item=None):
             "high": Decimal(str(round(float(hist["High"].iloc[-1]), 2))),
             "low": Decimal(str(round(float(hist["Low"].iloc[-1]), 2))),
             "close": Decimal(str(round(float(close.iloc[-1]), 2))),
-            "ttl": ttl_90,
+            "volume": Decimal(str(int(hist["Volume"].iloc[-1]))),
         }
-        # Add fundamentals snapshot (same TTL, enables PE/EPS trajectory)
         if data:
             for k in ["forward_pe", "trailing_pe", "forward_eps", "trailing_eps",
                        "operating_margins", "revenue_growth", "earnings_growth", "market_cap"]:
@@ -274,14 +327,35 @@ def store_history(market, sym, hist, data=None, screener_item=None):
     except Exception:
         return
 
-    # Compute AGG reference close prices
+    # Enforce daily cap: if >5000, compress oldest 5 into 1 weekly record
+    try:
+        daily_keys = _get_sorted_records(history_table, pk, "2")  # daily SKs start with year digit
+        if len(daily_keys) > DAILY_CAP:
+            oldest_5 = daily_keys[:5]
+            _compress_to_weekly(history_table, pk, oldest_5)
+            _enforce_weekly_cap(history_table, pk)
+    except Exception as e:
+        print(f"  cap check failed for {sym}: {e}")
+
+    # Compute AGG reference close prices (uses yfinance hist for short-term, DDB for long-term)
     n = len(close)
     agg = {"market_symbol": pk, "date": "AGG", "last_updated": datetime.now(timezone.utc).isoformat()}
     lookbacks = {"close_1d": 1, "close_3d": 3, "close_1w": 5, "close_3w": 15, "close_1m": 22, "close_3m": 66}
     for key, days in lookbacks.items():
         if n > days:
-            val = float(close.iloc[-(days + 1)])
-            agg[key] = Decimal(str(round(val, 2)))
+            agg[key] = Decimal(str(round(float(close.iloc[-(days + 1)]), 2)))
+    # Long-term lookbacks from DDB daily records
+    try:
+        all_daily = _get_sorted_records(history_table, pk, "2")
+        total = len(all_daily)
+        for key, trading_days in {"close_6m": 132, "close_1y": 252, "close_3y": 756, "close_5y": 1260}.items():
+            if total > trading_days:
+                ref_sk = all_daily[-(trading_days + 1)]
+                ref_item = history_table.get_item(Key={"market_symbol": pk, "date": ref_sk}).get("Item")
+                if ref_item and ref_item.get("close"):
+                    agg[key] = ref_item["close"]
+    except Exception:
+        pass
     history_table.put_item(Item=agg)
 
     # Archive earnings event permanently (SK=EARN#date, no TTL)
@@ -299,14 +373,12 @@ def store_history(market, sym, hist, data=None, screener_item=None):
         }
         if screener_item.get("cumulative_drop") is not None:
             earn_record["cumulative_drop"] = screener_item["cumulative_drop"]
-        # Snapshot fundamentals at earnings time
         if data:
             for k in ["forward_pe", "trailing_pe", "forward_eps", "trailing_eps",
                        "operating_margins", "revenue_growth", "earnings_growth", "market_cap"]:
                 v = data.get(k)
                 if v is not None:
                     earn_record[k] = Decimal(str(round(v, 4))) if isinstance(v, float) else Decimal(str(v))
-        # Only write if new or update cumulative_drop (it changes over the 7-day window)
         if not existing_earn or screener_item.get("cumulative_drop") is not None:
             earn_record = {k: v for k, v in earn_record.items() if v is not None}
             history_table.put_item(Item=earn_record)

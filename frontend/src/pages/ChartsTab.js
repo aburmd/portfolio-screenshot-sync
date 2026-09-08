@@ -27,6 +27,7 @@ function CandleChart({ ohlcv, zones, cur }) {
   const chartRef     = useRef(null);
   const candleRef    = useRef(null);
   const volumeRef    = useRef(null);
+  const tooltipRef   = useRef(null);
 
   useEffect(() => {
     if (!containerRef.current || !ohlcv?.length) return;
@@ -139,6 +140,35 @@ function CandleChart({ ohlcv, zones, cur }) {
 
     chart.timeScale().fitContent();
 
+    // OHLC tooltip on crosshair move
+    chart.subscribeCrosshairMove(param => {
+      const tooltip = tooltipRef.current;
+      if (!tooltip) return;
+      if (!param.time || !param.point || param.point.x < 0 || param.point.y < 0) {
+        tooltip.style.display = "none";
+        return;
+      }
+      const data = param.seriesData.get(candleSeries);
+      if (!data) { tooltip.style.display = "none"; return; }
+
+      const { open, high, low, close } = data;
+      const up = close >= open;
+      tooltip.innerHTML = [
+        `<span style="color:#999;font-size:10px">${param.time}</span>`,
+        `<span>O <b>${cur}${open?.toFixed(2)}</b></span>`,
+        `<span>H <b>${cur}${high?.toFixed(2)}</b></span>`,
+        `<span>L <b>${cur}${low?.toFixed(2)}</b></span>`,
+        `<span>C <b style="color:${up ? '#2e7d32' : '#c62828'}">${cur}${close?.toFixed(2)}</b></span>`,
+      ].join("  ");
+
+      const box = containerRef.current.getBoundingClientRect();
+      const x   = param.point.x + containerRef.current.offsetLeft;
+      const flipX = param.point.x > containerRef.current.clientWidth - 200;
+      tooltip.style.left    = flipX ? `${param.point.x - tooltip.offsetWidth - 8}px` : `${param.point.x + 12}px`;
+      tooltip.style.top     = "8px";
+      tooltip.style.display = "flex";
+    });
+
     // Responsive resize
     const ro = new ResizeObserver(() => {
       if (containerRef.current && chartRef.current) {
@@ -150,7 +180,18 @@ function CandleChart({ ohlcv, zones, cur }) {
     return () => { ro.disconnect(); chart.remove(); chartRef.current = null; };
   }, [ohlcv, zones, cur]);
 
-  return <div ref={containerRef} style={{ width: "100%", borderRadius: 4, overflow: "hidden", border: "1px solid #e0e0e0" }} />;
+  return (
+    <div style={{ position: "relative", width: "100%" }}>
+      <div ref={containerRef} style={{ width: "100%", borderRadius: 4, overflow: "hidden", border: "1px solid #e0e0e0" }} />
+      <div ref={tooltipRef} style={{
+        display: "none", position: "absolute", top: 8, left: 0,
+        background: "rgba(255,255,255,0.95)", border: "1px solid #e0e0e0",
+        borderRadius: 4, padding: "4px 10px", fontSize: 12, gap: 10,
+        pointerEvents: "none", whiteSpace: "nowrap", zIndex: 10,
+        boxShadow: "0 2px 6px rgba(0,0,0,0.12)",
+      }} />
+    </div>
+  );
 }
 
 function ChartPage({ userId, market, symbol, onBack }) {
