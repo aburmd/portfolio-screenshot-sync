@@ -397,17 +397,19 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
         "note": "final exit = HH x (1 + 0.8 x stock_avg_CAGR)",
     })
 
-    # ── sell zone sizing: match the buy zone at the same fib level ─────────────
-    # Build a lookup: fib_ratio → total_target_pct from buy zones
-    buy_pct_by_fib = {z["fib"]: z["total_target_pct"] for z in buy_zones if z.get("fib") is not None}
+    # ── sell zone sizing: reverse ladder, vol-weighted ────────────────────────
+    # Nearest sell zone (lowest price) → max_pos trim
+    # Furthest sell zone (highest price) → base_pos trim
+    # Vol adjusts within that range. Fixed zones (note set) keep their preset %.
     intermediate = [z for z in raw_sell if z.get("note") is None]
-    for z in intermediate:
-        fib = z.get("fib")
-        if fib is not None and fib in buy_pct_by_fib:
-            z["total_target_pct"] = buy_pct_by_fib[fib]
-        else:
-            # No matching buy zone at this fib — use max_pos as fallback
-            z["total_target_pct"] = max_pos
+    ns = len(intermediate)
+    if ns > 0:
+        max_vol_s = max(z["vol_pct"] for z in intermediate) or 1
+        for i, z in enumerate(intermediate):
+            # i=0 = nearest (lowest price), i=ns-1 = furthest
+            t       = (ns - 1 - i) / (ns - 1) if ns > 1 else 1.0
+            rel_vol = z["vol_pct"] / max_vol_s
+            z["total_target_pct"] = round(base_pos + t * (max_pos - base_pos) * rel_vol, 2)
 
     return {
         "symbol":        symbol,
