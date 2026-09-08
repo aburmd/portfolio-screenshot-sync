@@ -291,25 +291,34 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
     buy_zones.sort(key=lambda x: -x["price_level"])
 
     # ── position sizing (buy) ─────────────────────────────────────────────────
+    # skipped_count = fib levels that were buy candidates but current price already
+    # passed through them (fib_price >= current_price from the full band list).
+    # This offsets the sizing so remaining zones are treated as later in the ladder.
+    total_buy_bands = len([b for b in buy_bands if b["fib_price"] < period_hh])  # all 5 (or max_buy_zones)
+    skipped_count   = sum(1 for b in buy_bands if b["fib_price"] >= current_price)
+
     n = len(buy_zones)
     if n > 0:
         max_vol = max(z["vol_pct"] for z in buy_zones) or 1
+        # total ladder size = skipped + remaining; size each zone as if it's
+        # at position (skipped + i) in a full (skipped + n) zone ladder
+        total_n = skipped_count + n
         max_raw = max(
-            i * (buy_zones[i]["vol_pct"] / max_vol) for i in range(1, n)
-        ) if n > 1 else 1
+            (skipped_count + i) * (buy_zones[i]["vol_pct"] / max_vol)
+            for i in range(1, n)
+        ) if n > 1 else (skipped_count + 1)
 
         for i, z in enumerate(buy_zones):
-            if i == 0:
-                z["total_target_pct"] = base_pos
-            elif i == n - 1:
+            ladder_pos = skipped_count + i  # position in full ladder
+            if i == n - 1:  # last remaining zone always gets max_pos
                 z["total_target_pct"] = max_pos
             else:
                 rel_vol = z["vol_pct"] / max_vol
-                raw     = i * rel_vol
-                z["total_target_pct"] = round(
-                    base_pos + (raw / max_raw) * (max_pos - base_pos), 2)
+                raw     = ladder_pos * rel_vol
+                z["total_target_pct"] = min(round(
+                    base_pos + (raw / max_raw) * (max_pos - base_pos), 2), max_pos)
 
-        # 50% missed entry rule
+        # 50% missed entry rule: zone we're currently inside
         for z in buy_zones:
             if z["in_zone_now"] and z["total_target_pct"] >= 2 * base_pos:
                 z["adjusted_target_pct"] = round(z["total_target_pct"] / 2, 2)
