@@ -126,10 +126,16 @@ def _check_triggers(market: str, symbol: str, price: float):
             continue
 
         user_id   = trigger["user_id"]
+        tid       = trigger["trigger_id"]
+
+        # GSI is eventually consistent — confirm trigger still exists in base table
+        check = table.get_item(Key={"user_id": user_id, "trigger_id": tid}).get("Item")
+        if not check or check.get("status") != "active":
+            continue
+
         note      = trigger.get("note", "")
         repeat    = trigger.get("repeat", False)
         broadcast = trigger.get("broadcast", "self")
-        tid       = trigger["trigger_id"]
 
         if broadcast == "subscribers":
             emails = _get_subscriber_emails("price-alert-users")
