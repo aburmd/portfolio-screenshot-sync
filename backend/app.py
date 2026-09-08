@@ -3492,6 +3492,16 @@ async def add_trigger(market: str, symbol: str, data: dict):
         return {"error": "user_id and trigger_price are required"}
     if broadcast not in ("self", "subscribers"):
         return {"error": "broadcast must be 'self' or 'subscribers'"}
+    # Only admin can broadcast to subscribers — enforce server-side
+    if broadcast == "subscribers":
+        try:
+            cognito = boto3.client("cognito-idp", region_name=REGION)
+            resp_cog = cognito.admin_get_user(UserPoolId=COGNITO_USER_POOL_ID, Username=user_id)
+            attrs = {a["Name"]: a["Value"] for a in resp_cog.get("UserAttributes", [])}
+            if attrs.get("custom:role") != "admin":
+                broadcast = "self"
+        except Exception:
+            broadcast = "self"
 
     mkt = market.upper()
     sym = symbol.upper()
