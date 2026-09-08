@@ -13,9 +13,9 @@ SCREENER_TABLE = os.environ.get("SCREENER_TABLE", "portfolio-screener-dev")
 
 ddb = boto3.resource("dynamodb", region_name=REGION)
 
-# Fibonacci retracement levels in priority order (rank 1 = strongest signal)
-FIB_LEVELS    = [0.618, 0.236, 0.786, 0.500, 0.382]
-FIB_PRIORITY  = {f: i + 1 for i, f in enumerate(FIB_LEVELS)}  # {0.618:1, 0.236:2, ...}
+# Fibonacci levels in priority order (rank 1 = strongest signal)
+FIB_LEVELS   = [0.618, 0.236, 0.786, 0.500, 0.382]
+FIB_PRIORITY = {f: i + 1 for i, f in enumerate(FIB_LEVELS)}
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -118,33 +118,61 @@ def _window_records(daily, months):
     return [r for r in daily if r["date"] >= cutoff]
 
 
-def _fib_bands(hh, ll, n_levels):
+def _buy_fib_bands(hh, ll, n_levels):
     """
-    Return fib band boundaries for the top-N fib levels by priority.
-    Each band = (fib_ratio, fib_price, band_lo, band_hi).
+    Buy zones: fib retracement levels from HH downward (support below current price).
+    fib_price = HH - fib × (HH - LL)
     Band boundaries = midpoints between adjacent fib prices.
     """
-    # All 5 fib prices sorted high→low (nearest to HH first)
     all_fibs = sorted(
         [(f, round(hh - f * (hh - ll), 4)) for f in FIB_LEVELS],
-        key=lambda x: -x[1]
+        key=lambda x: -x[1]  # high→low
     )
-    # Add sentinel boundaries: HH at top, LL at bottom
     prices_only = [hh] + [fp for _, fp in all_fibs] + [ll]
-
     bands = []
     for i, (fib_ratio, fib_price) in enumerate(all_fibs):
         band_hi = round((prices_only[i] + fib_price) / 2, 4)
         band_lo = round((fib_price + prices_only[i + 2]) / 2, 4)
         bands.append({
-            "fib":      fib_ratio,
-            "fib_price": fib_price,
-            "band_lo":  band_lo,
-            "band_hi":  band_hi,
+            "fib": fib_ratio, "fib_price": fib_price,
+            "band_lo": band_lo, "band_hi": band_hi,
             "priority": FIB_PRIORITY[fib_ratio],
         })
+    return sorted(bands, key=lambda x: x["priority"])[:n_levels]
 
-    # Return only top-N by priority
+
+def _sell_fib_bands(hh, ll, n_levels):
+    """
+    Sell zones: fib extension levels from LL upward through and beyond HH.
+    fib_price = LL + fib × (HH - LL)  — mirrors buy side upward.
+    Extensions beyond HH use ratios > 1.0: 1.236, 1.382, 1.500, 1.618, 1.786.
+    Combined pool of retracement (near HH) + extension levels gives zones above current price.
+    """
+    price_range = hh - ll
+    # Retracement levels near/above current: LL + fib*(HH-LL) for fib in FIB_LEVELS
+    # Extension levels beyond HH: LL + ext*(HH-LL) for ext in [1.236,1.382,1.500,1.618,1.786]
+    ext_levels = [1.236, 1.382, 1.500, 1.618, 1.786]
+    all_levels = (
+        [(f, round(ll + f * price_range, 4)) for f in FIB_LEVELS] +
+        [(e, round(ll + e * price_range, 4)) for e in ext_levels]
+    )
+    # Sort low→high, assign bands as midpoints between adjacent levels
+    all_levels.sort(key=lambda x: x[1])
+    prices_only = [ll] + [fp for _, fp in all_levels] + [ll + 2 * price_range]
+    bands = []
+    for i, (fib_ratio, fib_price) in enumerate(all_levels):
+        band_lo = round((prices_only[i] + fib_price) / 2, 4)
+        band_hi = round((fib_price + prices_only[i + 2]) / 2, 4)
+        # Priority: use FIB_PRIORITY for base levels, ext levels get priority 6-10
+        if fib_ratio in FIB_PRIORITY:
+            priority = FIB_PRIORITY[fib_ratio]
+        else:
+            priority = 5 + ext_levels.index(fib_ratio) + 1
+        bands.append({
+            "fib": fib_ratio, "fib_price": fib_price,
+            "band_lo": band_lo, "band_hi": band_hi,
+            "priority": priority,
+        })
     return sorted(bands, key=lambda x: x["priority"])[:n_levels]
 
 
@@ -153,41 +181,39 @@ def _count_touches(records, band_lo, band_hi, zone_type):
     Count candle touches within [band_lo, band_hi].
     touch = any of O/H/L/C falls within the band.
     total_touches = candle count.
-    primary_touches = Low count (buy) or High count (sell) — used as tiebreaker.
+    primary_touches tiebreaker:
+      buy  → High touches (price recovered up through level = confirmed support)
+      sell → Low touches  (price dipped down to level = confirmed resistance)
     """
     total, primary = 0, 0
     for r in records:
         o, h, l, c = r.get("open"), r.get("high"), r.get("low"), r.get("close")
-        touched = any(
-            v is not None and band_lo <= v <= band_hi
-            for v in [o, h, l, c]
-        )
+        touched = any(v is not None and band_lo <= v <= band_hi for v in [o, h, l, c])
         if touched:
             total += 1
-            if zone_type == "buy" and l is not None and band_lo <= l <= band_hi:
+            if zone_type == "buy" and h is not None and band_lo <= h <= band_hi:
                 primary += 1
-            elif zone_type == "sell" and h is not None and band_lo <= h <= band_hi:
+            elif zone_type == "sell" and l is not None and band_lo <= l <= band_hi:
                 primary += 1
     return total, primary
 
 
 def _best_touch_price(records, band_lo, band_hi, zone_type):
     """
-    Within the band, find the most-representative price:
-    - buy  → median of all Low values that touched the band
-    - sell → median of all High values that touched the band
-    Falls back to fib_price if no primary touches.
+    Most-representative price within the band:
+      buy  → median of High values (price recovered up to here)
+      sell → median of Low values  (price dipped down to here)
+    Falls back to None if no primary touches.
     """
     prices = []
     for r in records:
-        v = r.get("low") if zone_type == "buy" else r.get("high")
+        v = r.get("high") if zone_type == "buy" else r.get("low")
         if v is not None and band_lo <= v <= band_hi:
             prices.append(v)
     if not prices:
         return None
     prices.sort()
-    mid = len(prices) // 2
-    return round(prices[mid], 2)
+    return round(prices[len(prices) // 2], 2)
 
 
 def _vol_pct(zone_price, band_lo, band_hi, records):
@@ -243,8 +269,8 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
     period_ll = min(r["low"]  for r in primary if r["low"])
 
     # ── Fibonacci bands ───────────────────────────────────────────────────────
-    buy_bands  = _fib_bands(period_hh, period_ll, max_buy_zones)
-    sell_bands = _fib_bands(period_hh, period_ll, max_sell_zones)
+    buy_bands  = _buy_fib_bands(period_hh, period_ll, max_buy_zones)
+    sell_bands = _sell_fib_bands(period_hh, period_ll, max_sell_zones)
 
     # ── QQQ gate price ────────────────────────────────────────────────────────
     if qqq_avg_cagr:
@@ -326,8 +352,8 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
     # Only fib levels above current price qualify as sell zones
     raw_sell = []
     for band in sell_bands:
-        if band["fib_price"] <= current_price * 1.05:
-            continue  # too close or below current price → skip
+        if band["fib_price"] <= current_price:
+            continue  # below or at current price → skip
 
         best_total, best_primary, best_records = 0, 0, w6m
         for wrecs in [w6m, w12m, w24m]:
