@@ -418,7 +418,7 @@ function SubscriptionsTab() {
 }
 
 function NotifyTab() {
-  const [subject,  setSubject]  = useState("");
+  const [subject,  setSubject]  = useState("📊 Portfolio Alert");
   const [message,  setMessage]  = useState("");
   const [sending,  setSending]  = useState(false);
   const [result,   setResult]   = useState(null);
