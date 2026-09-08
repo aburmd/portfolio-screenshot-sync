@@ -34,7 +34,8 @@ function CandleChart({ ohlcv, intraday, cur, triggers, onChartClick }) {
       layout: { background: { color: "#ffffff" }, textColor: "#333" },
       grid:   { vertLines: { color: "#f0f0f0" }, horzLines: { color: "#f0f0f0" } },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: "#e0e0e0" },
+      leftPriceScale:  { visible: true, borderColor: "#e0e0e0" },
+      rightPriceScale: { visible: false },
       timeScale: { borderColor: "#e0e0e0", timeVisible: true, secondsVisible: false, rightOffset: 10, barSpacing: 8 },
     });
     chartRef.current = chart;
@@ -43,6 +44,7 @@ function CandleChart({ ohlcv, intraday, cur, triggers, onChartClick }) {
       upColor: "#2e7d32", downColor: "#c62828",
       borderUpColor: "#2e7d32", borderDownColor: "#c62828",
       wickUpColor: "#2e7d32", wickDownColor: "#c62828",
+      priceScaleId: "left",
     });
     candleRef.current = candleSeries;
 
@@ -77,7 +79,7 @@ function CandleChart({ ohlcv, intraday, cur, triggers, onChartClick }) {
     const volumeSeries = chart.addSeries(HistogramSeries, {
       color: "#90caf9", priceFormat: { type: "volume" }, priceScaleId: "volume",
     });
-    chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+    chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 }, visible: false });
     volumeSeries.setData(ohlcv
       .filter(d => d.volume > 0 && d.close != null)
       .map(d => ({
