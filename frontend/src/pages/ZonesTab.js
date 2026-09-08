@@ -27,6 +27,7 @@ export default function ZonesTab({ userId }) {
   const [maxPos, setMaxPos]               = useState(3.0);
   const [maxBuyZones, setMaxBuyZones]     = useState(5);
   const [maxSellZones, setMaxSellZones]   = useState(5);
+  const [hhTrimPct, setHhTrimPct]         = useState(0.25);
   const [data, setData]         = useState(null);
   const [loading, setLoading]   = useState(false);
   const [saving, setSaving]     = useState(false);
@@ -37,7 +38,7 @@ export default function ZonesTab({ userId }) {
     if (!symbol.trim()) return;
     setLoading(true); setError(null); setData(null); setSaved(false);
     try {
-      const result = await fetchZones(market, symbol.trim().toUpperCase(), basePos, maxPos, maxBuyZones, maxSellZones);
+      const result = await fetchZones(market, symbol.trim().toUpperCase(), basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct);
       if (result.error) setError(result.error);
       else setData(result);
     } catch (e) { setError(e.message); }
@@ -90,6 +91,11 @@ export default function ZonesTab({ userId }) {
           <input type="number" value={maxSellZones} onChange={e => setMaxSellZones(parseInt(e.target.value) || 5)}
             min={1} max={20} style={{ padding: 6, width: 55 }} />
         </label>
+        <label style={{ fontSize: 12 }}>HH Trim%<br />
+          <input type="number" value={hhTrimPct}
+            onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setHhTrimPct(v); }}
+            step={0.05} min={0} style={{ padding: 6, width: 65 }} />
+        </label>
         <button style={btn()} onClick={handleSearch} disabled={loading}>
           {loading ? "Computing..." : "🔍 Compute Zones"}
         </button>
@@ -134,7 +140,7 @@ export default function ZonesTab({ userId }) {
             {cagr?.final_sell_price != null && (
               <span style={{ fontSize: 12, background: "#fce4ec", padding: "2px 6px", borderRadius: 3 }}>
                 🎯 Final Sell: <b>{cur}{cagr.final_sell_price?.toLocaleString()}</b>
-                <span style={{ color: "#999", marginLeft: 4 }}>({cagr.final_sell_window})</span>
+                <span style={{ color: "#999", marginLeft: 4 }}>({cagr.final_sell_window}, stock CAGR)</span>
               </span>
             )}
           </div>

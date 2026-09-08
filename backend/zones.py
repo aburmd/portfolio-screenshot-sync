@@ -203,7 +203,7 @@ def _vol_pct(zone_price, band_lo, band_hi, records):
 # ── main compute ──────────────────────────────────────────────────────────────
 
 def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
-                  max_buy_zones=5, max_sell_zones=5):
+                  max_buy_zones=5, max_sell_zones=5, hh_trim_pct=0.25):
     market = market.upper()
     symbol = symbol.upper()
 
@@ -355,56 +355,50 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
     raw_sell.sort(key=lambda x: x["price_level"])  # low→high
 
     # Always append 2 fixed zones
-    # 1) Near HH → trim to 0.25%
+    # 1) Near HH → trim to hh_trim_pct (configurable per stock, default 0.25%)
     raw_sell.append({
         "price_level": period_hh,
         "fib": None, "fib_price": period_hh,
         "priority": 99, "touch_count": 0, "primary_touches": 0,
         "vol_pct": 0.0,
         "pct_from_ll": round((period_hh - period_ll) / period_ll * 100, 2),
-        "total_target_pct": 0.25,
+        "total_target_pct": hh_trim_pct,
         "note": "just below HH",
     })
-    # 2) Final exit above HH
+    # 2) Final exit above HH — uses stock's own avg CAGR (not QQQ)
     final_sell_price  = None
     final_sell_window = "24M"
-    if qqq_avg_cagr:
+    if avg_cagr:
         hh_12m   = max((r["high"] for r in w12m if r["high"]), default=None)
         hh_24m   = max((r["high"] for r in w24m if r["high"]), default=None)
         close_1y = _f(agg.get("close_1y"))
-        if close_1y and avg_cagr and (current_price / close_1y - 1) >= avg_cagr:
+        if close_1y and (current_price / close_1y - 1) >= avg_cagr:
             hh_ref, final_sell_window = hh_12m or hh_24m, "12M"
         else:
             hh_ref = hh_24m or hh_12m
         if hh_ref:
-            final_sell_price = round(hh_ref * (1 + 0.80 * qqq_avg_cagr), 2)
+            final_sell_price = round(hh_ref * (1 + 0.80 * avg_cagr), 2)
     raw_sell.append({
-        "price_level": final_sell_price or round(period_hh * (1 + 0.80 * (qqq_avg_cagr or 0.20)), 2),
+        "price_level": final_sell_price or round(period_hh * (1 + 0.80 * (avg_cagr or 0.20)), 2),
         "fib": None, "fib_price": None,
         "priority": 100, "touch_count": 0, "primary_touches": 0,
         "vol_pct": 0.0,
         "pct_from_ll": round(((final_sell_price or period_hh) - period_ll) / period_ll * 100, 2),
         "total_target_pct": 0.0,
-        "note": "final exit = HH x (1 + 0.8 x QQQ_CAGR)",
+        "note": "final exit = HH x (1 + 0.8 x stock_avg_CAGR)",
     })
 
-    # ── sell zone sizing (intermediate zones only) ────────────────────────────
+    # ── sell zone sizing: match the buy zone at the same fib level ─────────────
+    # Build a lookup: fib_ratio → total_target_pct from buy zones
+    buy_pct_by_fib = {z["fib"]: z["total_target_pct"] for z in buy_zones if z.get("fib") is not None}
     intermediate = [z for z in raw_sell if z.get("note") is None]
-    ns = len(intermediate)
-    if ns > 0:
-        max_vol_s = max(z["vol_pct"] for z in intermediate) or 1
-        max_raw_s = max(
-            i * (intermediate[i]["vol_pct"] / max_vol_s) for i in range(1, ns)
-        ) if ns > 1 else 1
-        for i, z in enumerate(intermediate):
-            rel_vol = z["vol_pct"] / max_vol_s
-            rank    = ns - 1 - i  # highest rank = nearest to current price
-            raw     = rank * rel_vol
-            z["total_target_pct"] = min(
-                round(0.25 + (raw / max_raw_s) * (max_pos - 0.25), 2)
-                if max_raw_s > 0 else max_pos,
-                max_pos
-            )
+    for z in intermediate:
+        fib = z.get("fib")
+        if fib is not None and fib in buy_pct_by_fib:
+            z["total_target_pct"] = buy_pct_by_fib[fib]
+        else:
+            # No matching buy zone at this fib — use max_pos as fallback
+            z["total_target_pct"] = max_pos
 
     return {
         "symbol":        symbol,
@@ -423,6 +417,7 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
             "qqq_gate_price":    qqq_gate_price,
             "final_sell_price":  final_sell_price,
             "final_sell_window": final_sell_window,
+            "hh_trim_pct":       hh_trim_pct,
         },
         "base_pos":       base_pos,
         "max_pos":        max_pos,
