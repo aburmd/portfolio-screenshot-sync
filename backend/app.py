@@ -3078,62 +3078,75 @@ async def get_zones(market: str, symbol: str, base_pos: float = 0.5, max_pos: fl
 @app.get("/research/ohlcv/{market}/{symbol}")
 async def get_ohlcv(market: str, symbol: str):
     """
-    Return OHLCV rows for a symbol from S3 csv.gz.
-    If not found in S3:
-      1. Fetch via yfinance (max history) and write to S3
-      2. Upsert symbol into portfolio-universe-dev with daily_enabled=True
-    Returns: {"symbol", "market", "rows": [{date,open,high,low,close,volume}], "source": "s3"|"fetched"}
+    Sequence:
+      1. Check universe DDB (master list) — is this symbol known + daily_enabled?
+      2a. Known → read S3 csv.gz → return rows (source="s3")
+      2b. Unknown → invoke EOD Scanner Lambda synchronously for this one symbol
+              → Lambda fetches yfinance max history, writes S3, updates DDB AGG
+              → add entry to universe DDB (daily_enabled=True)
+              → read S3 → return rows (source="fetched")
     """
-    import gzip
+    import json as _json
     from eod_scanner import _read_s3, _write_s3, _update_agg, DAILY_CAP
     import yfinance as yf
 
     mkt = market.upper()
     sym = symbol.upper()
+
+    EOD_SCANNER_FN = os.environ.get("EOD_SCANNER_FUNCTION", f"portfolio-eod-scanner-dev")
+
+    # ── Step 1: check universe DDB ────────────────────────────────────────────
+    universe = ddb.Table(UNIVERSE_TABLE)
+    resp = universe.get_item(Key={"market": mkt, "symbol": sym})
+    item = resp.get("Item")
+    known = item is not None and item.get("daily_enabled")
+
+    # ── Step 2a: known → read S3 ──────────────────────────────────────────────
+    if known:
+        rows = _read_s3(mkt, sym)
+        if rows:
+            return {"symbol": sym, "market": mkt, "rows": rows, "source": "s3"}
+        # Known in DDB but S3 file missing (edge case) — fall through to fetch
+
+    # ── Step 2b: unknown (or S3 missing) → fetch via yfinance directly ───────
+    # We run the fetch inline (same Lambda) rather than invoking EOD Scanner
+    # because API Gateway has a 30s timeout — invoking another Lambda and waiting
+    # would add cold-start overhead. The EOD Scanner logic is imported directly.
     yf_sym = f"{sym}.NS" if mkt == "IN" else sym
+    try:
+        hist = yf.Ticker(yf_sym).history(period="max")
+    except Exception as e:
+        return {"error": f"yfinance error: {e}"}
+    if hist is None or hist.empty:
+        return {"error": f"No data found for {sym} — check symbol and market"}
 
-    # Try S3 first
-    rows = _read_s3(mkt, sym)
-    source = "s3"
+    rows = []
+    for idx, row in hist.iterrows():
+        rows.append({
+            "date":   idx.strftime("%Y-%m-%d"),
+            "open":   round(float(row["Open"]),   2),
+            "high":   round(float(row["High"]),   2),
+            "low":    round(float(row["Low"]),    2),
+            "close":  round(float(row["Close"]),  2),
+            "volume": int(row["Volume"]),
+        })
+    if len(rows) > DAILY_CAP:
+        rows = rows[-DAILY_CAP:]
 
-    if not rows:
-        # Fetch full history from yfinance
-        try:
-            hist = yf.Ticker(yf_sym).history(period="max")
-        except Exception as e:
-            return {"error": f"yfinance error: {e}"}
-        if hist is None or hist.empty:
-            return {"error": f"No data found for {sym}"}
+    # Write to S3 + update DDB AGG
+    _write_s3(mkt, sym, rows)
+    _update_agg(mkt, sym, rows)
 
-        rows = []
-        for idx, row in hist.iterrows():
-            rows.append({
-                "date":   idx.strftime("%Y-%m-%d"),
-                "open":   round(float(row["Open"]),   2),
-                "high":   round(float(row["High"]),   2),
-                "low":    round(float(row["Low"]),    2),
-                "close":  round(float(row["Close"]),  2),
-                "volume": int(row["Volume"]),
-            })
-        # Trim to cap and write to S3
-        if len(rows) > DAILY_CAP:
-            rows = rows[-DAILY_CAP:]
-        _write_s3(mkt, sym, rows)
-        _update_agg(mkt, sym, rows)
-        source = "fetched"
+    # ── Step 3: register in universe DDB (master list) ────────────────────────
+    # daily_enabled=True → EOD Scanner will pick this up every market close
+    universe.put_item(Item={
+        "market":        mkt,
+        "symbol":        sym,
+        "daily_enabled": True,
+        "min1_enabled":  False,
+    })
 
-        # Register in universe table with daily_enabled=True
-        try:
-            ddb.Table(UNIVERSE_TABLE).put_item(Item={
-                "market":        mkt,
-                "symbol":        sym,
-                "daily_enabled": True,
-                "min1_enabled":  False,
-            })
-        except Exception:
-            pass
-
-    return {"symbol": sym, "market": mkt, "rows": rows, "source": source}
+    return {"symbol": sym, "market": mkt, "rows": rows, "source": "fetched"}
 
 
 # ── Position Plans ────────────────────────────────────────────────────────────

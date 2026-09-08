@@ -168,7 +168,9 @@ export default function OhlcvChart() {
 
       {loading && (
         <div style={{ padding: 24, textAlign: "center", color: "#666" }}>
-          {data === null ? "Fetching OHLCV data from S3… (first-time fetch may take ~10s)" : "Loading..."}
+          {data === null
+            ? "Checking master list… if new symbol, fetching full history from Yahoo Finance (~10s)"
+            : "Loading..."}
         </div>
       )}
 
