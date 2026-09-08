@@ -35,7 +35,7 @@ function CandleChart({ ohlcv, intraday, cur, triggers, onChartClick }) {
       grid:   { vertLines: { color: "#f0f0f0" }, horzLines: { color: "#f0f0f0" } },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderColor: "#e0e0e0" },
-      timeScale: { borderColor: "#e0e0e0", timeVisible: true, secondsVisible: false },
+      timeScale: { borderColor: "#e0e0e0", timeVisible: true, secondsVisible: false, rightOffset: 10, barSpacing: 8 },
     });
     chartRef.current = chart;
 
