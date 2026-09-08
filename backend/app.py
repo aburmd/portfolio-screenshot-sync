@@ -3628,23 +3628,25 @@ async def get_intraday(market: str, symbol: str):
     sym = symbol.upper()
     yf_sym = f"{sym}.NS" if mkt == "IN" else sym
     try:
-        hist = yf.Ticker(yf_sym).history(period="1d", interval="5m")
+        hist = yf.Ticker(yf_sym).history(period="1d", interval="1d")
     except Exception as e:
-        return {"error": str(e), "bars": []}
+        return {"error": str(e), "bar": None}
     if hist is None or hist.empty:
-        return {"bars": []}
-    bars = []
-    for idx, row in hist.iterrows():
-        ts = int(idx.timestamp())
-        bars.append({
-            "time":   ts,
+        return {"bar": None}
+    row = hist.iloc[-1]
+    today = hist.index[-1].strftime("%Y-%m-%d")
+    return {
+        "symbol": sym,
+        "market": mkt,
+        "bar": {
+            "date":   today,
             "open":   round(float(row["Open"]),   2),
             "high":   round(float(row["High"]),   2),
             "low":    round(float(row["Low"]),    2),
             "close":  round(float(row["Close"]),  2),
             "volume": int(row["Volume"]),
-        })
-    return {"symbol": sym, "market": mkt, "bars": bars}
+        },
+    }
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

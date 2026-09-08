@@ -51,16 +51,13 @@ function CandleChart({ ohlcv, intraday, cur, triggers, onChartClick }) {
       low: d.low ?? d.close, close: d.close,
     })).filter(d => d.close != null));
 
-    // Append today's intraday bars (unix timestamps) after daily data
+    // Append today's live daily bar from yfinance if not already in S3 data
     if (intraday?.length) {
-      const intradaySeries = chart.addSeries(CandlestickSeries, {
-        upColor: "#43a047", downColor: "#e53935",
-        borderUpColor: "#43a047", borderDownColor: "#e53935",
-        wickUpColor: "#43a047", wickDownColor: "#e53935",
-      });
-      intradaySeries.setData(intraday.map(b => ({
-        time: b.time, open: b.open, high: b.high, low: b.low, close: b.close,
-      })));
+      const b = intraday[0];
+      const alreadyPresent = ohlcv.some(d => d.date === b.date);
+      if (!alreadyPresent) {
+        candleSeries.update({ time: b.date, open: b.open, high: b.high, low: b.low, close: b.close });
+      }
     }
 
     // Draw trigger price lines
@@ -394,7 +391,7 @@ export default function OhlcvChart() {
     setIntradayLoad(true);
     try {
       const res = await fetchIntraday(mkt, sym);
-      setIntradayBars(res.bars || []);
+      setIntradayBars(res.bar ? [res.bar] : []);
     } catch (_) { setIntradayBars([]); }
     setIntradayLoad(false);
   }, []);
