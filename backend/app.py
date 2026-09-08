@@ -8,10 +8,11 @@ from typing import List
 
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from mangum import Mangum
+from auth import get_claims, require_admin
 
 import yfinance as yf
 
@@ -3462,46 +3463,32 @@ async def delete_chart(market: str, symbol: str, user_id: str):
 # ── Price Triggers ───────────────────────────────────────────────────────────
 
 @app.post("/research/trigger/{market}/{symbol}")
-async def add_trigger(market: str, symbol: str, data: dict):
+async def add_trigger(market: str, symbol: str, data: dict, request: Request):
     """
     Add a price trigger for a stock.
-    Sets min1_enabled=True in universe so intraday scanner watches this symbol.
-
-    Body fields:
-      user_id        : str   (required)
-      trigger_price  : float (required)
-      direction      : "above" | "below"  (default "below")
-      repeat         : bool  (default False) — fires every time if True, once only if False
-      note           : str   (optional)
-      broadcast      : "self" | "subscribers"  (admin only, default "self")
-                       "self"        → email only to the trigger creator
-                       "subscribers" → email to all users in price-alert-users subscription list
+    user_id and role are read from the JWT — not trusted from request body.
     """
     import uuid as _uuid
     from datetime import datetime, timezone as tz
     from decimal import Decimal
 
-    user_id       = data.get("user_id")
+    claims    = get_claims(request)
+    user_id   = claims["sub"]
+    is_admin  = claims.get("custom:role") == "admin"
+
     trigger_price = data.get("trigger_price")
     direction     = data.get("direction", "below")
     repeat        = bool(data.get("repeat", False))
     note          = data.get("note", "")
     broadcast     = data.get("broadcast", "self")
 
-    if not user_id or trigger_price is None:
-        return {"error": "user_id and trigger_price are required"}
+    if trigger_price is None:
+        return {"error": "trigger_price is required"}
     if broadcast not in ("self", "subscribers"):
-        return {"error": "broadcast must be 'self' or 'subscribers'"}
-    # Only admin can broadcast to subscribers — enforce server-side
-    if broadcast == "subscribers":
-        try:
-            cognito = boto3.client("cognito-idp", region_name=REGION)
-            resp_cog = cognito.admin_get_user(UserPoolId=COGNITO_USER_POOL_ID, Username=user_id)
-            attrs = {a["Name"]: a["Value"] for a in resp_cog.get("UserAttributes", [])}
-            if attrs.get("custom:role") != "admin":
-                broadcast = "self"
-        except Exception:
-            broadcast = "self"
+        broadcast = "self"
+    # Only admin can broadcast to subscribers
+    if broadcast == "subscribers" and not is_admin:
+        broadcast = "self"
 
     mkt = market.upper()
     sym = symbol.upper()
@@ -3610,6 +3597,53 @@ async def remove_subscription(sub_type: str, user_id: str):
         Key={"sub_type": sub_type, "user_id": user_id}
     )
     return {"removed": user_id}
+
+
+@app.post("/admin/notify")
+async def send_notification(data: dict, request: Request):
+    """
+    Send a broadcast notification to all price-alert-users subscribers.
+    Admin only — verified via JWT. Each subscriber gets an individual email.
+    """
+    require_admin(request)
+    from boto3.dynamodb.conditions import Key as _Key
+
+    subject = (data.get("subject") or "").strip()
+    message = (data.get("message") or "").strip()
+    if not subject or not message:
+        return {"error": "subject and message are required"}
+
+    from_email = os.environ.get("ADMIN_EMAIL", "aburmd@gmail.com")
+    ses_client = boto3.client("ses", region_name="us-east-1")
+
+    resp = ddb.Table(SUBSCRIPTIONS_TABLE).query(
+        KeyConditionExpression=_Key("sub_type").eq("price-alert-users")
+    )
+    subscribers = resp.get("Items", [])
+    if not subscribers:
+        return {"sent": 0, "failed": 0, "detail": []}
+
+    sent, failed, detail = 0, 0, []
+    for sub in subscribers:
+        email = sub.get("email")
+        if not email:
+            continue
+        try:
+            ses_client.send_email(
+                Source=from_email,
+                Destination={"ToAddresses": [email]},
+                Message={
+                    "Subject": {"Data": subject},
+                    "Body":    {"Text": {"Data": message}},
+                },
+            )
+            sent += 1
+            detail.append({"email": email, "status": "sent"})
+        except Exception as e:
+            failed += 1
+            detail.append({"email": email, "status": "failed", "reason": str(e)})
+
+    return {"sent": sent, "failed": failed, "detail": detail}
 
 
 @app.get("/research/intraday/{market}/{symbol}")

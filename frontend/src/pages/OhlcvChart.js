@@ -186,7 +186,7 @@ function TriggerPanel({ symbol, market, cur, clickedPrice, isAdmin, onAdded }) {
       const attrs = await fetchUserAttributes();
       const userId = attrs.sub;
       const res = await addTrigger(market, symbol, {
-        userId, triggerPrice: p, direction, repeat, note, broadcast,
+        triggerPrice: p, direction, repeat, note, broadcast,
       });
       if (res.error) { setMsg({ type: "error", text: res.error }); }
       else {

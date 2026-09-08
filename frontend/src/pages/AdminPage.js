@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { listSubscriptions, addSubscription, removeSubscription } from "../services/api";
+import { listSubscriptions, addSubscription, removeSubscription, sendNotification } from "../services/api";
 import "../styles/admin.css";
 
 const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:8000";
@@ -21,12 +21,14 @@ function AdminPage() {
         <button style={tabStyle(tab === "shares")} onClick={() => setTab("shares")}>🔗 Share Requests</button>
         <button style={tabStyle(tab === "users")} onClick={() => setTab("users")}>👥 Manage Users</button>
         <button style={tabStyle(tab === "subscriptions")} onClick={() => setTab("subscriptions")}>🔔 Alert Subscribers</button>
+        <button style={tabStyle(tab === "notify")} onClick={() => setTab("notify")}>📢 Notify</button>
       </div>
       <div className="admin-content">
         {tab === "symbols" && <SymbolsTab />}
         {tab === "shares" && <SharesTab />}
         {tab === "users" && <UsersTab />}
         {tab === "subscriptions" && <SubscriptionsTab />}
+        {tab === "notify" && <NotifyTab />}
       </div>
     </div>
   );
@@ -410,6 +412,105 @@ function SubscriptionsTab() {
             ))}
           </tbody>
         </table>
+      )}
+    </div>
+  );
+}
+
+function NotifyTab() {
+  const [subject,  setSubject]  = useState("");
+  const [message,  setMessage]  = useState("");
+  const [sending,  setSending]  = useState(false);
+  const [result,   setResult]   = useState(null);
+
+  const handleSend = async () => {
+    if (!subject.trim() || !message.trim()) {
+      setResult({ type: "error", text: "Subject and message are required." });
+      return;
+    }
+    setSending(true); setResult(null);
+    try {
+      const res = await sendNotification(subject.trim(), message.trim());
+      if (res.error) {
+        setResult({ type: "error", text: res.error });
+      } else {
+        setResult({ type: "ok", sent: res.sent, failed: res.failed, detail: res.detail || [] });
+        if (res.sent > 0) { setSubject(""); setMessage(""); }
+      }
+    } catch (e) { setResult({ type: "error", text: e.message }); }
+    setSending(false);
+  };
+
+  return (
+    <div style={{ maxWidth: 600 }}>
+      <p style={{ fontSize: 13, color: "#555", marginBottom: 16 }}>
+        Send a message to all <b>Alert Subscribers</b>. Each subscriber receives an individual email.
+      </p>
+
+      <label style={{ fontSize: 12, display: "block", marginBottom: 12 }}>
+        Subject
+        <input
+          value={subject}
+          onChange={e => setSubject(e.target.value)}
+          placeholder="e.g. Buy alert: RELIANCE at ₹1290"
+          style={{ display: "block", width: "100%", marginTop: 4, padding: "7px 10px",
+            fontSize: 13, borderRadius: 4, border: "1px solid #ccc", boxSizing: "border-box" }}
+        />
+      </label>
+
+      <label style={{ fontSize: 12, display: "block", marginBottom: 16 }}>
+        Message
+        <textarea
+          value={message}
+          onChange={e => setMessage(e.target.value)}
+          placeholder={"e.g. RELIANCE is at ₹1290 — good entry point.\nConsider buying 10 shares.\n\n- Abu"}
+          rows={8}
+          style={{ display: "block", width: "100%", marginTop: 4, padding: "7px 10px",
+            fontSize: 13, borderRadius: 4, border: "1px solid #ccc", boxSizing: "border-box",
+            resize: "vertical", fontFamily: "inherit" }}
+        />
+      </label>
+
+      <button
+        onClick={handleSend}
+        disabled={sending || !subject.trim() || !message.trim()}
+        style={{ padding: "8px 24px", background: sending ? "#bdbdbd" : "#1565c0",
+          color: "#fff", border: "none", borderRadius: 4, cursor: sending ? "not-allowed" : "pointer",
+          fontSize: 14, fontWeight: "bold" }}>
+        {sending ? "Sending…" : "📢 Send to All Subscribers"}
+      </button>
+
+      {result && result.type === "error" && (
+        <div style={{ marginTop: 12, fontSize: 13, color: "#c62828" }}>❌ {result.text}</div>
+      )}
+
+      {result && result.type === "ok" && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 13, marginBottom: 8 }}>
+            ✅ Sent: <b>{result.sent}</b>
+            {result.failed > 0 && <span style={{ color: "#c62828", marginLeft: 12 }}>❌ Failed: <b>{result.failed}</b></span>}
+          </div>
+          {result.detail.length > 0 && (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: "#f5f5f5" }}>
+                  <th style={{ padding: "5px 8px", textAlign: "left", borderBottom: "1px solid #e0e0e0" }}>Email</th>
+                  <th style={{ padding: "5px 8px", textAlign: "left", borderBottom: "1px solid #e0e0e0" }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.detail.map((d, i) => (
+                  <tr key={i}>
+                    <td style={{ padding: "5px 8px" }}>{d.email}</td>
+                    <td style={{ padding: "5px 8px", color: d.status === "sent" ? "#2e7d32" : "#c62828" }}>
+                      {d.status === "sent" ? "✅ sent" : `❌ ${d.reason}`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       )}
     </div>
   );

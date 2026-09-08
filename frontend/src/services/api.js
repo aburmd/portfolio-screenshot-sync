@@ -1,5 +1,18 @@
 export const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
+import { fetchAuthSession } from "aws-amplify/auth";
+
+async function authFetch(url, options = {}) {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+    if (token) {
+      options.headers = { ...(options.headers || {}), Authorization: `Bearer ${token}` };
+    }
+  } catch (_) {}
+  return fetch(url, options);
+}
+
 export async function fetchPortfolio(userId) {
   const res = await fetch(`${API_BASE}/portfolio/${userId}`);
   if (!res.ok) throw new Error("Failed to fetch portfolio");
@@ -379,9 +392,9 @@ export async function deleteChart(market, symbol, userId) {
 
 // ── Price Triggers ────────────────────────────────────────────────────────────
 export async function addTrigger(market, symbol, { userId, triggerPrice, direction, repeat, note, broadcast = "self" }) {
-  const res = await fetch(`${API_BASE}/research/trigger/${market}/${encodeURIComponent(symbol)}`, {
+  const res = await authFetch(`${API_BASE}/research/trigger/${market}/${encodeURIComponent(symbol)}`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_id: userId, trigger_price: triggerPrice, direction, repeat, note, broadcast }),
+    body: JSON.stringify({ trigger_price: triggerPrice, direction, repeat, note, broadcast }),
   });
   return res.json();
 }
@@ -403,5 +416,12 @@ export async function addSubscription(subType, userId) {
 }
 export async function removeSubscription(subType, userId) {
   const res = await fetch(`${API_BASE}/admin/subscriptions/${subType}/${userId}`, { method: "DELETE" });
+  return res.json();
+}
+export async function sendNotification(subject, message) {
+  const res = await authFetch(`${API_BASE}/admin/notify`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subject, message }),
+  });
   return res.json();
 }
