@@ -143,31 +143,23 @@ def _buy_fib_bands(hh, ll, n_levels):
 
 def _sell_fib_bands(hh, ll, n_levels):
     """
-    Sell zones: fib extension levels from LL upward through and beyond HH.
-    fib_price = LL + fib × (HH - LL)  — mirrors buy side upward.
-    Extensions beyond HH use ratios > 1.0: 1.236, 1.382, 1.500, 1.618, 1.786.
-    Combined pool of retracement (near HH) + extension levels gives zones above current price.
+    Sell zones: fib extension levels above HH (LL + ext*(HH-LL) for ext > 1.0)
+    plus base fib levels that happen to be above current price.
+    Priority order same as buy: 0.618→0.236→0.786→0.500→0.382 mapped to extensions.
     """
     price_range = hh - ll
-    # Retracement levels near/above current: LL + fib*(HH-LL) for fib in FIB_LEVELS
-    # Extension levels beyond HH: LL + ext*(HH-LL) for ext in [1.236,1.382,1.500,1.618,1.786]
-    ext_levels = [1.236, 1.382, 1.500, 1.618, 1.786]
-    all_levels = (
-        [(f, round(ll + f * price_range, 4)) for f in FIB_LEVELS] +
-        [(e, round(ll + e * price_range, 4)) for e in ext_levels]
-    )
+    ext_levels = [1.618, 1.236, 1.786, 1.500, 1.382]  # mirrors FIB_LEVELS priority order
+    all_levels = [(e, round(ll + e * price_range, 4)) for e in ext_levels]
     # Sort low→high, assign bands as midpoints between adjacent levels
     all_levels.sort(key=lambda x: x[1])
-    prices_only = [ll] + [fp for _, fp in all_levels] + [ll + 2 * price_range]
+    sentinel_lo = hh  # bottom sentinel = HH (sell zones start above HH)
+    sentinel_hi = round(ll + 2.5 * price_range, 4)  # top sentinel
+    prices_only = [sentinel_lo] + [fp for _, fp in all_levels] + [sentinel_hi]
     bands = []
     for i, (fib_ratio, fib_price) in enumerate(all_levels):
         band_lo = round((prices_only[i] + fib_price) / 2, 4)
         band_hi = round((fib_price + prices_only[i + 2]) / 2, 4)
-        # Priority: use FIB_PRIORITY for base levels, ext levels get priority 6-10
-        if fib_ratio in FIB_PRIORITY:
-            priority = FIB_PRIORITY[fib_ratio]
-        else:
-            priority = 5 + ext_levels.index(fib_ratio) + 1
+        priority = ext_levels.index(fib_ratio) + 1
         bands.append({
             "fib": fib_ratio, "fib_price": fib_price,
             "band_lo": band_lo, "band_hi": band_hi,

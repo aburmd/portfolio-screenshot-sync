@@ -73,12 +73,14 @@ export default function ZonesTab({ userId }) {
           </select>
         </label>
         <label style={{ fontSize: 12 }}>Base%<br />
-          <input type="number" value={basePos} onChange={e => setBasePos(parseFloat(e.target.value) || 0.5)}
-            step={0.1} style={{ padding: 6, width: 60 }} />
+          <input type="number" value={basePos}
+            onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setBasePos(v); }}
+            step={0.1} min={0.1} style={{ padding: 6, width: 60 }} />
         </label>
         <label style={{ fontSize: 12 }}>Max%<br />
-          <input type="number" value={maxPos} onChange={e => setMaxPos(parseFloat(e.target.value) || 3.0)}
-            step={0.5} style={{ padding: 6, width: 60 }} />
+          <input type="number" value={maxPos}
+            onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setMaxPos(v); }}
+            step={0.5} min={0.1} style={{ padding: 6, width: 60 }} />
         </label>
         <label style={{ fontSize: 12 }}>Buy Zones<br />
           <input type="number" value={maxBuyZones} onChange={e => setMaxBuyZones(parseInt(e.target.value) || 5)}
