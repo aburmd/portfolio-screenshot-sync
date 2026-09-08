@@ -1,5 +1,6 @@
 """Buy/Sell Zone computation using Fibonacci retracement + touch point analysis."""
 
+import io
 import os
 from datetime import date, timedelta
 from decimal import Decimal
@@ -10,8 +11,10 @@ from boto3.dynamodb.conditions import Key
 REGION         = os.environ.get("AWS_REGION", "us-west-1")
 HISTORY_TABLE  = os.environ.get("STOCK_HISTORY_TABLE", "portfolio-stock-history-dev")
 SCREENER_TABLE = os.environ.get("SCREENER_TABLE", "portfolio-screener-dev")
+OHLCV_BUCKET   = os.environ.get("SCREENSHOTS_BUCKET", "portfolio-screenshots-dev")
 
 ddb = boto3.resource("dynamodb", region_name=REGION)
+s3  = boto3.client("s3", region_name=REGION)
 
 # Fibonacci levels in priority order (rank 1 = strongest signal)
 FIB_LEVELS   = [0.618, 0.236, 0.786, 0.500, 0.382]
@@ -39,36 +42,74 @@ def _cagr(current, past_price, years):
 
 
 def _fetch_ohlcv(market, symbol):
-    """Return all daily OHLCV records + AGG from DDB, sorted oldest→newest."""
+    """Return daily OHLCV records + AGG.  S3 Parquet first, DDB fallback."""
+    daily = _fetch_ohlcv_s3(market, symbol)
+    if daily is None:
+        daily = _fetch_ohlcv_ddb(market, symbol)
+    agg = _fetch_agg_ddb(market, symbol)
+    return daily or [], agg
+
+
+def _fetch_ohlcv_s3(market, symbol):
+    """Read daily.parquet from S3. Returns sorted list or None on miss."""
+    try:
+        import pandas as pd
+        key = f"ohlcv/{market}/{symbol}/daily.parquet"
+        obj = s3.get_object(Bucket=OHLCV_BUCKET, Key=key)
+        df  = pd.read_parquet(io.BytesIO(obj["Body"].read()))
+        return [
+            {
+                "date":   row["date"],
+                "open":   float(row["open"])   if row["open"]   is not None else None,
+                "high":   float(row["high"])   if row["high"]   is not None else None,
+                "low":    float(row["low"])    if row["low"]    is not None else None,
+                "close":  float(row["close"])  if row["close"]  is not None else None,
+                "volume": int(row["volume"])   if row["volume"] is not None else 0,
+            }
+            for _, row in df.iterrows()
+        ]
+    except Exception:
+        return None
+
+
+def _fetch_ohlcv_ddb(market, symbol):
+    """DDB fallback: read daily OHLCV records, sorted oldest→newest."""
     table = ddb.Table(HISTORY_TABLE)
     pk    = f"{market}#{symbol}"
-
-    resp  = table.query(KeyConditionExpression=Key("market_symbol").eq(pk))
-    items = resp.get("Items", [])
-    while resp.get("LastEvaluatedKey"):
-        resp = table.query(
-            KeyConditionExpression=Key("market_symbol").eq(pk),
-            ExclusiveStartKey=resp["LastEvaluatedKey"],
-        )
-        items.extend(resp.get("Items", []))
-
-    agg, daily = None, []
-    for item in items:
-        d = item.get("date", "")
-        if d == "AGG":
-            agg = {k: _f(v) if isinstance(v, Decimal) else v for k, v in item.items()}
-        elif d[:1].isdigit():
+    daily = []
+    kwargs = {
+        "KeyConditionExpression": Key("market_symbol").eq(pk) & Key("date").begins_with("2"),
+    }
+    while True:
+        resp = table.query(**kwargs)
+        for item in resp.get("Items", []):
             daily.append({
-                "date":   d,
+                "date":   item["date"],
                 "open":   _f(item.get("open")),
                 "high":   _f(item.get("high")),
                 "low":    _f(item.get("low")),
                 "close":  _f(item.get("close")),
                 "volume": int(item["volume"]) if item.get("volume") else 0,
             })
-
+        if "LastEvaluatedKey" not in resp:
+            break
+        kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
     daily.sort(key=lambda x: x["date"])
-    return daily, agg
+    return daily
+
+
+def _fetch_agg_ddb(market, symbol):
+    """Fetch the AGG record from DDB (always from DDB — it's a single point lookup)."""
+    try:
+        resp = ddb.Table(HISTORY_TABLE).get_item(
+            Key={"market_symbol": f"{market}#{symbol}", "date": "AGG"}
+        )
+        item = resp.get("Item")
+        if not item:
+            return None
+        return {k: _f(v) if isinstance(v, Decimal) else v for k, v in item.items()}
+    except Exception:
+        return None
 
 
 def _get_current_price(market, symbol, daily, agg):
@@ -299,15 +340,22 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
 
     n = len(buy_zones)
     if n > 0:
-        max_vol    = max(z["vol_pct"] for z in buy_zones) or 1
+        max_vol     = max(z["vol_pct"] for z in buy_zones) or 1
         deepest_pos = skipped_count + n - 1
 
+        # ladder_start: if already holding, nearest zone targets current holding
+        # so user knows to add only at deeper zones; otherwise start at base_pos
+        ladder_start = current_holding_pct if current_holding_pct > 0 else base_pos
+
         for i, z in enumerate(buy_zones):
-            ladder_pos = skipped_count + i
-            rel_vol    = z["vol_pct"] / max_vol
-            t = (ladder_pos / deepest_pos) * rel_vol if deepest_pos > 0 else 1.0
+            # linear fraction 0→1 across n zones (index-based, ignore skipped offset)
+            t_linear = i / (n - 1) if n > 1 else 1.0
+            # vol nudge: ±5% of step (high vol = buy more, low vol = buy less)
+            rel_vol  = z["vol_pct"] / max_vol
+            nudge    = (rel_vol - 0.5) * 0.10
+            t        = max(0.0, min(1.0, t_linear + nudge))
             z["total_target_pct"] = min(
-                round(base_pos + t * (max_pos - base_pos), 2), max_pos
+                round(ladder_start + t * (max_pos - ladder_start), 2), max_pos
             )
         # deepest zone always anchors at max_pos
         buy_zones[-1]["total_target_pct"] = max_pos
