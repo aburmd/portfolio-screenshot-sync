@@ -119,9 +119,9 @@ function CandleChart({ ohlcv, cur, triggers, onChartClick }) {
 
     // Click → pass price to parent for trigger creation
     chart.subscribeClick(param => {
-      if (!param.point || !candleSeries) return;
-      const price = candleSeries.coordinateToPrice(param.point.y);
-      if (price != null) onChartClick(parseFloat(price.toFixed(2)));
+      if (!param.point) return;
+      const price = chart.priceScale("right").coordinateToPrice(param.point.y);
+      if (price != null && price > 0) onChartClick(parseFloat(price.toFixed(2)));
     });
 
     const ro = new ResizeObserver(() => {
