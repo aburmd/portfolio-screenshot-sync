@@ -43,6 +43,8 @@ FUNDAMENTALS_TABLE = os.environ.get("FUNDAMENTALS_TABLE", "portfolio-fundamental
 POSITION_PLANS_TABLE = os.environ.get("POSITION_PLANS_TABLE", "portfolio-position-plans-dev")
 SAVED_CHARTS_TABLE   = os.environ.get("SAVED_CHARTS_TABLE",   "portfolio-saved-charts-dev")
 UNIVERSE_TABLE       = os.environ.get("UNIVERSE_TABLE",       "portfolio-universe-dev")
+TRIGGERS_TABLE       = os.environ.get("TRIGGERS_TABLE",       "portfolio-triggers-dev")
+SUBSCRIPTIONS_TABLE  = os.environ.get("SUBSCRIPTIONS_TABLE",  "portfolio-subscriptions-dev")
 
 s3 = boto3.client("s3", region_name=REGION)
 ddb = boto3.resource("dynamodb", region_name=REGION)
@@ -3455,6 +3457,150 @@ async def delete_chart(market: str, symbol: str, user_id: str):
     table = ddb.Table(SAVED_CHARTS_TABLE)
     table.delete_item(Key={"user_id": user_id, "market_symbol": f"{market.upper()}#{symbol.upper()}"})
     return {"deleted": f"{market.upper()}#{symbol.upper()}"}
+
+
+# ── Price Triggers ───────────────────────────────────────────────────────────
+
+@app.post("/research/trigger/{market}/{symbol}")
+async def add_trigger(market: str, symbol: str, data: dict):
+    """
+    Add a price trigger for a stock.
+    Sets min1_enabled=True in universe so intraday scanner watches this symbol.
+
+    Body fields:
+      user_id        : str   (required)
+      trigger_price  : float (required)
+      direction      : "above" | "below"  (default "below")
+      repeat         : bool  (default False) — fires every time if True, once only if False
+      note           : str   (optional)
+      broadcast      : "self" | "subscribers"  (admin only, default "self")
+                       "self"        → email only to the trigger creator
+                       "subscribers" → email to all users in price-alert-users subscription list
+    """
+    import uuid as _uuid
+    from datetime import datetime, timezone as tz
+
+    user_id       = data.get("user_id")
+    trigger_price = data.get("trigger_price")
+    direction     = data.get("direction", "below")
+    repeat        = bool(data.get("repeat", False))
+    note          = data.get("note", "")
+    broadcast     = data.get("broadcast", "self")
+
+    if not user_id or trigger_price is None:
+        return {"error": "user_id and trigger_price are required"}
+    if broadcast not in ("self", "subscribers"):
+        return {"error": "broadcast must be 'self' or 'subscribers'"}
+
+    mkt = market.upper()
+    sym = symbol.upper()
+    trigger_id = _uuid.uuid4().hex[:8]
+
+    ddb.Table(TRIGGERS_TABLE).put_item(Item={
+        "user_id":       user_id,
+        "trigger_id":    trigger_id,
+        "market_symbol": f"{mkt}#{sym}",
+        "market":        mkt,
+        "symbol":        sym,
+        "trigger_price": Decimal(str(round(float(trigger_price), 4))),
+        "direction":     direction,
+        "repeat":        repeat,
+        "broadcast":     broadcast,
+        "note":          note,
+        "status":        "active",
+        "created_at":    datetime.now(tz.utc).isoformat(),
+    })
+
+    # Enable 1-min intraday scanning for this symbol
+    ddb.Table(UNIVERSE_TABLE).update_item(
+        Key={"market": mkt, "symbol": sym},
+        UpdateExpression="SET min1_enabled = :t",
+        ExpressionAttributeValues={":t": True},
+    )
+
+    return {"trigger_id": trigger_id, "status": "active", "min1_enabled": True}
+
+
+@app.get("/research/triggers/{user_id}")
+async def list_triggers(user_id: str):
+    """List all triggers for a user."""
+    from boto3.dynamodb.conditions import Key as _Key
+    resp = ddb.Table(TRIGGERS_TABLE).query(
+        KeyConditionExpression=_Key("user_id").eq(user_id)
+    )
+    items = resp.get("Items", [])
+    for item in items:
+        if "trigger_price" in item:
+            item["trigger_price"] = float(item["trigger_price"])
+    return {"triggers": sorted(items, key=lambda x: x.get("created_at", ""), reverse=True)}
+
+
+@app.delete("/research/trigger/{trigger_id}")
+async def delete_trigger(trigger_id: str, user_id: str):
+    """Delete a trigger. Disables min1_enabled for the symbol if no active triggers remain."""
+    from boto3.dynamodb.conditions import Key as _Key, Attr as _Attr
+
+    table = ddb.Table(TRIGGERS_TABLE)
+    resp = table.query(
+        KeyConditionExpression=_Key("user_id").eq(user_id),
+        FilterExpression=_Attr("trigger_id").eq(trigger_id),
+    )
+    items = resp.get("Items", [])
+    if not items:
+        return {"error": "Trigger not found"}
+
+    item = items[0]
+    mkt, sym = item["market"], item["symbol"]
+    table.delete_item(Key={"user_id": user_id, "trigger_id": trigger_id})
+
+    # Disable intraday scanning if no active triggers remain for this symbol (any user)
+    remaining = ddb.Table(TRIGGERS_TABLE).query(
+        IndexName="market-symbol-index",
+        KeyConditionExpression=_Key("market_symbol").eq(f"{mkt}#{sym}") & _Key("status").eq("active"),
+    ).get("Items", [])
+    if not remaining:
+        ddb.Table(UNIVERSE_TABLE).update_item(
+            Key={"market": mkt, "symbol": sym},
+            UpdateExpression="SET min1_enabled = :f",
+            ExpressionAttributeValues={":f": False},
+        )
+
+    return {"deleted": trigger_id, "min1_enabled_disabled": not remaining}
+
+
+# ── Subscriptions ─────────────────────────────────────────────────────────────
+
+@app.get("/admin/subscriptions/{sub_type}")
+async def list_subscriptions(sub_type: str):
+    """List all users subscribed to a given type (admin only)."""
+    from boto3.dynamodb.conditions import Key as _Key
+    resp = ddb.Table(SUBSCRIPTIONS_TABLE).query(
+        KeyConditionExpression=_Key("sub_type").eq(sub_type)
+    )
+    return {"sub_type": sub_type, "subscribers": resp.get("Items", [])}
+
+
+@app.post("/admin/subscriptions/{sub_type}/{user_id}")
+async def add_subscription(sub_type: str, user_id: str):
+    """Add a user to a subscription list (admin only)."""
+    from datetime import datetime, timezone as tz
+    email = _resolve_username_to_email(user_id)
+    ddb.Table(SUBSCRIPTIONS_TABLE).put_item(Item={
+        "sub_type":  sub_type,
+        "user_id":   user_id,
+        "email":     email,
+        "added_at":  datetime.now(tz.utc).isoformat(),
+    })
+    return {"added": user_id, "email": email}
+
+
+@app.delete("/admin/subscriptions/{sub_type}/{user_id}")
+async def remove_subscription(sub_type: str, user_id: str):
+    """Remove a user from a subscription list (admin only)."""
+    ddb.Table(SUBSCRIPTIONS_TABLE).delete_item(
+        Key={"sub_type": sub_type, "user_id": user_id}
+    )
+    return {"removed": user_id}
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

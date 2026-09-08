@@ -25,14 +25,17 @@ REGION           = os.environ.get("AWS_REGION", "us-west-1")
 UNIVERSE_TABLE   = os.environ.get("UNIVERSE_TABLE", "portfolio-universe-dev")
 HISTORY_TABLE    = os.environ.get("STOCK_HISTORY_TABLE", "portfolio-stock-history-dev")
 INTRADAY_TABLE   = os.environ.get("INTRADAY_TABLE", "portfolio-intraday-dev")
-ALERT_FROM_EMAIL = os.environ.get("ALERT_FROM_EMAIL", "")
-ALERT_TO_EMAIL   = os.environ.get("ALERT_TO_EMAIL", "")
+TRIGGERS_TABLE      = os.environ.get("TRIGGERS_TABLE",      "portfolio-triggers-dev")
+SUBSCRIPTIONS_TABLE = os.environ.get("SUBSCRIPTIONS_TABLE", "portfolio-subscriptions-dev")
+ALERT_FROM_EMAIL    = os.environ.get("ALERT_FROM_EMAIL",     "")
+COGNITO_POOL_ID     = os.environ.get("COGNITO_USER_POOL_ID", "")
 
 # Alert cooldown: don't re-alert same symbol+zone within this many minutes
 ALERT_COOLDOWN_MIN = 60
 
-ddb = boto3.resource("dynamodb", region_name=REGION)
-ses = boto3.client("ses", region_name="us-east-1")
+ddb      = boto3.resource("dynamodb", region_name=REGION)
+ses      = boto3.client("ses", region_name="us-east-1")
+cognito  = boto3.client("cognito-idp", region_name=REGION)
 
 
 # ── Universe query ────────────────────────────────────────────────────────────
@@ -67,7 +70,114 @@ def _get_agg(market, symbol):
         return None
 
 
-# ── Zone check ────────────────────────────────────────────────────────────────
+# ── User email lookup ─────────────────────────────────────────────────────────
+
+def _get_user_email(user_id: str) -> str | None:
+    """Look up user's email from Cognito by username (user_id)."""
+    if not COGNITO_POOL_ID:
+        return None
+    try:
+        resp = cognito.admin_get_user(UserPoolId=COGNITO_POOL_ID, Username=user_id)
+        attrs = {a["Name"]: a["Value"] for a in resp.get("UserAttributes", [])}
+        return attrs.get("email")
+    except Exception:
+        return None
+
+
+# ── Trigger check ─────────────────────────────────────────────────────────────
+
+def _get_subscriber_emails(sub_type):
+    """Return all emails subscribed to sub_type."""
+    from boto3.dynamodb.conditions import Key as _Key
+    try:
+        resp = ddb.Table(SUBSCRIPTIONS_TABLE).query(
+            KeyConditionExpression=_Key("sub_type").eq(sub_type)
+        )
+        return [item["email"] for item in resp.get("Items", []) if item.get("email")]
+    except Exception as e:
+        print(f"  subscriptions query error: {e}")
+        return []
+
+
+def _check_triggers(market: str, symbol: str, price: float):
+    """
+    Query all active triggers for this market+symbol via GSI.
+    For each trigger:
+      - direction="below": fire if price <= trigger_price
+      - direction="above": fire if price >= trigger_price
+    On fire:
+      - broadcast="self"        -> email only to the trigger creator
+      - broadcast="subscribers" -> email to all price-alert-users subscribers
+      - repeat=False -> mark status="fired" (once only)
+      - repeat=True  -> leave status="active" (fires every time)
+    """
+    from boto3.dynamodb.conditions import Key as _Key
+    table = ddb.Table(TRIGGERS_TABLE)
+
+    resp = table.query(
+        IndexName="market-symbol-index",
+        KeyConditionExpression=_Key("market_symbol").eq(f"{market}#{symbol}") & _Key("status").eq("active"),
+    )
+    for trigger in resp.get("Items", []):
+        tp        = float(trigger["trigger_price"])
+        dirn      = trigger.get("direction", "below")
+        fired     = (dirn == "below" and price <= tp) or (dirn == "above" and price >= tp)
+        if not fired:
+            continue
+
+        user_id   = trigger["user_id"]
+        note      = trigger.get("note", "")
+        repeat    = trigger.get("repeat", False)
+        broadcast = trigger.get("broadcast", "self")
+        tid       = trigger["trigger_id"]
+
+        if broadcast == "subscribers":
+            emails = _get_subscriber_emails("price-alert-users")
+            for email in emails:
+                _send_trigger_alert(symbol, market, price, tp, dirn, note, email)
+        else:
+            email = _get_user_email(user_id)
+            _send_trigger_alert(symbol, market, price, tp, dirn, note, email)
+
+        if not repeat:
+            table.update_item(
+                Key={"user_id": user_id, "trigger_id": tid},
+                UpdateExpression="SET #s = :fired",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":fired": "fired"},
+            )
+
+
+def _send_trigger_alert(symbol, market, price, trigger_price, direction, note, to_email):
+    arrow = "↓" if direction == "below" else "↑"
+    subject = f"[TRIGGER {arrow}] {symbol} ({market}) hit {trigger_price:.2f} — now {price:.2f}"
+    body_lines = [
+        f"Your price trigger for {symbol} ({market}) was hit.",
+        f"",
+        f"  Trigger price : {trigger_price:.2f} ({direction})",
+        f"  Current price : {price:.2f}",
+    ]
+    if note:
+        body_lines.append(f"  Note          : {note}")
+    body = "\n".join(body_lines)
+
+    if not ALERT_FROM_EMAIL or not to_email:
+        print(f"  TRIGGER ALERT (no SES): {subject}")
+        return
+    try:
+        ses.send_email(
+            Source=ALERT_FROM_EMAIL,
+            Destination={"ToAddresses": [to_email]},
+            Message={
+                "Subject": {"Data": subject},
+                "Body":    {"Text": {"Data": body}},
+            },
+        )
+        print(f"  TRIGGER ALERT sent to {to_email}: {subject}")
+    except Exception as e:
+        print(f"  TRIGGER ALERT failed for {symbol}: {e}")
+
+
 
 def _check_zone(price, agg):
     """
@@ -130,7 +240,7 @@ def _set_cooldown(market, symbol, zone_type):
 # ── SES alert ─────────────────────────────────────────────────────────────────
 
 def _send_alert(market, symbol, zone_type, zone_label, price):
-    if not ALERT_FROM_EMAIL or not ALERT_TO_EMAIL:
+    if not ALERT_FROM_EMAIL:
         print(f"  ALERT [{zone_type}] {market}:{symbol} @ {price:.2f} — {zone_label} (SES not configured)")
         return
     try:
@@ -138,7 +248,7 @@ def _send_alert(market, symbol, zone_type, zone_label, price):
         body    = f"{symbol} ({market}) entered {zone_type} zone\n\n{zone_label}\n\nPrice: {price:.2f}"
         ses.send_email(
             Source=ALERT_FROM_EMAIL,
-            Destination={"ToAddresses": [ALERT_TO_EMAIL]},
+            Destination={"ToAddresses": [ALERT_FROM_EMAIL]},
             Message={
                 "Subject": {"Data": subject},
                 "Body":    {"Text": {"Data": body}},
@@ -202,6 +312,9 @@ def _process_symbol(market, symbol, now_utc, write_5min):
     if zone_type and not _is_on_cooldown(market, symbol, zone_type):
         _send_alert(market, symbol, zone_type, zone_label, price)
         _set_cooldown(market, symbol, zone_type)
+
+    # User-defined price triggers
+    _check_triggers(market, symbol, price)
 
     # Write 5-min bar every 5th minute
     if write_5min:

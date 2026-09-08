@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from "react";
-import { createChart, CandlestickSeries, HistogramSeries, CrosshairMode } from "lightweight-charts";
-import { fetchOhlcv } from "../services/api";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { createChart, CandlestickSeries, HistogramSeries, CrosshairMode, LineStyle } from "lightweight-charts";
+import { fetchOhlcv, addTrigger, listTriggers, deleteTrigger } from "../services/api";
+import { fetchAuthSession, fetchUserAttributes } from "aws-amplify/auth";
 
 const RANGES = ["6M", "1Y", "2Y", "5Y", "All"];
 
@@ -13,11 +14,29 @@ function filterByRange(rows, range) {
   return rows.filter(r => r.date >= cutoffStr);
 }
 
-function CandleChart({ ohlcv, cur }) {
+function CandleChart({ ohlcv, cur, triggers, onChartClick }) {
   const containerRef = useRef(null);
   const chartRef     = useRef(null);
   const candleRef    = useRef(null);
   const tooltipRef   = useRef(null);
+  // keep refs to trigger lines so we can update them without remounting
+  const triggerLinesRef = useRef([]);
+
+  // Draw / update trigger lines whenever triggers change
+  const drawTriggerLines = useCallback((chart) => {
+    // Remove old lines
+    triggerLinesRef.current.forEach(s => { try { chart.removeSeries(s); } catch (_) {} });
+    triggerLinesRef.current = [];
+
+    (triggers || []).forEach(t => {
+      const color  = t.status === "fired" ? "#9e9e9e" : (t.direction === "above" ? "#e53935" : "#1976d2");
+      const style  = t.status === "fired" ? LineStyle.Dashed : LineStyle.Solid;
+      const series = chart.addSeries(CandlestickSeries.__proto__ || CandlestickSeries, {});
+      // Use a price line on the candle series instead of a separate series
+      // We'll use the candleSeries priceLine API
+      return; // handled below via priceLine
+    });
+  }, [triggers]);
 
   useEffect(() => {
     if (!containerRef.current || !ohlcv?.length) return;
@@ -46,6 +65,20 @@ function CandleChart({ ohlcv, cur }) {
       low: d.low ?? d.close, close: d.close,
     })).filter(d => d.close != null));
 
+    // Draw trigger price lines
+    (triggers || []).forEach(t => {
+      const color = t.status === "fired" ? "#9e9e9e" : (t.direction === "above" ? "#e53935" : "#1976d2");
+      const style = t.status === "fired" ? LineStyle.Dashed : LineStyle.Solid;
+      candleSeries.createPriceLine({
+        price:     t.trigger_price,
+        color,
+        lineWidth: 1,
+        lineStyle: style,
+        axisLabelVisible: true,
+        title: `${t.direction === "above" ? "▲" : "▼"} ${t.trigger_price.toFixed(2)}${t.repeat ? " ↺" : ""}${t.status === "fired" ? " ✓" : ""}`,
+      });
+    });
+
     const volumeSeries = chart.addSeries(HistogramSeries, {
       color: "#90caf9", priceFormat: { type: "volume" }, priceScaleId: "volume",
     });
@@ -60,7 +93,7 @@ function CandleChart({ ohlcv, cur }) {
 
     chart.timeScale().fitContent();
 
-    // OHLC tooltip
+    // OHLC tooltip on hover
     chart.subscribeCrosshairMove(param => {
       const tooltip = tooltipRef.current;
       if (!tooltip) return;
@@ -84,17 +117,25 @@ function CandleChart({ ohlcv, cur }) {
       tooltip.style.display = "flex";
     });
 
+    // Click → pass price to parent for trigger creation
+    chart.subscribeClick(param => {
+      if (!param.point || !candleSeries) return;
+      const price = candleSeries.coordinateToPrice(param.point.y);
+      if (price != null) onChartClick(parseFloat(price.toFixed(2)));
+    });
+
     const ro = new ResizeObserver(() => {
       if (containerRef.current && chartRef.current)
         chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
     });
     ro.observe(containerRef.current);
     return () => { ro.disconnect(); chart.remove(); chartRef.current = null; };
-  }, [ohlcv, cur]);
+  }, [ohlcv, cur, triggers, onChartClick]);
 
   return (
     <div style={{ position: "relative", width: "100%" }}>
-      <div ref={containerRef} style={{ width: "100%", borderRadius: 4, overflow: "hidden", border: "1px solid #e0e0e0" }} />
+      <div ref={containerRef} style={{ width: "100%", borderRadius: 4, overflow: "hidden",
+        border: "1px solid #e0e0e0", cursor: "crosshair" }} />
       <div ref={tooltipRef} style={{
         display: "none", position: "absolute", top: 8, left: 0,
         background: "rgba(255,255,255,0.95)", border: "1px solid #e0e0e0",
@@ -106,22 +147,243 @@ function CandleChart({ ohlcv, cur }) {
   );
 }
 
+// ── Trigger creation panel ────────────────────────────────────────────────────
+
+function TriggerPanel({ symbol, market, cur, clickedPrice, isAdmin, onAdded }) {
+  const [price,     setPrice]     = useState("");
+  const [direction, setDirection] = useState("below");
+  const [repeat,    setRepeat]    = useState(false);
+  const [broadcast, setBroadcast] = useState("self");
+  const [note,      setNote]      = useState("");
+  const [saving,    setSaving]    = useState(false);
+  const [msg,       setMsg]       = useState(null);
+
+  // When user clicks chart, pre-fill price and auto-set direction
+  useEffect(() => {
+    if (clickedPrice == null) return;
+    setPrice(String(clickedPrice));
+    setMsg(null);
+  }, [clickedPrice]);
+
+  const handleAdd = async () => {
+    const p = parseFloat(price);
+    if (!p || isNaN(p)) { setMsg({ type: "error", text: "Enter a valid price" }); return; }
+    setSaving(true); setMsg(null);
+    try {
+      const attrs = await fetchUserAttributes();
+      const userId = attrs.sub;
+      const res = await addTrigger(market, symbol, {
+        userId, triggerPrice: p, direction, repeat, note, broadcast,
+      });
+      if (res.error) { setMsg({ type: "error", text: res.error }); }
+      else {
+        const broadcastLabel = broadcast === "subscribers" ? " — broadcast to all subscribers" : "";
+        setMsg({ type: "ok", text: `Trigger set at ${cur}${p} (${direction})${repeat ? " — repeating" : ""}${broadcastLabel}` });
+        setNote("");
+        onAdded();
+      }
+    } catch (e) { setMsg({ type: "error", text: e.message }); }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ background: "#f5f5f5", border: "1px solid #e0e0e0", borderRadius: 6,
+      padding: "12px 16px", marginTop: 12 }}>
+      <div style={{ fontSize: 12, fontWeight: "bold", color: "#555", marginBottom: 8 }}>
+        🎯 Add Price Trigger — <span style={{ color: "#999", fontWeight: "normal" }}>click chart to set price</span>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+        {/* Price */}
+        <label style={{ fontSize: 12 }}>Price ({cur})
+          <br />
+          <input
+            value={price}
+            onChange={e => setPrice(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleAdd()}
+            placeholder="e.g. 150.00"
+            style={{ padding: "5px 8px", width: 110, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }}
+          />
+        </label>
+
+        {/* Direction */}
+        <label style={{ fontSize: 12 }}>Direction
+          <br />
+          <select value={direction} onChange={e => setDirection(e.target.value)}
+            style={{ padding: "5px 8px", borderRadius: 4, border: "1px solid #ccc", fontSize: 13 }}>
+            <option value="below">▼ Price drops to / below</option>
+            <option value="above">▲ Price rises to / above</option>
+          </select>
+        </label>
+
+        {/* Note */}
+        <label style={{ fontSize: 12 }}>Note (optional)
+          <br />
+          <input
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="e.g. support zone"
+            style={{ padding: "5px 8px", width: 160, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }}
+          />
+        </label>
+
+        {/* Repeat toggle */}
+        <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+          Repeat
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+            background: repeat ? "#e3f2fd" : "#fff", border: "1px solid #ccc",
+            borderRadius: 4, padding: "5px 10px", fontSize: 13 }}>
+            <input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)} />
+            {repeat ? "↺ Every hit" : "Once only"}
+          </label>
+        </label>
+
+        {/* Broadcast — admin only */}
+        {isAdmin && (
+          <label style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+            Send alert to
+            <select value={broadcast} onChange={e => setBroadcast(e.target.value)}
+              style={{ padding: "5px 8px", borderRadius: 4, border: "1px solid #ccc", fontSize: 13,
+                background: broadcast === "subscribers" ? "#fff8e1" : "#fff" }}>
+              <option value="self">👤 Only me</option>
+              <option value="subscribers">📢 All subscribers</option>
+            </select>
+          </label>
+        )}
+
+        <button
+          onClick={handleAdd}
+          disabled={saving || !price}
+          style={{ padding: "6px 18px", background: saving ? "#bdbdbd" : "#1565c0", color: "#fff",
+            border: "none", borderRadius: 4, cursor: saving ? "not-allowed" : "pointer",
+            fontSize: 13, fontWeight: "bold", alignSelf: "flex-end" }}>
+          {saving ? "Saving…" : "Add Trigger"}
+        </button>
+      </div>
+
+      {msg && (
+        <div style={{ marginTop: 8, fontSize: 12,
+          color: msg.type === "ok" ? "#2e7d32" : "#c62828" }}>
+          {msg.type === "ok" ? "✅" : "❌"} {msg.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Triggers list ─────────────────────────────────────────────────────────────
+
+function TriggersList({ symbol, market, cur, triggers, onDeleted }) {
+  const [deleting, setDeleting] = useState(null);
+
+  if (!triggers?.length) return (
+    <div style={{ fontSize: 12, color: "#999", marginTop: 8 }}>No triggers set for {symbol}.</div>
+  );
+
+  const handleDelete = async (t) => {
+    setDeleting(t.trigger_id);
+    try {
+      const attrs = await fetchUserAttributes();
+      await deleteTrigger(t.trigger_id, attrs.sub);
+      onDeleted();
+    } catch (_) {}
+    setDeleting(null);
+  };
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 12, fontWeight: "bold", color: "#555", marginBottom: 6 }}>
+        Triggers for {symbol} ({market})
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr style={{ background: "#f5f5f5" }}>
+            {["Price", "Direction", "Repeat", "Broadcast", "Note", "Status", ""].map(h => (
+              <th key={h} style={{ padding: "5px 8px", textAlign: "left", borderBottom: "1px solid #e0e0e0" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {triggers.map(t => (
+            <tr key={t.trigger_id} style={{ opacity: t.status === "fired" ? 0.5 : 1 }}>
+              <td style={{ padding: "5px 8px", fontWeight: "bold" }}>{cur}{t.trigger_price.toFixed(2)}</td>
+              <td style={{ padding: "5px 8px", color: t.direction === "above" ? "#e53935" : "#1976d2" }}>
+                {t.direction === "above" ? "▲ above" : "▼ below"}
+              </td>
+              <td style={{ padding: "5px 8px" }}>{t.repeat ? "↺ repeating" : "once"}</td>
+              <td style={{ padding: "5px 8px" }}>
+                {t.broadcast === "subscribers"
+                  ? <span style={{ background: "#fff8e1", color: "#f57f17", padding: "2px 6px", borderRadius: 10, fontSize: 11 }}>📢 subscribers</span>
+                  : <span style={{ color: "#999", fontSize: 11 }}>👤 only me</span>}
+              </td>
+              <td style={{ padding: "5px 8px", color: "#666" }}>{t.note || "—"}</td>
+              <td style={{ padding: "5px 8px" }}>
+                <span style={{
+                  background: t.status === "fired" ? "#e0e0e0" : "#e8f5e9",
+                  color: t.status === "fired" ? "#757575" : "#2e7d32",
+                  padding: "2px 7px", borderRadius: 10, fontSize: 11,
+                }}>
+                  {t.status === "fired" ? "✓ fired" : "● active"}
+                </span>
+              </td>
+              <td style={{ padding: "5px 8px" }}>
+                <button
+                  onClick={() => handleDelete(t)}
+                  disabled={deleting === t.trigger_id}
+                  style={{ padding: "2px 8px", fontSize: 11, background: "#fff",
+                    border: "1px solid #e57373", color: "#e53935", borderRadius: 4, cursor: "pointer" }}>
+                  {deleting === t.trigger_id ? "…" : "Delete"}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
 export default function OhlcvChart() {
-  const [symbol,  setSymbol]  = useState("");
-  const [market,  setMarket]  = useState("US");
-  const [range,   setRange]   = useState("1Y");
-  const [data,    setData]    = useState(null);   // {symbol, market, rows, source}
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState(null);
+  const [symbol,       setSymbol]       = useState("");
+  const [market,       setMarket]       = useState("US");
+  const [range,        setRange]        = useState("1Y");
+  const [data,         setData]         = useState(null);
+  const [loading,      setLoading]      = useState(false);
+  const [error,        setError]        = useState(null);
+  const [clickedPrice, setClickedPrice] = useState(null);
+  const [triggers,     setTriggers]     = useState([]);
+  const [userId,       setUserId]       = useState(null);
+  const [isAdmin,      setIsAdmin]      = useState(false);
+
+  // Fetch current user id and role once
+  useEffect(() => {
+    fetchUserAttributes().then(a => {
+      setUserId(a.sub);
+      setIsAdmin((a["custom:role"] || "") === "admin");
+    }).catch(() => {});
+  }, []);
+
+  const loadTriggers = useCallback(async (sym, mkt) => {
+    if (!userId || !sym) return;
+    try {
+      const res = await listTriggers(userId);
+      const all = res.triggers || [];
+      setTriggers(all.filter(t => t.symbol === sym.toUpperCase() && t.market === mkt.toUpperCase()));
+    } catch (_) {}
+  }, [userId]);
 
   const handleSearch = async (sym = symbol, mkt = market) => {
     const s = sym.trim().toUpperCase();
     if (!s) return;
-    setLoading(true); setError(null); setData(null);
+    setLoading(true); setError(null); setData(null); setClickedPrice(null);
     try {
       const result = await fetchOhlcv(mkt, s);
       if (result.error) { setError(result.error); }
-      else { setData(result); }
+      else {
+        setData(result);
+        await loadTriggers(s, mkt);
+      }
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
@@ -155,7 +417,8 @@ export default function OhlcvChart() {
           onClick={() => handleSearch()}
           disabled={loading || !symbol.trim()}
           style={{ padding: "7px 20px", background: loading ? "#bdbdbd" : "#1976d2", color: "#fff",
-            border: "none", borderRadius: 4, cursor: loading ? "not-allowed" : "pointer", fontSize: 13, fontWeight: "bold" }}>
+            border: "none", borderRadius: 4, cursor: loading ? "not-allowed" : "pointer",
+            fontSize: 13, fontWeight: "bold" }}>
           {loading ? "Loading..." : "🔍 Search"}
         </button>
       </div>
@@ -168,9 +431,7 @@ export default function OhlcvChart() {
 
       {loading && (
         <div style={{ padding: 24, textAlign: "center", color: "#666" }}>
-          {data === null
-            ? "Checking master list… if new symbol, fetching full history from Yahoo Finance (~10s)"
-            : "Loading..."}
+          Checking master list… if new symbol, fetching full history from Yahoo Finance (~10s)
         </div>
       )}
 
@@ -205,10 +466,41 @@ export default function OhlcvChart() {
             </div>
           </div>
 
+          {/* Clicked price hint */}
+          {clickedPrice != null && (
+            <div style={{ fontSize: 12, color: "#1565c0", marginBottom: 4 }}>
+              📍 Clicked: {cur}{clickedPrice} — price pre-filled below
+            </div>
+          )}
+
           {filtered.length > 0
-            ? <CandleChart ohlcv={filtered} cur={cur} />
+            ? <CandleChart
+                ohlcv={filtered}
+                cur={cur}
+                triggers={triggers}
+                onChartClick={setClickedPrice}
+              />
             : <p style={{ color: "#999" }}>No data for selected range.</p>
           }
+
+          {/* Trigger creation panel */}
+          <TriggerPanel
+            symbol={data.symbol}
+            market={data.market}
+            cur={cur}
+            clickedPrice={clickedPrice}
+            isAdmin={isAdmin}
+            onAdded={() => loadTriggers(data.symbol, data.market)}
+          />
+
+          {/* Triggers list */}
+          <TriggersList
+            symbol={data.symbol}
+            market={data.market}
+            cur={cur}
+            triggers={triggers}
+            onDeleted={() => loadTriggers(data.symbol, data.market)}
+          />
         </>
       )}
 
@@ -216,7 +508,7 @@ export default function OhlcvChart() {
         <div style={{ padding: 32, textAlign: "center", color: "#999", background: "#fafafa",
           borderRadius: 6, border: "1px dashed #ddd" }}>
           Enter a symbol and click Search.<br />
-          <span style={{ fontSize: 12 }}>Data is read from S3. If not cached, it will be fetched from Yahoo Finance and saved automatically.</span>
+          <span style={{ fontSize: 12 }}>Click anywhere on the chart to set a trigger price.</span>
         </div>
       )}
     </div>

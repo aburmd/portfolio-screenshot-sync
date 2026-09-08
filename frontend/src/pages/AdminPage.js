@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { listSubscriptions, addSubscription, removeSubscription } from "../services/api";
 import "../styles/admin.css";
 
 const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:8000";
@@ -19,11 +20,13 @@ function AdminPage() {
         <button style={tabStyle(tab === "symbols")} onClick={() => setTab("symbols")}>⚠️ Unknown Symbols</button>
         <button style={tabStyle(tab === "shares")} onClick={() => setTab("shares")}>🔗 Share Requests</button>
         <button style={tabStyle(tab === "users")} onClick={() => setTab("users")}>👥 Manage Users</button>
+        <button style={tabStyle(tab === "subscriptions")} onClick={() => setTab("subscriptions")}>🔔 Alert Subscribers</button>
       </div>
       <div className="admin-content">
         {tab === "symbols" && <SymbolsTab />}
         {tab === "shares" && <SharesTab />}
         {tab === "users" && <UsersTab />}
+        {tab === "subscriptions" && <SubscriptionsTab />}
       </div>
     </div>
   );
@@ -309,3 +312,105 @@ function SharesTab() {
 }
 
 export default AdminPage;
+
+// ── Subscriptions Tab ─────────────────────────────────────────────────────────
+
+function SubscriptionsTab() {
+  const SUB_TYPE = "price-alert-users";
+  const [subscribers, setSubscribers] = useState([]);
+  const [loading,     setLoading]     = useState(false);
+  const [newUserId,   setNewUserId]   = useState("");
+  const [msg,         setMsg]         = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await listSubscriptions(SUB_TYPE);
+      setSubscribers(res.subscribers || []);
+    } catch (_) {}
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleAdd = async () => {
+    const uid = newUserId.trim();
+    if (!uid) return;
+    try {
+      const res = await addSubscription(SUB_TYPE, uid);
+      if (res.error) { setMsg({ type: "error", text: res.error }); return; }
+      setMsg({ type: "ok", text: `Added ${res.email || uid}` });
+      setNewUserId("");
+      load();
+    } catch (e) { setMsg({ type: "error", text: e.message }); }
+  };
+
+  const handleRemove = async (userId) => {
+    try {
+      await removeSubscription(SUB_TYPE, userId);
+      load();
+    } catch (_) {}
+  };
+
+  return (
+    <div>
+      <p style={{ fontSize: 13, color: "#555", marginBottom: 12 }}>
+        Users in this list receive email alerts when an admin creates a trigger with <b>"All subscribers"</b> broadcast.
+      </p>
+
+      {/* Add subscriber */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
+        <input
+          value={newUserId}
+          onChange={e => setNewUserId(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && handleAdd()}
+          placeholder="Cognito user_id (sub)"
+          style={{ padding: "6px 10px", width: 280, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }}
+        />
+        <button onClick={handleAdd}
+          style={{ padding: "6px 16px", background: "#1565c0", color: "#fff",
+            border: "none", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>
+          Add
+        </button>
+      </div>
+
+      {msg && (
+        <div style={{ marginBottom: 10, fontSize: 12,
+          color: msg.type === "ok" ? "#2e7d32" : "#c62828" }}>
+          {msg.type === "ok" ? "✅" : "❌"} {msg.text}
+        </div>
+      )}
+
+      {loading ? <p>Loading...</p> : (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ background: "#f5f5f5" }}>
+              {["Email", "User ID", "Added", ""].map(h => (
+                <th key={h} style={{ padding: "6px 10px", textAlign: "left", borderBottom: "1px solid #e0e0e0" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {subscribers.length === 0 && (
+              <tr><td colSpan={4} style={{ padding: 12, color: "#999" }}>No subscribers yet.</td></tr>
+            )}
+            {subscribers.map(s => (
+              <tr key={s.user_id}>
+                <td style={{ padding: "6px 10px" }}>{s.email}</td>
+                <td style={{ padding: "6px 10px", color: "#999", fontSize: 11 }}>{s.user_id}</td>
+                <td style={{ padding: "6px 10px", color: "#999", fontSize: 11 }}>{s.added_at?.slice(0, 10)}</td>
+                <td style={{ padding: "6px 10px" }}>
+                  <button onClick={() => handleRemove(s.user_id)}
+                    style={{ padding: "2px 10px", fontSize: 11, background: "#fff",
+                      border: "1px solid #e57373", color: "#e53935", borderRadius: 4, cursor: "pointer" }}>
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}

@@ -371,3 +371,32 @@ export async function deleteChart(market, symbol, userId) {
   const res = await fetch(`${API_BASE}/research/charts/${market}/${encodeURIComponent(symbol)}?user_id=${userId}`, { method: "DELETE" });
   return res.json();
 }
+
+// ── Price Triggers ────────────────────────────────────────────────────────────
+export async function addTrigger(market, symbol, { userId, triggerPrice, direction, repeat, note, broadcast = "self" }) {
+  const res = await fetch(`${API_BASE}/research/trigger/${market}/${encodeURIComponent(symbol)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId, trigger_price: triggerPrice, direction, repeat, note, broadcast }),
+  });
+  return res.json();
+}
+export async function listTriggers(userId) {
+  const res = await fetch(`${API_BASE}/research/triggers/${userId}`);
+  return res.json();
+}
+export async function deleteTrigger(triggerId, userId) {
+  const res = await fetch(`${API_BASE}/research/trigger/${triggerId}?user_id=${userId}`, { method: "DELETE" });
+  return res.json();
+}
+export async function listSubscriptions(subType) {
+  const res = await fetch(`${API_BASE}/admin/subscriptions/${subType}`);
+  return res.json();
+}
+export async function addSubscription(subType, userId) {
+  const res = await fetch(`${API_BASE}/admin/subscriptions/${subType}/${userId}`, { method: "POST" });
+  return res.json();
+}
+export async function removeSubscription(subType, userId) {
+  const res = await fetch(`${API_BASE}/admin/subscriptions/${subType}/${userId}`, { method: "DELETE" });
+  return res.json();
+}
