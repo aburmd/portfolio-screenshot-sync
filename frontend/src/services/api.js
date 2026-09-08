@@ -1,6 +1,6 @@
-export const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:8000";
-
 import { fetchAuthSession } from "aws-amplify/auth";
+
+export const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
 async function authFetch(url, options = {}) {
   try {
