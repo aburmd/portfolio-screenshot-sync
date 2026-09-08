@@ -6,6 +6,7 @@
     "@aws-amplify/ui-react": "^6.15.3",
     "amazon-cognito-identity-js": "^6.3.16",
     "aws-amplify": "^6.16.4",
+    "lightweight-charts": "^5.2.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-scripts": "5.0.1",

@@ -1,8 +1,5 @@
-import React, { useState, useEffect, useCallback } from "react";
-import {
-  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, Cell,
-} from "recharts";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { createChart, CrosshairMode, LineStyle } from "lightweight-charts";
 import { fetchSavedCharts, fetchSavedChart, refreshChart, deleteChart } from "../services/api";
 
 const btn = (color = "#1976d2", disabled = false) => ({
@@ -25,45 +22,135 @@ function filterByRange(ohlcv, range) {
   return ohlcv.filter(r => r.date >= cutoffStr);
 }
 
-// Candlestick bar shape for Recharts
-function CandleBar({ x, y, width, height, payload }) {
-  if (!payload) return null;
-  const { open, close, high, low } = payload;
-  if (open == null || close == null) return null;
-  const isUp = close >= open;
-  const color = isUp ? "#2e7d32" : "#c62828";
-  const bodyTop = Math.min(open, close);
-  const bodyBot = Math.max(open, close);
-  // We need pixel coords — use the chart's scale. Since we're using Bar with custom shape,
-  // x/y/width/height are provided by Recharts based on the value.
-  // We'll render a simple colored bar (open-close body) + wick lines.
-  const barW = Math.max(width - 2, 1);
-  const cx = x + width / 2;
-  return (
-    <g>
-      {/* Wick */}
-      <line x1={cx} y1={y} x2={cx} y2={y + height} stroke={color} strokeWidth={1} />
-      {/* Body — drawn as rect using y/height from Recharts (which maps to close value) */}
-      <rect x={x + 1} y={y} width={barW} height={Math.max(height, 1)} fill={color} opacity={0.85} />
-    </g>
-  );
-}
+function CandleChart({ ohlcv, zones, cur }) {
+  const containerRef = useRef(null);
+  const chartRef     = useRef(null);
+  const candleRef    = useRef(null);
+  const volumeRef    = useRef(null);
 
-// Custom tooltip
-function ChartTooltip({ active, payload, label, cur }) {
-  if (!active || !payload?.length) return null;
-  const d = payload[0]?.payload;
-  if (!d) return null;
-  return (
-    <div style={{ background: "#fff", border: "1px solid #ccc", padding: 8, fontSize: 11, borderRadius: 4 }}>
-      <div style={{ fontWeight: "bold", marginBottom: 4 }}>{label}</div>
-      {d.open  != null && <div>O: {cur}{d.open?.toFixed(2)}</div>}
-      {d.high  != null && <div>H: {cur}{d.high?.toFixed(2)}</div>}
-      {d.low   != null && <div>L: {cur}{d.low?.toFixed(2)}</div>}
-      {d.close != null && <div>C: <b>{cur}{d.close?.toFixed(2)}</b></div>}
-      {d.volume > 0    && <div style={{ color: "#666" }}>Vol: {(d.volume / 1e6).toFixed(1)}M</div>}
-    </div>
-  );
+  useEffect(() => {
+    if (!containerRef.current || !ohlcv?.length) return;
+
+    // destroy previous instance
+    if (chartRef.current) { chartRef.current.remove(); chartRef.current = null; }
+
+    const chart = createChart(containerRef.current, {
+      width:  containerRef.current.clientWidth,
+      height: 500,
+      layout: { background: { color: "#ffffff" }, textColor: "#333" },
+      grid:   { vertLines: { color: "#f0f0f0" }, horzLines: { color: "#f0f0f0" } },
+      crosshair: { mode: CrosshairMode.Normal },
+      rightPriceScale: { borderColor: "#e0e0e0" },
+      timeScale: { borderColor: "#e0e0e0", timeVisible: true, secondsVisible: false },
+    });
+    chartRef.current = chart;
+
+    // Candlestick series
+    const candleSeries = chart.addCandlestickSeries({
+      upColor:          "#2e7d32",
+      downColor:        "#c62828",
+      borderUpColor:    "#2e7d32",
+      borderDownColor:  "#c62828",
+      wickUpColor:      "#2e7d32",
+      wickDownColor:    "#c62828",
+    });
+    candleRef.current = candleSeries;
+
+    const candleData = ohlcv.map(d => ({
+      time:  d.date,
+      open:  d.open  ?? d.close,
+      high:  d.high  ?? d.close,
+      low:   d.low   ?? d.close,
+      close: d.close,
+    })).filter(d => d.close != null);
+    candleSeries.setData(candleData);
+
+    // Volume series (histogram on separate pane)
+    const volumeSeries = chart.addHistogramSeries({
+      color:       "#90caf9",
+      priceFormat: { type: "volume" },
+      priceScaleId: "volume",
+    });
+    chart.priceScale("volume").applyOptions({
+      scaleMargins: { top: 0.85, bottom: 0 },
+    });
+    volumeRef.current = volumeSeries;
+
+    const volData = ohlcv
+      .filter(d => d.volume > 0 && d.close != null)
+      .map(d => ({
+        time:  d.date,
+        value: d.volume,
+        color: (d.close >= (d.open ?? d.close)) ? "rgba(46,125,50,0.4)" : "rgba(198,40,40,0.4)",
+      }));
+    volumeSeries.setData(volData);
+
+    // Buy zone lines
+    const buyZones  = zones?.buy_zones  || [];
+    const sellZones = zones?.sell_zones || [];
+
+    buyZones.forEach(z => {
+      const line = candleSeries.createPriceLine({
+        price:      z.price_level,
+        color:      z.in_zone_now ? "#2e7d32" : "#66bb6a",
+        lineWidth:  z.in_zone_now ? 2 : 1,
+        lineStyle:  z.in_zone_now ? LineStyle.Solid : LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: `B ${cur}${z.price_level?.toFixed(2)} (${z.total_target_pct?.toFixed(1)}%)`,
+      });
+    });
+
+    sellZones.forEach(z => {
+      candleSeries.createPriceLine({
+        price:      z.price_level,
+        color:      z.note ? "#b71c1c" : "#ef5350",
+        lineWidth:  z.note ? 2 : 1,
+        lineStyle:  z.note ? LineStyle.Dotted : LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: z.note
+          ? `S ${cur}${z.price_level?.toFixed(2)} (${z.note})`
+          : `S ${cur}${z.price_level?.toFixed(2)} →${z.total_target_pct?.toFixed(1)}%`,
+      });
+    });
+
+    // Current price line
+    if (zones?.current_price) {
+      candleSeries.createPriceLine({
+        price:     zones.current_price,
+        color:     "#1976d2",
+        lineWidth: 1,
+        lineStyle: LineStyle.Solid,
+        axisLabelVisible: true,
+        title: `Now ${cur}${zones.current_price?.toFixed(2)}`,
+      });
+    }
+
+    // QQQ gate
+    if (zones?.cagr_summary?.qqq_gate_price) {
+      candleSeries.createPriceLine({
+        price:     zones.cagr_summary.qqq_gate_price,
+        color:     "#e65100",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dotted,
+        axisLabelVisible: true,
+        title: `QQQ Gate`,
+      });
+    }
+
+    chart.timeScale().fitContent();
+
+    // Responsive resize
+    const ro = new ResizeObserver(() => {
+      if (containerRef.current && chartRef.current) {
+        chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
+      }
+    });
+    ro.observe(containerRef.current);
+
+    return () => { ro.disconnect(); chart.remove(); chartRef.current = null; };
+  }, [ohlcv, zones, cur]);
+
+  return <div ref={containerRef} style={{ width: "100%", borderRadius: 4, overflow: "hidden", border: "1px solid #e0e0e0" }} />;
 }
 
 function ChartPage({ userId, market, symbol, onBack }) {
@@ -100,25 +187,11 @@ function ChartPage({ userId, market, symbol, onBack }) {
   };
 
   const alreadyRefreshed = chartData?.last_refreshed_date === today;
-  const cur = market === "IN" ? "₹" : "$";
-
-  const ohlcv = filterByRange(chartData?.cached_ohlcv, range);
-  const zones = chartData?.cached_zones;
-
-  // Thin out data for performance: show every Nth candle based on range
-  const step = range === "6M" ? 1 : range === "1Y" ? 1 : 2;
-  const displayData = ohlcv.filter((_, i) => i % step === 0);
-
-  // Buy zone reference lines
+  const cur    = market === "IN" ? "₹" : "$";
+  const ohlcv  = filterByRange(chartData?.cached_ohlcv, range);
+  const zones  = chartData?.cached_zones;
   const buyZones  = zones?.buy_zones  || [];
   const sellZones = zones?.sell_zones || [];
-  const gatePrice = zones?.cagr_summary?.qqq_gate_price;
-  const finalSell = zones?.cagr_summary?.final_sell_price;
-
-  // Y axis domain with padding
-  const allPrices = displayData.flatMap(d => [d.high, d.low].filter(Boolean));
-  const yMin = allPrices.length ? Math.min(...allPrices) * 0.97 : 0;
-  const yMax = allPrices.length ? Math.max(...allPrices) * 1.03 : 100;
 
   return (
     <div>
@@ -148,75 +221,21 @@ function ChartPage({ userId, market, symbol, onBack }) {
       {/* Avg price placeholder */}
       <div style={{ background: "#f5f5f5", border: "1px dashed #bdbdbd", borderRadius: 4, padding: "6px 12px", fontSize: 11, color: "#999", marginBottom: 10 }}>
         📊 Avg price overlay — <i>multi-account feature coming soon</i>
-        <select disabled style={{ marginLeft: 8, padding: "2px 6px", fontSize: 11, color: "#bdbdbd" }}>
-          <option>Select account...</option>
-        </select>
       </div>
 
       {error && <div style={{ background: "#fce4ec", color: "#c62828", padding: 8, borderRadius: 4, marginBottom: 8 }}>❌ {error}</div>}
 
-      {loading ? <p>Loading chart...</p> : displayData.length > 0 ? (
+      {/* Legend */}
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 11, marginBottom: 8 }}>
+        <span style={{ color: "#2e7d32" }}>🟢 Buy zones (dashed=pending, solid=in zone)</span>
+        <span style={{ color: "#ef5350" }}>🔴 Sell zones (dashed=fib, dotted=fixed)</span>
+        <span style={{ color: "#1976d2" }}>━ Current price</span>
+        <span style={{ color: "#e65100" }}>┅ QQQ Gate</span>
+      </div>
+
+      {loading ? <p>Loading chart...</p> : ohlcv.length > 0 ? (
         <>
-          {/* Zone legend */}
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 11, marginBottom: 6 }}>
-            <span style={{ color: "#2e7d32" }}>━━ Buy zones</span>
-            <span style={{ color: "#c62828" }}>━━ Sell zones</span>
-            {gatePrice && <span style={{ color: "#e65100" }}>┅┅ QQQ Gate</span>}
-            {finalSell && <span style={{ color: "#b71c1c" }}>┅┅ Final Sell</span>}
-            <span style={{ color: "#1976d2" }}>━ Current price</span>
-          </div>
-
-          <ResponsiveContainer width="100%" height={480}>
-            <ComposedChart data={displayData} margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="date" tick={{ fontSize: 10 }}
-                tickFormatter={v => v?.slice(5)}  // show MM-DD
-                interval={Math.floor(displayData.length / 8)} />
-              <YAxis domain={[yMin, yMax]} tick={{ fontSize: 10 }}
-                tickFormatter={v => `${cur}${v >= 1000 ? (v/1000).toFixed(0)+"K" : v.toFixed(0)}`}
-                width={55} />
-              <Tooltip content={<ChartTooltip cur={cur} />} />
-
-              {/* Candlestick bars — use high as value, shape draws full candle */}
-              <Bar dataKey="high" shape={<CandleBar />} isAnimationActive={false}>
-                {displayData.map((d, i) => <Cell key={i} />)}
-              </Bar>
-
-              {/* Current price */}
-              {zones?.current_price && (
-                <ReferenceLine y={zones.current_price} stroke="#1976d2" strokeWidth={1.5}
-                  label={{ value: `${cur}${zones.current_price?.toFixed(2)}`, position: "right", fontSize: 10, fill: "#1976d2" }} />
-              )}
-
-              {/* Buy zones — green solid/dashed */}
-              {buyZones.map((z, i) => (
-                <ReferenceLine key={`buy-${i}`} y={z.price_level}
-                  stroke="#2e7d32" strokeWidth={1}
-                  strokeDasharray={z.in_zone_now ? undefined : "4 3"}
-                  label={{ value: `${cur}${z.price_level?.toFixed(0)} (${z.total_target_pct?.toFixed(1)}%)`, position: "insideBottomLeft", fontSize: 9, fill: "#2e7d32" }} />
-              ))}
-
-              {/* Sell zones — red solid/dashed */}
-              {sellZones.map((z, i) => (
-                <ReferenceLine key={`sell-${i}`} y={z.price_level}
-                  stroke="#c62828" strokeWidth={1}
-                  strokeDasharray="4 3"
-                  label={{ value: `${cur}${z.price_level?.toFixed(0)}`, position: "insideTopLeft", fontSize: 9, fill: "#c62828" }} />
-              ))}
-
-              {/* QQQ gate */}
-              {gatePrice && (
-                <ReferenceLine y={gatePrice} stroke="#e65100" strokeWidth={1} strokeDasharray="6 3"
-                  label={{ value: `Gate ${cur}${gatePrice?.toFixed(0)}`, position: "right", fontSize: 9, fill: "#e65100" }} />
-              )}
-
-              {/* Final sell */}
-              {finalSell && (
-                <ReferenceLine y={finalSell} stroke="#b71c1c" strokeWidth={1} strokeDasharray="6 3"
-                  label={{ value: `Exit ${cur}${finalSell?.toFixed(0)}`, position: "right", fontSize: 9, fill: "#b71c1c" }} />
-              )}
-            </ComposedChart>
-          </ResponsiveContainer>
+          <CandleChart ohlcv={ohlcv} zones={zones} cur={cur} />
 
           {/* Zone summary below chart */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
@@ -246,9 +265,9 @@ function ChartPage({ userId, market, symbol, onBack }) {
 }
 
 export default function ChartsTab({ userId }) {
-  const [charts, setCharts]       = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [selected, setSelected]   = useState(null); // { market, symbol }
+  const [charts, setCharts]     = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [selected, setSelected] = useState(null);
 
   const loadCharts = useCallback(async () => {
     if (!userId) return;
@@ -288,16 +307,13 @@ export default function ChartsTab({ userId }) {
             <div key={c.market_symbol}
               onClick={() => setSelected({ market: c.market, symbol: c.symbol })}
               style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: 16, cursor: "pointer",
-                background: "#fff", transition: "box-shadow 0.15s",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}
+                background: "#fff", transition: "box-shadow 0.15s", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}
               onMouseEnter={e => e.currentTarget.style.boxShadow = "0 3px 8px rgba(0,0,0,0.15)"}
               onMouseLeave={e => e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.08)"}
             >
               <div style={{ fontSize: 18, fontWeight: "bold" }}>{c.symbol}</div>
               <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>{c.market}</div>
-              <div style={{ fontSize: 10, color: "#999", marginTop: 6 }}>
-                Last refreshed: {c.last_refreshed_date || "—"}
-              </div>
+              <div style={{ fontSize: 10, color: "#999", marginTop: 6 }}>Last refreshed: {c.last_refreshed_date || "—"}</div>
               {c.last_refreshed_date === new Date().toISOString().slice(0, 10) && (
                 <div style={{ fontSize: 10, color: "#2e7d32", marginTop: 2 }}>✅ Up to date</div>
               )}
