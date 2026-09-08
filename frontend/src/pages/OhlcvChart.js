@@ -15,28 +15,15 @@ function filterByRange(rows, range) {
 }
 
 function CandleChart({ ohlcv, cur, triggers, onChartClick }) {
-  const containerRef = useRef(null);
-  const chartRef     = useRef(null);
-  const candleRef    = useRef(null);
-  const tooltipRef   = useRef(null);
+  const containerRef    = useRef(null);
+  const chartRef        = useRef(null);
+  const candleRef       = useRef(null);
+  const tooltipRef      = useRef(null);
+  const onChartClickRef = useRef(onChartClick);
+  // keep ref current so click handler never goes stale
+  useEffect(() => { onChartClickRef.current = onChartClick; }, [onChartClick]);
   // keep refs to trigger lines so we can update them without remounting
   const triggerLinesRef = useRef([]);
-
-  // Draw / update trigger lines whenever triggers change
-  const drawTriggerLines = useCallback((chart) => {
-    // Remove old lines
-    triggerLinesRef.current.forEach(s => { try { chart.removeSeries(s); } catch (_) {} });
-    triggerLinesRef.current = [];
-
-    (triggers || []).forEach(t => {
-      const color  = t.status === "fired" ? "#9e9e9e" : (t.direction === "above" ? "#e53935" : "#1976d2");
-      const style  = t.status === "fired" ? LineStyle.Dashed : LineStyle.Solid;
-      const series = chart.addSeries(CandlestickSeries.__proto__ || CandlestickSeries, {});
-      // Use a price line on the candle series instead of a separate series
-      // We'll use the candleSeries priceLine API
-      return; // handled below via priceLine
-    });
-  }, [triggers]);
 
   useEffect(() => {
     if (!containerRef.current || !ohlcv?.length) return;
@@ -121,7 +108,8 @@ function CandleChart({ ohlcv, cur, triggers, onChartClick }) {
     chart.subscribeClick(param => {
       if (!param.point) return;
       const price = candleSeries.coordinateToPrice(param.point.y);
-      if (price != null && price > 0) onChartClick(parseFloat(price.toFixed(2)));
+      console.log("chart click param.point:", param.point, "price:", price);
+      if (price != null && price > 0) onChartClickRef.current(parseFloat(price.toFixed(2)));
     });
 
     const ro = new ResizeObserver(() => {
@@ -130,7 +118,7 @@ function CandleChart({ ohlcv, cur, triggers, onChartClick }) {
     });
     ro.observe(containerRef.current);
     return () => { ro.disconnect(); chart.remove(); chartRef.current = null; };
-  }, [ohlcv, cur, triggers, onChartClick]);
+  }, [ohlcv, cur, triggers]);
 
   return (
     <div style={{ position: "relative", width: "100%" }}>
