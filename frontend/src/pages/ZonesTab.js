@@ -164,7 +164,7 @@ export default function ZonesTab({ userId }) {
                     <th style={{ padding: "6px 8px", textAlign: "center" }}>Level</th>
                     <th style={{ padding: "6px 8px", textAlign: "right" }}>Vol%</th>
                     <th style={{ padding: "6px 8px", textAlign: "right" }}>% from HH</th>
-                    <th style={{ padding: "6px 8px", textAlign: "right" }}>Add%</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right" }}>Target%</th>
                     <th style={{ padding: "6px 8px", textAlign: "center" }}>Status</th>
                   </tr>
                 </thead>
@@ -184,7 +184,7 @@ export default function ZonesTab({ userId }) {
                         <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: "bold" }}>
                           {inZone && z.adjusted_target_pct !== z.total_target_pct
                             ? <><span style={{ color: "#e65100" }}>{z.adjusted_target_pct?.toFixed(2)}%</span><span style={{ color: "#999", fontSize: 10 }}> (50% rule)</span></>
-                            : <span title={z.gross_target_pct != null ? "Gross target: " + z.gross_target_pct.toFixed(2) + "%" : ""}>{z.total_target_pct?.toFixed(2)}%</span>
+                            : <span>{z.total_target_pct?.toFixed(2)}%</span>
                           }
                         </td>
                         <td style={{ padding: "5px 8px", textAlign: "center" }}>
@@ -237,7 +237,7 @@ export default function ZonesTab({ userId }) {
         {/* Legend */}
         <div style={{ marginTop: 12, padding: 10, background: "#f5f5f5", borderRadius: 4, fontSize: 11, color: "#666" }}>
           <b>Legend:</b> L1 = 1 window confirmed | L2 = 2 windows | L3 = all 3 windows (strongest) &nbsp;·&nbsp;
-          <b>Add%</b> = incremental allocation to add at that zone (existing holding already subtracted) &nbsp;·&nbsp;
+          <b>Target%</b> = total portfolio allocation at that price level &nbsp;·&nbsp;
           <b>50% rule</b> = already in zone, buy half now &nbsp;·&nbsp;
           ✅ = CAGR qualified + QQQ gate qualified
         </div>

@@ -318,18 +318,14 @@ def compute_zones(symbol, market, base_pos=0.5, max_pos=3.0,
                 z["total_target_pct"] = min(round(
                     base_pos + (raw / max_raw) * (max_pos - base_pos), 2), max_pos)
 
-        # 50% missed entry rule: zone we're currently inside
+        # 50% missed entry rule: only applies when no meaningful position held yet
+        # If current_holding_pct >= base_pos, user already has a position — skip rule
         for z in buy_zones:
-            gross_target = z["total_target_pct"]
-            # subtract what's already held — only show incremental buy needed
-            incremental = max(0.0, round(gross_target - current_holding_pct, 2))
-            z["gross_target_pct"]  = gross_target   # absolute target for reference
-            z["total_target_pct"]  = incremental
-            if z["in_zone_now"] and incremental >= 2 * base_pos:
-                z["adjusted_target_pct"] = round(incremental / 2, 2)
+            if z["in_zone_now"] and z["total_target_pct"] >= 2 * base_pos and current_holding_pct < base_pos:
+                z["adjusted_target_pct"] = round(z["total_target_pct"] / 2, 2)
                 z["reserved_pct"]        = z["adjusted_target_pct"]
             else:
-                z["adjusted_target_pct"] = incremental
+                z["adjusted_target_pct"] = z["total_target_pct"]
                 z["reserved_pct"]        = 0
 
     # ── BUILD SELL ZONES ──────────────────────────────────────────────────────
