@@ -31,6 +31,7 @@ cp "$BACKEND_DIR/daily_scanner.py" "$BUILD_DIR/backend-package/"
 cp "$BACKEND_DIR/alpaca_client.py" "$BUILD_DIR/backend-package/"
 cp "$BACKEND_DIR/zones.py" "$BUILD_DIR/backend-package/"
 cp "$BACKEND_DIR/eod_scanner.py" "$BUILD_DIR/backend-package/"
+cp "$BACKEND_DIR/intraday_scanner.py" "$BUILD_DIR/backend-package/"
 
 echo "Stripping pyarrow (provided by Lambda Layer or unused)..."
 cd "$BUILD_DIR/backend-package"
