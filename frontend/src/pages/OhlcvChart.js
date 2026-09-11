@@ -48,17 +48,23 @@ function CandleChart({ ohlcv, intraday, cur, triggers, onChartClick }) {
     });
     candleRef.current = candleSeries;
 
-    candleSeries.setData(ohlcv.map(d => ({
+    // Build lookup map keyed by date string — used by tooltip instead of seriesData
+    const barMap = {};
+    const candles = ohlcv.map(d => ({
       time: d.date, open: d.open ?? d.close, high: d.high ?? d.close,
       low: d.low ?? d.close, close: d.close,
-    })).filter(d => d.close != null));
+    })).filter(d => d.close != null);
+    candles.forEach(d => { barMap[d.time] = d; });
+    candleSeries.setData(candles);
 
     // Append today's live daily bar from yfinance if not already in S3 data
     if (intraday?.length) {
       const b = intraday[0];
       const alreadyPresent = ohlcv.some(d => d.date === b.date);
       if (!alreadyPresent) {
-        candleSeries.update({ time: b.date, open: b.open, high: b.high, low: b.low, close: b.close });
+        const bar = { time: b.date, open: b.open, high: b.high, low: b.low, close: b.close };
+        candleSeries.update(bar);
+        barMap[b.date] = bar;
       }
     }
 
@@ -97,17 +103,20 @@ function CandleChart({ ohlcv, intraday, cur, triggers, onChartClick }) {
         if (tooltip) tooltip.style.display = "none";
         return;
       }
-      // Use first entry from seriesData map (candlestick series)
-      const data = param.seriesData.get(candleSeries) || [...param.seriesData.values()][0];
+      // Look up bar by time from our own map — works for all bars, not just the hovered one
+      const timeKey = typeof param.time === "object"
+        ? `${param.time.year}-${String(param.time.month).padStart(2,"0")}-${String(param.time.day).padStart(2,"0")}`
+        : param.time;
+      const data = barMap[timeKey];
       // Store the exact price under cursor via coordinateToPrice
       const hoverPrice = candleSeries.coordinateToPrice(param.point.y);
       if (hoverPrice != null && hoverPrice > 0) lastPriceRef.current = hoverPrice;
-      if (!data || data.open == null) { if (tooltip) tooltip.style.display = "none"; return; }
+      if (!data) { if (tooltip) tooltip.style.display = "none"; return; }
       const { open, high, low, close } = data;
       const up = close >= open;
       if (tooltip) {
         tooltip.innerHTML = [
-          `<span style="color:#999;font-size:10px">${typeof param.time === "object" ? `${param.time.year}-${String(param.time.month).padStart(2,"0")}-${String(param.time.day).padStart(2,"0")}` : param.time}</span>`,
+          `<span style="color:#999;font-size:10px">${timeKey}</span>`,
           `<span>O <b>${cur}${open?.toFixed(2)}</b></span>`,
           `<span>H <b>${cur}${high?.toFixed(2)}</b></span>`,
           `<span>L <b>${cur}${low?.toFixed(2)}</b></span>`,
