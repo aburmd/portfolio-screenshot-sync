@@ -1,12 +1,23 @@
 """Alpaca trading client — reads keys from SSM, wraps alpaca-py."""
 import os
 import boto3
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 
 REGION = os.environ.get("AWS_REGION", "us-west-1")
 _client_cache = {}
+ET = ZoneInfo("America/New_York")
+
+
+def _extended_hours_tif() -> TimeInForce:
+    """Pre-market (4:00–9:30 AM ET) → OPG. After-hours (4:00–8:00 PM ET) → DAY."""
+    now = datetime.now(ET).time()
+    if time(4, 0) <= now < time(9, 30):
+        return TimeInForce.OPG
+    return TimeInForce.DAY
 
 
 def _get_client(paper: bool = True) -> TradingClient:
@@ -20,7 +31,9 @@ def _get_client(paper: bool = True) -> TradingClient:
     api_secret = ssm.get_parameter(Name=f"{prefix}-secret", WithDecryption=True)["Parameter"]["Value"]
 
     client = TradingClient(api_key, api_secret, paper=paper)
-    _client_cache[key] = client
+    # Only cache paper client — live credentials may be rotated
+    if paper:
+        _client_cache[key] = client
     return client
 
 
@@ -52,7 +65,8 @@ def place_order(symbol: str, qty: float = None, side: str = "buy", order_type: s
     elif order_type == "limit" and limit_price:
         req = LimitOrderRequest(
             symbol=symbol.upper(), qty=qty, side=order_side,
-            time_in_force=TimeInForce.DAY, limit_price=limit_price,
+            time_in_force=_extended_hours_tif() if extended_hours else TimeInForce.DAY,
+            limit_price=limit_price,
             extended_hours=extended_hours
         )
     else:
