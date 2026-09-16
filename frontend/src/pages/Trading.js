@@ -248,7 +248,7 @@ export default function Trading({ user }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "#f0f0f0" }}>
-                  {["Symbol", "Side", "Type", "Qty / Amount", "Filled", "Price", "Status", "Submitted", ""].map(h => (
+                  {["Symbol", "Side", "Type", "TIF", "Qty / Amount", "Filled", "Price", "Status", "Submitted", ""].map(h => (
                     <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -259,6 +259,15 @@ export default function Trading({ user }) {
                     <td style={{ padding: "7px 10px", fontWeight: 600 }}>{o.symbol}</td>
                     <td style={{ padding: "7px 10px", color: o.side === "buy" ? "green" : "red", fontWeight: 600 }}>{o.side.toUpperCase()}</td>
                     <td style={{ padding: "7px 10px" }}>{o.type}</td>
+                    <td style={{ padding: "7px 10px", fontSize: 11 }}>
+                      <span style={{ display: "inline-block", padding: "2px 6px", borderRadius: 3,
+                        background: o.extended_hours ? "#fff8e1" : "#f0f0f0",
+                        color: o.extended_hours ? "#e65100" : "#555",
+                        border: `1px solid ${o.extended_hours ? "#ff9800" : "#ddd"}`,
+                        whiteSpace: "nowrap" }}>
+                        {o.extended_hours ? "\uD83C\uDF19 Ext" : ""}{o.time_in_force ? (o.extended_hours ? " \u00B7 " : "") + o.time_in_force.toUpperCase() : ""}
+                      </span>
+                    </td>
                     <td style={{ padding: "7px 10px" }}>{o.notional ? `$${o.notional}` : (o.qty || "—")}</td>
                     <td style={{ padding: "7px 10px" }}>{o.filled_qty > 0 ? o.filled_qty : "—"}</td>
                     <td style={{ padding: "7px 10px" }}>{o.filled_avg_price ? fmt(o.filled_avg_price) : (o.limit_price ? fmt(o.limit_price) : "market")}</td>

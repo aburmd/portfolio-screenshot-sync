@@ -108,6 +108,8 @@ def list_orders(paper: bool = True, limit: int = 20) -> list:
             "filled_avg_price": float(o.filled_avg_price) if o.filled_avg_price is not None else None,
             "limit_price": float(o.limit_price) if o.limit_price is not None else None,
             "notional": float(o.notional) if o.notional is not None else None,
+            "time_in_force": o.time_in_force.value if o.time_in_force is not None else None,
+            "extended_hours": getattr(o, "extended_hours", False) or False,
         }
         for o in orders
     ]
