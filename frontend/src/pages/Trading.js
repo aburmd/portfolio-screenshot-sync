@@ -10,7 +10,7 @@ export default function Trading({ user }) {
   const [account, setAccount] = useState(null);
   const [positions, setPositions] = useState([]);
   const [orders, setOrders] = useState([]);
-  const [form, setForm] = useState({ symbol: "", qty: "", amount: "", by: "qty", side: "buy", order_type: "market", limit_price: "" });
+  const [form, setForm] = useState({ symbol: "", qty: "", amount: "", by: "qty", side: "buy", order_type: "market", limit_price: "", extended_hours: false });
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [canceling, setCanceling] = useState(null);
@@ -52,10 +52,13 @@ export default function Trading({ user }) {
     if (byAmount && !form.amount) return setStatus("Amount required");
     if (!byAmount && !form.qty) return setStatus("Qty required");
     if (byAmount && form.order_type !== "market") return setStatus("Dollar amount only works with Market orders");
+    if (form.extended_hours && form.order_type !== "limit") return setStatus("Extended hours requires a Limit order with a limit price");
+    if (form.extended_hours && !form.limit_price) return setStatus("Extended hours requires a limit price");
     setStatus("Placing order...");
     const body = {
       symbol: form.symbol.toUpperCase(), side: form.side,
       order_type: form.order_type, paper,
+      extended_hours: form.extended_hours,
       ...(byAmount ? { notional: parseFloat(form.amount) } : { qty: parseFloat(form.qty) }),
       ...(form.order_type === "limit" && form.limit_price ? { limit_price: parseFloat(form.limit_price) } : {}),
     };
@@ -70,7 +73,7 @@ export default function Trading({ user }) {
     } else {
       const detail = byAmount ? `$${form.amount}` : `${res.qty} shares`;
       setStatus(`✅ Order placed: ${res.side} ${detail} of ${res.symbol} — status: ${res.status}`);
-      setForm(f => ({ ...f, symbol: "", qty: "", amount: "", limit_price: "", side: "buy" }));
+      setForm(f => ({ ...f, symbol: "", qty: "", amount: "", limit_price: "", side: "buy", extended_hours: false }));
       setTimeout(load, 1500);
     }
   };
@@ -162,7 +165,9 @@ export default function Trading({ user }) {
           )}
           <div>
             <div style={{ fontSize: 11, marginBottom: 4 }}>Type</div>
-            <select value={form.order_type} onChange={e => setForm(f => ({ ...f, order_type: e.target.value }))} style={{ padding: "6px 8px" }}>
+            <select value={form.order_type}
+              onChange={e => setForm(f => ({ ...f, order_type: e.target.value, extended_hours: e.target.value !== "limit" ? false : f.extended_hours }))}
+              style={{ padding: "6px 8px" }}>
               <option value="market">Market</option>
               <option value="limit">Limit</option>
             </select>
@@ -172,6 +177,18 @@ export default function Trading({ user }) {
               <div style={{ fontSize: 11, marginBottom: 4 }}>Limit Price</div>
               <input type="number" value={form.limit_price} onChange={e => setForm(f => ({ ...f, limit_price: e.target.value }))}
                 placeholder="0.00" style={{ width: 90, padding: "6px 8px" }} step="0.01" />
+            </div>
+          )}
+          {form.order_type === "limit" && (
+            <div style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                padding: "6px 10px", borderRadius: 4, border: `1px solid ${form.extended_hours ? "#ff9800" : "#ddd"}`,
+                background: form.extended_hours ? "#fff8e1" : "#fff", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
+                <input type="checkbox" checked={form.extended_hours}
+                  onChange={e => setForm(f => ({ ...f, extended_hours: e.target.checked }))}
+                  style={{ cursor: "pointer" }} />
+                🌙 Extended Hours
+              </label>
             </div>
           )}
           <button onClick={placeOrder}

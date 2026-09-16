@@ -3031,6 +3031,7 @@ async def trading_place_order(data: dict):
             limit_price=data.get("limit_price"),
             notional=float(data["notional"]) if data.get("notional") else None,
             paper=data.get("paper", True),
+            extended_hours=data.get("extended_hours", False),
         )
     except Exception as e:
         return {"error": str(e)}

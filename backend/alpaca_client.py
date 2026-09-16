@@ -37,9 +37,14 @@ def get_account(paper: bool = True) -> dict:
 
 
 def place_order(symbol: str, qty: float = None, side: str = "buy", order_type: str = "market",
-                limit_price: float = None, notional: float = None, paper: bool = True) -> dict:
+                limit_price: float = None, notional: float = None, paper: bool = True,
+                extended_hours: bool = False) -> dict:
     client = _get_client(paper)
     order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+
+    # Extended hours requires limit orders with time_in_force=day
+    if extended_hours and order_type != "limit":
+        raise ValueError("Extended hours trading requires a limit order with a limit price")
 
     if notional:
         req = MarketOrderRequest(symbol=symbol.upper(), notional=round(notional, 2),
@@ -47,7 +52,8 @@ def place_order(symbol: str, qty: float = None, side: str = "buy", order_type: s
     elif order_type == "limit" and limit_price:
         req = LimitOrderRequest(
             symbol=symbol.upper(), qty=qty, side=order_side,
-            time_in_force=TimeInForce.DAY, limit_price=limit_price
+            time_in_force=TimeInForce.DAY, limit_price=limit_price,
+            extended_hours=extended_hours
         )
     else:
         req = MarketOrderRequest(
