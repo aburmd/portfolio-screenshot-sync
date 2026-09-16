@@ -14,6 +14,7 @@ export default function Trading({ user }) {
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [canceling, setCanceling] = useState(null);
+  const [editing, setEditing] = useState(null);
 
   const switchMode = (toLive) => {
     if (toLive && !window.confirm("⚠️ Switch to LIVE trading?\n\nReal money will be used. Are you sure?")) return;
@@ -89,6 +90,26 @@ export default function Trading({ user }) {
     setTimeout(load, 800);
   };
 
+  const editOrder = async (o) => {
+    setEditing(o.id);
+    const res = await fetch(`${API_BASE}/trading/order/${o.id}?paper=${paper}`, { method: "DELETE" }).then(r => r.json());
+    if (res.error) { setStatus("❌ Could not cancel for edit: " + res.error); setEditing(null); return; }
+    setForm({
+      symbol: o.symbol,
+      side: o.side,
+      by: o.notional ? "amount" : "qty",
+      qty: o.qty ? String(o.qty) : "",
+      amount: o.notional ? String(o.notional) : "",
+      order_type: o.type,
+      limit_price: o.limit_price ? String(o.limit_price) : "",
+      extended_hours: o.extended_hours || false,
+    });
+    setEditing(null);
+    setStatus(`✏️ Editing ${o.symbol} — order cancelled. Modify values and resubmit.`);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    setTimeout(load, 800);
+  };
+
   const statusColor = { filled: "green", accepted: "#2196f3", pending_new: "#ff9800", canceled: "#999", rejected: "red", new: "#2196f3" };
 
   return (
@@ -131,7 +152,7 @@ export default function Trading({ user }) {
 
       {/* Order Form */}
       <div style={{ background: "#f9f9f9", border: "1px solid #ddd", borderRadius: 8, padding: 16, marginBottom: 20 }}>
-        <div style={{ fontWeight: 600, marginBottom: 12 }}>Place Order</div>
+        <div style={{ fontWeight: 600, marginBottom: 12 }}>{status?.startsWith('✏️') ? '✏️ Modify Order' : 'Place Order'}</div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <div>
             <div style={{ fontSize: 11, marginBottom: 4 }}>Symbol</div>
@@ -275,7 +296,13 @@ export default function Trading({ user }) {
                       <span style={{ color: statusColor[o.status] || "#333", fontWeight: 500 }}>{o.status}</span>
                     </td>
                     <td style={{ padding: "7px 10px", color: "#888", fontSize: 12 }}>{o.submitted_at?.slice(0, 16).replace("T", " ")}</td>
-                    <td style={{ padding: "7px 10px" }}>
+                    <td style={{ padding: "7px 10px", display: "flex", gap: 6 }}>
+                      {CANCELABLE.includes(o.status) && (
+                        <button onClick={() => editOrder(o)} disabled={editing === o.id}
+                          style={{ padding: "4px 10px", background: "#fff", color: "#1976d2", border: "1px solid #1976d2", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                          {editing === o.id ? "..." : "Edit"}
+                        </button>
+                      )}
                       {CANCELABLE.includes(o.status) && (
                         <button onClick={() => cancelOrder(o.id)} disabled={canceling === o.id}
                           style={{ padding: "4px 10px", background: "#fff", color: "#f44336", border: "1px solid #f44336", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
