@@ -70,11 +70,13 @@ export default function Trading({ user }) {
       let msg = res.error;
       try { const p = JSON.parse(msg); msg = p.message || msg; } catch {}
       setStatus("❌ " + msg);
-    } else {
-      const detail = byAmount ? `$${form.amount}` : `${res.qty} shares`;
-      setStatus(`✅ Order placed: ${res.side} ${detail} of ${res.symbol} — status: ${res.status}`);
+    } else if (res.id) {
+      const detail = byAmount ? `$${form.amount}` : `${form.qty} shares`;
+      setStatus(`✅ Order placed: ${form.side} ${detail} of ${form.symbol.toUpperCase()} — status: ${res.status || "accepted"}`);
       setForm(f => ({ ...f, symbol: "", qty: "", amount: "", limit_price: "", side: "buy", extended_hours: false }));
       setTimeout(load, 1500);
+    } else {
+      setStatus("❌ Unexpected response: " + JSON.stringify(res));
     }
   };
 
