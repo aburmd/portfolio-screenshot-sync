@@ -15,6 +15,22 @@ export default function Trading({ user }) {
   const [loading, setLoading] = useState(false);
   const [canceling, setCanceling] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [posSort, setPosSort] = useState({ key: null, dir: "asc" });
+
+  function sortPositions(rows) {
+    if (!posSort.key) return rows;
+    return [...rows].sort((a, b) => {
+      const av = a[posSort.key] ?? (posSort.dir === "asc" ? Infinity : -Infinity);
+      const bv = b[posSort.key] ?? (posSort.dir === "asc" ? Infinity : -Infinity);
+      if (av < bv) return posSort.dir === "asc" ? -1 : 1;
+      if (av > bv) return posSort.dir === "asc" ?  1 : -1;
+      return 0;
+    });
+  }
+
+  function togglePosSort(key) {
+    setPosSort(s => ({ key, dir: s.key === key && s.dir === "asc" ? "desc" : "asc" }));
+  }
 
   const switchMode = (toLive) => {
     if (toLive && !window.confirm("⚠️ Switch to LIVE trading?\n\nReal money will be used. Are you sure?")) return;
@@ -244,18 +260,48 @@ export default function Trading({ user }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "#f0f0f0" }}>
-                  {["Symbol", "Qty", "Avg Entry", "Current", "Market Value", "Unrealized P/L", "P/L %", ""].map(h => (
-                    <th key={h} style={{ padding: "8px 10px", textAlign: h === "Symbol" || h === "" ? "left" : "right", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
+                  {[
+                    { key: "symbol",        label: "Symbol" },
+                    { key: "qty",           label: "Qty" },
+                    { key: "avg_entry_price",label: "Avg Entry" },
+                    { key: "current_price", label: "Current" },
+                    { key: "lastday_price", label: "Prev Close" },
+                    { key: "change_today",  label: "Today %" },
+                    { key: "market_value",  label: "Mkt Value" },
+                    { key: "unrealized_pl", label: "Unreal P/L" },
+                    { key: "unrealized_plpc",label: "P/L %" },
+                    { key: null,            label: "" },
+                  ].map(({ key, label }) => (
+                    <th key={label} onClick={() => key && togglePosSort(key)}
+                      style={{ padding: "8px 10px", textAlign: label === "Symbol" || !label ? "left" : "right",
+                        fontWeight: 600, whiteSpace: "nowrap", cursor: key ? "pointer" : "default",
+                        userSelect: "none",
+                        color: posSort.key === key ? "#1976d2" : "#333" }}>
+                      {label}{posSort.key === key ? (posSort.dir === "asc" ? " ↑" : " ↓") : ""}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {positions.map(p => (
+                {sortPositions(positions).map(p => {
+                  const todayPl = p.change_today != null && p.market_value != null
+                    ? p.market_value * (p.change_today / 100) / (1 + p.change_today / 100)
+                    : null;
+                  return (
                   <tr key={p.symbol} style={{ borderBottom: "1px solid #eee" }}>
                     <td style={{ padding: "7px 10px", fontWeight: 600 }}>{p.symbol}</td>
                     <td style={{ padding: "7px 10px", textAlign: "right" }}>{p.qty}</td>
                     <td style={{ padding: "7px 10px", textAlign: "right" }}>{fmt(p.avg_entry_price)}</td>
                     <td style={{ padding: "7px 10px", textAlign: "right" }}>{fmt(p.current_price)}</td>
+                    <td style={{ padding: "7px 10px", textAlign: "right", color: "#888" }}>{fmt(p.lastday_price)}</td>
+                    <td style={{ padding: "7px 10px", textAlign: "right" }}>
+                      {p.change_today != null
+                        ? <span style={{ color: p.change_today >= 0 ? "green" : "red", fontWeight: 600 }}>
+                            {p.change_today >= 0 ? "+" : ""}{p.change_today.toFixed(2)}%
+                            {todayPl != null && <span style={{ fontSize: 11, marginLeft: 4, opacity: 0.8 }}>({todayPl >= 0 ? "+" : ""}{fmt(todayPl)})</span>}
+                          </span>
+                        : "—"}
+                    </td>
                     <td style={{ padding: "7px 10px", textAlign: "right" }}>{fmt(p.market_value)}</td>
                     <td style={{ padding: "7px 10px", textAlign: "right", color: p.unrealized_pl >= 0 ? "green" : "red" }}>{fmt(p.unrealized_pl)}</td>
                     <td style={{ padding: "7px 10px", textAlign: "right" }}>{pct(p.unrealized_plpc)}</td>
@@ -266,7 +312,8 @@ export default function Trading({ user }) {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

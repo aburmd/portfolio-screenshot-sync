@@ -132,6 +132,8 @@ def get_positions(paper: bool = True) -> list:
             "market_value": float(p.market_value) if p.market_value else None,
             "unrealized_pl": float(p.unrealized_pl) if p.unrealized_pl else None,
             "unrealized_plpc": round(float(p.unrealized_plpc) * 100, 2) if p.unrealized_plpc else None,
+            "lastday_price": float(p.lastday_price) if p.lastday_price else None,
+            "change_today": round(float(p.change_today) * 100, 2) if p.change_today else None,
         }
         for p in positions
     ]
