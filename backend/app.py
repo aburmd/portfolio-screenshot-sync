@@ -3064,6 +3064,80 @@ async def trading_positions(paper: bool = True):
         return {"error": str(e)}
 
 
+@app.get("/trading/positions/export-csv")
+async def export_positions_csv(paper: bool = False):
+    """Export Alpaca positions as a Fidelity-compatible CSV for import into portfolio apps."""
+    import csv, io
+    from fastapi.responses import StreamingResponse
+    from alpaca_client import _get_client
+
+    client = _get_client(paper)
+    positions = client.get_all_positions()
+
+    # Compute total portfolio value for percent-of-account
+    total_value = sum(float(p.market_value) for p in positions if p.market_value)
+
+    account_label = "Alpaca-Paper" if paper else "Alpaca-Live"
+    account_name  = "Alpaca Paper Trading" if paper else "Alpaca Trading"
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "Account number", "Account name", "Symbol", "Description",
+        "Quantity", "Last price", "Last price change", "Current value",
+        "Today's gain/loss dollar", "Today's gain/loss percent",
+        "Total gain/loss dollar", "Total gain/loss percent",
+        "Percent of account", "Cost basis total", "Average cost basis", "Type",
+    ])
+
+    for p in sorted(positions, key=lambda x: x.symbol):
+        qty           = float(p.qty)
+        cur_price     = float(p.current_price)  if p.current_price     else 0.0
+        last_price    = float(p.lastday_price)  if p.lastday_price     else cur_price
+        mkt_value     = float(p.market_value)   if p.market_value      else 0.0
+        cost_basis    = float(p.cost_basis)     if p.cost_basis        else 0.0
+        avg_cost      = float(p.avg_entry_price)
+        unreal_pl     = float(p.unrealized_pl)  if p.unrealized_pl     else 0.0
+        unreal_plpc   = float(p.unrealized_plpc) if p.unrealized_plpc  else 0.0
+        change_today  = float(p.change_today)   if p.change_today      else 0.0
+
+        price_change      = cur_price - last_price
+        today_gl_dollar   = change_today * last_price * qty
+        today_gl_pct      = change_today * 100
+        pct_of_account    = (mkt_value / total_value * 100) if total_value else 0.0
+
+        def fmt_dollar(v): return f"${v:,.2f} "
+        def fmt_pct(v):    return f"{v:.2f}%"
+
+        writer.writerow([
+            account_label,
+            account_name,
+            p.symbol,
+            p.symbol,  # no full name from Alpaca positions API
+            round(qty, 6),
+            fmt_dollar(cur_price),
+            fmt_dollar(price_change) if price_change >= 0 else f"({abs(price_change):,.2f})",
+            fmt_dollar(mkt_value),
+            fmt_dollar(today_gl_dollar) if today_gl_dollar >= 0 else f"(${abs(today_gl_dollar):,.2f})",
+            fmt_pct(today_gl_pct),
+            fmt_dollar(unreal_pl) if unreal_pl >= 0 else f"(${abs(unreal_pl):,.2f})",
+            fmt_pct(unreal_plpc * 100),
+            fmt_pct(pct_of_account),
+            fmt_dollar(cost_basis),
+            fmt_dollar(avg_cost),
+            "Cash",
+        ])
+
+    buf.seek(0)
+    from datetime import date
+    filename = f"Portfolio_Positions-{date.today().strftime('%b-%d-%Y')}-alpaca.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ── Zones / Position Plans / Saved Charts ────────────────────────────────────
 
 @app.get("/research/zones/{market}/{symbol}")

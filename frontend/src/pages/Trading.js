@@ -227,7 +227,19 @@ export default function Trading({ user }) {
       {/* Positions */}
       {positions.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>Open Positions ({positions.length})</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+            <div style={{ fontWeight: 600 }}>Open Positions ({positions.length})</div>
+            <button
+              onClick={() => {
+                const url = `${API_BASE}/trading/positions/export-csv?paper=${paper}`;
+                const a = document.createElement("a");
+                a.href = url; a.click();
+              }}
+              style={{ padding: "4px 12px", background: "#1565c0", color: "#fff", border: "none",
+                borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+              ⬇ Export Fidelity CSV
+            </button>
+          </div>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
