@@ -3074,8 +3074,9 @@ async def export_positions_csv(paper: bool = False):
     client = _get_client(paper)
     positions = client.get_all_positions()
 
-    # Compute total portfolio value for percent-of-account
-    total_value = sum(float(p.market_value) for p in positions if p.market_value)
+    # Compute total portfolio value for percent-of-account (positions + cash)
+    cash         = float(client.get_account().cash)
+    total_value  = sum(float(p.market_value) for p in positions if p.market_value) + cash
 
     account_label = "Alpaca-Paper" if paper else "Alpaca-Live"
     account_name  = "Alpaca Paper Trading" if paper else "Alpaca Trading"
@@ -3129,10 +3130,27 @@ async def export_positions_csv(paper: bool = False):
         ])
 
     buf.seek(0)
+    positions_csv = buf.getvalue()
+    # Split header from position rows, insert SPAXX** cash row right after header
+    lines = positions_csv.split("\n", 1)
+    header_line = lines[0] + "\n"
+    positions_lines = lines[1] if len(lines) > 1 else ""
+
+    cash_pct = (cash / total_value * 100) if total_value else 0.0
+    cash_buf = io.StringIO()
+    cash_writer = csv.writer(cash_buf)
+    cash_writer.writerow([
+        account_label, account_name, "SPAXX**", "HELD IN MONEY MARKET",
+        "", "", "", f"${cash:,.2f} ",
+        "", "", "", "",
+        fmt_pct(cash_pct), "", "", "Cash",
+    ])
+    combined = header_line + cash_buf.getvalue() + positions_lines
+
     from datetime import date
     filename = f"Portfolio_Positions-{date.today().strftime('%b-%d-%Y')}-alpaca.csv"
     return StreamingResponse(
-        iter([buf.getvalue()]),
+        iter([combined]),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
