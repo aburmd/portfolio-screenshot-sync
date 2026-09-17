@@ -1,9 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { createChart, CandlestickSeries, HistogramSeries, CrosshairMode, LineStyle } from "lightweight-charts";
+import { createChart, CandlestickSeries, HistogramSeries, LineSeries, CrosshairMode, LineStyle } from "lightweight-charts";
 import { fetchOhlcv, fetchIntraday, addTrigger, listTriggers, deleteTrigger } from "../services/api";
 import { fetchAuthSession, fetchUserAttributes } from "aws-amplify/auth";
 
 const RANGES = ["6M", "1Y", "2Y", "5Y", "All"];
+
+const MA_CONFIGS = [
+  { key: "ma50",  color: "#1976d2", label: "MA50"  },
+  { key: "ma150", color: "#f57c00", label: "MA150" },
+  { key: "ma200", color: "#7b1fa2", label: "MA200" },
+];
 
 function filterByRange(rows, range) {
   if (!rows?.length || range === "All") return rows || [];
@@ -14,7 +20,7 @@ function filterByRange(rows, range) {
   return rows.filter(r => r.date >= cutoffStr);
 }
 
-function CandleChart({ ohlcv, intraday, cur, triggers, onChartClick }) {
+function CandleChart({ ohlcv, intraday, cur, triggers, onChartClick, visibleMAs }) {
   const containerRef    = useRef(null);
   const chartRef        = useRef(null);
   const candleRef       = useRef(null);
@@ -57,7 +63,20 @@ function CandleChart({ ohlcv, intraday, cur, triggers, onChartClick }) {
     candles.forEach(d => { barMap[d.time] = d; });
     candleSeries.setData(candles);
 
-    // Append today's live daily bar from yfinance if not already in S3 data
+    // MA lines from stored S3 values
+    MA_CONFIGS.forEach(({ key, color, label }) => {
+      if (!visibleMAs.has(key)) return;
+      const maData = ohlcv
+        .filter(d => d[key] && parseFloat(d[key]) > 0)
+        .map(d => ({ time: d.date, value: parseFloat(d[key]) }));
+      if (!maData.length) return;
+      const maSeries = chart.addSeries(LineSeries, {
+        color, lineWidth: 1.5, priceScaleId: "left",
+        lastValueVisible: true, priceLineVisible: false, title: label,
+      });
+      maSeries.setData(maData);
+    });
+
     if (intraday?.length) {
       const b = intraday[0];
       const alreadyPresent = ohlcv.some(d => d.date === b.date);
@@ -381,6 +400,7 @@ export default function OhlcvChart() {
   const [isAdmin,       setIsAdmin]       = useState(false);
   const [intradayBars,  setIntradayBars]  = useState([]);
   const [intradayLoad,  setIntradayLoad]  = useState(false);
+  const [visibleMAs,    setVisibleMAs]    = useState(new Set(["ma50", "ma150", "ma200"]));
 
   // Fetch current user id and role once
   useEffect(() => {
@@ -423,6 +443,14 @@ export default function OhlcvChart() {
     } catch (e) { setError(e.message); }
     setLoading(false);
   };
+
+  function toggleMA(key) {
+    setVisibleMAs(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
 
   const cur      = market === "IN" ? "₹" : "$";
   const filtered = filterByRange(data?.rows, range);
@@ -497,6 +525,18 @@ export default function OhlcvChart() {
               </span>
             )}
 
+            {/* MA toggles */}
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              {MA_CONFIGS.map(({ key, color, label }) => (
+                <button key={key} onClick={() => toggleMA(key)} style={{
+                  padding: "3px 10px", fontSize: 12, borderRadius: 4, cursor: "pointer",
+                  background: visibleMAs.has(key) ? color : "#fff",
+                  color: visibleMAs.has(key) ? "#fff" : "#999",
+                  border: `1px solid ${color}`,
+                }}>{label}</button>
+              ))}
+            </div>
+
             {/* Range selector */}
             <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
               {RANGES.map(r => (
@@ -524,6 +564,7 @@ export default function OhlcvChart() {
                 cur={cur}
                 triggers={triggers}
                 onChartClick={setClickedPrice}
+                visibleMAs={visibleMAs}
               />
             : <p style={{ color: "#999" }}>No data for selected range.</p>
           }

@@ -3865,20 +3865,33 @@ def _compute_screener_stats(symbol: str):
     days_from_low  = (last_date - dates_52w.iloc[low_idx  - dates_52w.index[0]]).days
     price = float(closes.iloc[-1])
 
+    ma50v  = ma(50)
+    ma150v = ma(150)
+    ma200v = ma(200)
+
+    def ma_diff(a, b):
+        """% diff between two MA values: (a - b) / b * 100, None if either missing."""
+        if a is None or b is None:
+            return None
+        return round((a - b) / b * 100, 2)
+
     return {
-        "price":          price,
-        "ma50":           ma(50),
-        "ma150":          ma(150),
-        "ma200":          ma(200),
-        "ma50_dir":       ma_direction(50),
-        "ma150_dir":      ma_direction(150),
-        "ma200_dir":      ma_direction(200),
-        "high_52w":       high_52w,
-        "low_52w":        low_52w,
-        "days_from_high": days_from_high,
-        "days_from_low":  days_from_low,
-        "pct_from_high":  round((price - high_52w) / high_52w * 100, 2),
-        "pct_from_low":   round((price - low_52w)  / low_52w  * 100, 2),
+        "price":            price,
+        "ma50":             ma50v,
+        "ma150":            ma150v,
+        "ma200":            ma200v,
+        "ma50_dir":         ma_direction(50),
+        "ma150_dir":        ma_direction(150),
+        "ma200_dir":        ma_direction(200),
+        "high_52w":         high_52w,
+        "low_52w":          low_52w,
+        "days_from_high":   days_from_high,
+        "days_from_low":    days_from_low,
+        "pct_from_high":    round((price - high_52w) / high_52w * 100, 2),
+        "pct_from_low":     round((price - low_52w)  / low_52w  * 100, 2),
+        "ma200_vs_ma150":   ma_diff(ma200v, ma150v),
+        "ma200_vs_ma50":    ma_diff(ma200v, ma50v),
+        "ma150_vs_ma50":    ma_diff(ma150v, ma50v),
     }
 
 
@@ -3896,7 +3909,7 @@ def screener_daily():
     for delta in range(0, 10):
         check_date = (date.today() - timedelta(days=delta)).isoformat()
         resp = ranking_table.query(
-            KeyConditionExpression=Key("date").eq(check_date),
+            KeyConditionExpression=Key("pk").eq(check_date),
             FilterExpression=Attr("candidate_status").eq("SELECTED"),
             Limit=1,
         )
@@ -3908,7 +3921,7 @@ def screener_daily():
     # Fetch all SELECTED items for data_date (paginate)
     items = []
     kwargs = {
-        "KeyConditionExpression": Key("date").eq(data_date),
+        "KeyConditionExpression": Key("pk").eq(data_date),
         "FilterExpression": Attr("candidate_status").eq("SELECTED"),
     }
     while True:
@@ -3919,11 +3932,10 @@ def screener_daily():
         kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
 
     # Parallel S3 reads
-    symbol_meta = {item["symbol"]: item for item in items}
     results = []
 
     def enrich(item):
-        sym = item["symbol"]
+        sym = item["sk"]  # sk = ticker symbol
         stats = _compute_screener_stats(sym)
         if stats is None:
             return None
@@ -3936,7 +3948,7 @@ def screener_daily():
         }
 
     with ThreadPoolExecutor(max_workers=10) as pool:
-        futures = {pool.submit(enrich, item): item["symbol"] for item in items}
+        futures = {pool.submit(enrich, item): item["sk"] for item in items}
         for fut in as_completed(futures):
             r = fut.result()
             if r:

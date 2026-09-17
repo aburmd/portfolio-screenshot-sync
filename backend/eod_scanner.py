@@ -32,7 +32,7 @@ DAILY_CAP      = 5000
 ddb = boto3.resource("dynamodb", region_name=REGION)
 s3  = boto3.client("s3", region_name=REGION)
 
-FIELDNAMES = ["date", "open", "high", "low", "close", "volume"]
+FIELDNAMES = ["date", "open", "high", "low", "close", "volume", "ma50", "ma150", "ma200"]
 
 # Long-term AGG lookback trading-day offsets
 AGG_LOOKBACKS = {
@@ -40,6 +40,15 @@ AGG_LOOKBACKS = {
     "close_1m": 22, "close_3m": 66, "close_6m": 132,
     "close_1y": 252, "close_3y": 756, "close_5y": 1260,
 }
+
+
+def _compute_mas(rows):
+    """Compute MA50/150/200 for all rows in-place. Requires float closes."""
+    closes = [float(r["close"]) for r in rows]
+    for i, r in enumerate(rows):
+        r["ma50"]  = round(sum(closes[i-49:i+1])  / 50,  2) if i >= 49  else ""
+        r["ma150"] = round(sum(closes[i-149:i+1]) / 150, 2) if i >= 149 else ""
+        r["ma200"] = round(sum(closes[i-199:i+1]) / 200, 2) if i >= 199 else ""
 
 
 # ── S3 helpers ────────────────────────────────────────────────────────────────
@@ -153,6 +162,7 @@ def _process_symbol(market, symbol):
     if len(rows) > DAILY_CAP:
         rows = rows[-DAILY_CAP:]
 
+    _compute_mas(rows)
     _write_s3(market, symbol, rows)
     _update_agg(market, symbol, rows)
     return True
