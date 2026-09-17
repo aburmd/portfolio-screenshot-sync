@@ -3105,10 +3105,38 @@ async def get_ohlcv(market: str, symbol: str):
     item = resp.get("Item")
     known = item is not None and item.get("daily_enabled")
 
-    # ── Step 2a: known → read S3 ──────────────────────────────────────────────
+    # ── Step 2a: known → read S3, then backfill any gap up to yesterday ────────
     if known:
         rows = _read_s3(mkt, sym)
         if rows:
+            from datetime import date, timedelta
+            last_date = rows[-1]["date"]  # e.g. "2026-09-04"
+            yesterday = (date.today() - timedelta(days=1)).isoformat()
+            if last_date < yesterday:
+                # Gap detected — fetch missing bars from yfinance
+                yf_sym = f"{sym}.NS" if mkt == "IN" else sym
+                try:
+                    hist = yf.Ticker(yf_sym).history(start=last_date, end=date.today().isoformat())
+                    if hist is not None and not hist.empty:
+                        existing_dates = {r["date"] for r in rows}
+                        for idx, row in hist.iterrows():
+                            d = idx.strftime("%Y-%m-%d")
+                            if d not in existing_dates and d <= yesterday:
+                                rows.append({
+                                    "date":   d,
+                                    "open":   round(float(row["Open"]),   2),
+                                    "high":   round(float(row["High"]),   2),
+                                    "low":    round(float(row["Low"]),    2),
+                                    "close":  round(float(row["Close"]),  2),
+                                    "volume": int(row["Volume"]),
+                                })
+                        rows.sort(key=lambda r: r["date"])
+                        if len(rows) > DAILY_CAP:
+                            rows = rows[-DAILY_CAP:]
+                        _write_s3(mkt, sym, rows)
+                        _update_agg(mkt, sym, rows)
+                except Exception as e:
+                    print(f"Backfill gap failed for {sym}: {e}")
             return {"symbol": sym, "market": mkt, "rows": rows, "source": "s3"}
         # Known in DDB but S3 file missing (edge case) — fall through to fetch
 
