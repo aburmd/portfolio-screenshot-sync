@@ -49,6 +49,7 @@ UNIVERSE_TABLE       = os.environ.get("UNIVERSE_TABLE",       "portfolio-univers
 TRIGGERS_TABLE       = os.environ.get("TRIGGERS_TABLE",       "portfolio-triggers-dev")
 SUBSCRIPTIONS_TABLE  = os.environ.get("SUBSCRIPTIONS_TABLE",  "portfolio-subscriptions-dev")
 PAPER_RANKING_TABLE  = os.environ.get("PAPER_RANKING_TABLE",   "paper_daily_ranking")
+TRADE_LOTS_TABLE     = os.environ.get("TRADE_LOTS_TABLE",      "portfolio-trade-lots-dev")
 
 s3 = boto3.client("s3", region_name=REGION)
 ddb = boto3.resource("dynamodb", region_name=REGION)
@@ -3023,10 +3024,11 @@ async def trading_account(paper: bool = True):
 
 
 @app.post("/trading/order")
-async def trading_place_order(data: dict):
+async def trading_place_order(data: dict, request: Request):
     try:
         from alpaca_client import place_order
-        return place_order(
+        from datetime import datetime, timezone
+        result = place_order(
             symbol=data["symbol"],
             qty=float(data["qty"]) if data.get("qty") is not None else None,
             side=data["side"],
@@ -3036,6 +3038,34 @@ async def trading_place_order(data: dict):
             paper=data.get("paper", True),
             extended_hours=data.get("extended_hours", False),
         )
+        # Store lot record in DDB (best-effort — don't fail the order if this fails)
+        if result.get("id") and not result.get("error"):
+            try:
+                claims = get_claims(request)
+                user_id = claims.get("sub", "unknown") if claims else "unknown"
+                ts = datetime.now(timezone.utc).isoformat()
+                sk = f"{data['symbol']}#{ts}#{result['id'][:8]}"
+                lot_item = {
+                    "user_id":    user_id,
+                    "sk":         sk,
+                    "order_id":   result["id"],
+                    "symbol":     data["symbol"].upper(),
+                    "side":       data["side"],
+                    "order_type": data.get("order_type", "market"),
+                    "qty":        str(data["qty"]) if data.get("qty") else None,
+                    "notional":   str(data["notional"]) if data.get("notional") else None,
+                    "limit_price":str(data["limit_price"]) if data.get("limit_price") else None,
+                    "paper":      str(data.get("paper", True)),
+                    "status":     result.get("status", "pending"),
+                    "submitted_at": ts,
+                    "filled_at":  None,
+                    "fill_price": None,
+                    "filled_qty": None,
+                }
+                ddb.Table(TRADE_LOTS_TABLE).put_item(Item={k: v for k, v in lot_item.items() if v is not None})
+            except Exception as lot_err:
+                print(f"Lot record write failed (non-fatal): {lot_err}")
+        return result
     except Exception as e:
         return {"error": str(e)}
 
@@ -3063,6 +3093,75 @@ async def trading_positions(paper: bool = True):
     try:
         from alpaca_client import get_positions
         return get_positions(paper=paper)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/trading/lots/{symbol}")
+async def trading_lots(symbol: str, request: Request, paper: bool = True):
+    """Return our own stored lot records for a symbol, enriched with current price."""
+    try:
+        claims = get_claims(request)
+        user_id = claims.get("sub", "") if claims else ""
+        if not user_id:
+            return {"error": "Unauthorized"}
+
+        table = ddb.Table(TRADE_LOTS_TABLE)
+        resp = table.query(
+            KeyConditionExpression=Key("user_id").eq(user_id)
+                & Key("sk").begins_with(symbol.upper() + "#"),
+        )
+        items = resp.get("Items", [])
+
+        # Get current price from Alpaca position
+        current_price = None
+        try:
+            from alpaca_client import _get_client
+            pos = _get_client(paper).get_open_position(symbol.upper())
+            current_price = float(pos.current_price) if pos.current_price else None
+        except Exception:
+            pass
+
+        lots = []
+        for item in sorted(items, key=lambda x: x["submitted_at"]):
+            qty = float(item["filled_qty"]) if item.get("filled_qty") else \
+                  float(item["qty"]) if item.get("qty") else None
+            fill_price = float(item["fill_price"]) if item.get("fill_price") else \
+                         float(item["limit_price"]) if item.get("limit_price") else None
+            cost = round(qty * fill_price, 2) if qty and fill_price else None
+            cur_val = round(qty * current_price, 2) if qty and current_price else None
+            pl = round(cur_val - cost, 2) if cur_val is not None and cost else None
+            plpc = round(pl / cost * 100, 2) if pl is not None and cost else None
+
+            # Days held + long-term flag
+            from datetime import date
+            submitted = item.get("filled_at") or item.get("submitted_at", "")
+            try:
+                held_days = (date.today() - date.fromisoformat(submitted[:10])).days
+            except Exception:
+                held_days = None
+            days_to_lt = max(0, 366 - held_days) if held_days is not None else None
+
+            lots.append({
+                "order_id":     item.get("order_id"),
+                "side":         item.get("side"),
+                "submitted_at": submitted[:10] if submitted else None,
+                "filled_at":    item.get("filled_at", "")[:10] if item.get("filled_at") else None,
+                "status":       item.get("status"),
+                "order_type":   item.get("order_type"),
+                "qty":          qty,
+                "fill_price":   fill_price,
+                "cost_basis":   cost,
+                "current_price":current_price,
+                "cur_value":    cur_val,
+                "unrealized_pl":    pl,
+                "unrealized_plpc":  plpc,
+                "held_days":    held_days,
+                "days_to_lt":   days_to_lt,
+                "is_long_term": held_days >= 366 if held_days is not None else None,
+                "paper":        item.get("paper") == "True",
+            })
+        return lots
     except Exception as e:
         return {"error": str(e)}
 

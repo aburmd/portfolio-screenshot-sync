@@ -137,3 +137,49 @@ def get_positions(paper: bool = True) -> list:
         }
         for p in positions
     ]
+
+
+def get_lots(symbol: str, paper: bool = True) -> list:
+    """Return filled BUY orders for symbol as lots, enriched with current price P/L."""
+    from alpaca.trading.requests import GetOrdersRequest
+    from alpaca.trading.enums import QueryOrderStatus
+    client = _get_client(paper)
+
+    # Get current price from position
+    current_price = None
+    try:
+        pos = client.get_open_position(symbol.upper())
+        current_price = float(pos.current_price) if pos.current_price else None
+    except Exception:
+        pass
+
+    req = GetOrdersRequest(status=QueryOrderStatus.CLOSED, symbols=[symbol.upper()], limit=500)
+    orders = client.get_orders(req)
+
+    lots = []
+    for o in orders:
+        if o.side.value != "buy" or not o.filled_qty or float(o.filled_qty) <= 0:
+            continue
+        qty = float(o.filled_qty)
+        price = float(o.filled_avg_price) if o.filled_avg_price else None
+        if not price:
+            continue
+        cost = qty * price
+        cur_val = qty * current_price if current_price else None
+        pl = cur_val - cost if cur_val is not None else None
+        plpc = round(pl / cost * 100, 2) if pl is not None and cost > 0 else None
+        lots.append({
+            "order_id":    str(o.id),
+            "filled_at":   str(o.filled_at)[:10] if o.filled_at else str(o.submitted_at)[:10],
+            "qty":         qty,
+            "fill_price":  round(price, 2),
+            "cost_basis":  round(cost, 2),
+            "current_price": current_price,
+            "cur_value":   round(cur_val, 2) if cur_val is not None else None,
+            "unrealized_pl":   round(pl, 2) if pl is not None else None,
+            "unrealized_plpc": plpc,
+        })
+
+    # Sort oldest first
+    lots.sort(key=lambda x: x["filled_at"])
+    return lots

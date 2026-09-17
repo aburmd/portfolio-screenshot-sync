@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { API_BASE } from "../services/api";
+import { API_BASE, fetchLots } from "../services/api";
 
 const fmt = (n, prefix = "$") => n != null ? `${prefix}${Number(n).toFixed(2)}` : "—";
 const pct = (n) => n != null ? <span style={{ color: n >= 0 ? "green" : "red" }}>{n >= 0 ? "+" : ""}{n.toFixed(2)}%</span> : "—";
@@ -16,6 +16,29 @@ export default function Trading({ user }) {
   const [canceling, setCanceling] = useState(null);
   const [editing, setEditing] = useState(null);
   const [posSort, setPosSort] = useState({ key: null, dir: "asc" });
+  const [expanded, setExpanded] = useState({});   // symbol → true/false
+  const [lots, setLots]         = useState({});   // symbol → array
+  const [lotsLoading, setLotsLoading] = useState({});
+
+  async function toggleExpand(symbol) {
+    if (expanded[symbol]) {
+      setExpanded(e => ({ ...e, [symbol]: false }));
+      return;
+    }
+    setExpanded(e => ({ ...e, [symbol]: true }));
+    if (lots[symbol]) return; // already loaded
+    setLotsLoading(l => ({ ...l, [symbol]: true }));
+    try {
+      const data = await fetchLots(symbol, paper);
+      setLots(l => ({ ...l, [symbol]: Array.isArray(data) ? data : [] }));
+    } catch (_) {
+      setLots(l => ({ ...l, [symbol]: [] }));
+    }
+    setLotsLoading(l => ({ ...l, [symbol]: false }));
+  }
+
+  function sellLot(symbol, lot) {}
+
 
   function sortPositions(rows) {
     if (!posSort.key) return rows;
@@ -287,31 +310,89 @@ export default function Trading({ user }) {
                   const todayPl = p.change_today != null && p.market_value != null
                     ? p.market_value * (p.change_today / 100) / (1 + p.change_today / 100)
                     : null;
+                  const isExpanded = expanded[p.symbol];
+                  const symLots = lots[p.symbol] || [];
+                  const isLoadingLots = lotsLoading[p.symbol];
                   return (
-                  <tr key={p.symbol} style={{ borderBottom: "1px solid #eee" }}>
-                    <td style={{ padding: "7px 10px", fontWeight: 600 }}>{p.symbol}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right" }}>{p.qty}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right" }}>{fmt(p.avg_entry_price)}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right" }}>{fmt(p.current_price)}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right", color: "#888" }}>{fmt(p.lastday_price)}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right" }}>
-                      {p.change_today != null
-                        ? <span style={{ color: p.change_today >= 0 ? "green" : "red", fontWeight: 600 }}>
-                            {p.change_today >= 0 ? "+" : ""}{p.change_today.toFixed(2)}%
-                            {todayPl != null && <span style={{ fontSize: 11, marginLeft: 4, opacity: 0.8 }}>({todayPl >= 0 ? "+" : ""}{fmt(todayPl)})</span>}
-                          </span>
-                        : "—"}
-                    </td>
-                    <td style={{ padding: "7px 10px", textAlign: "right" }}>{fmt(p.market_value)}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right", color: p.unrealized_pl >= 0 ? "green" : "red" }}>{fmt(p.unrealized_pl)}</td>
-                    <td style={{ padding: "7px 10px", textAlign: "right" }}>{pct(p.unrealized_plpc)}</td>
-                    <td style={{ padding: "7px 10px" }}>
-                      <button onClick={() => sellPosition(p)}
-                        style={{ padding: "4px 12px", background: "#f44336", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
-                        Sell
-                      </button>
-                    </td>
-                  </tr>
+                  <React.Fragment key={p.symbol}>
+                    <tr style={{ borderBottom: isExpanded ? "none" : "1px solid #eee" }}>
+                      <td style={{ padding: "7px 10px", fontWeight: 600 }}>
+                        <button onClick={() => toggleExpand(p.symbol)} style={{
+                          background: "none", border: "none", cursor: "pointer",
+                          fontSize: 12, marginRight: 4, color: "#1976d2", padding: 0,
+                        }}>{isExpanded ? "▼" : "▶"}</button>
+                        {p.symbol}
+                      </td>
+                      <td style={{ padding: "7px 10px", textAlign: "right" }}>{p.qty}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right" }}>{fmt(p.avg_entry_price)}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right" }}>{fmt(p.current_price)}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", color: "#888" }}>{fmt(p.lastday_price)}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right" }}>
+                        {p.change_today != null
+                          ? <span style={{ color: p.change_today >= 0 ? "green" : "red", fontWeight: 600 }}>
+                              {p.change_today >= 0 ? "+" : ""}{p.change_today.toFixed(2)}%
+                              {todayPl != null && <span style={{ fontSize: 11, marginLeft: 4, opacity: 0.8 }}>({todayPl >= 0 ? "+" : ""}{fmt(todayPl)})</span>}
+                            </span>
+                          : "—"}
+                      </td>
+                      <td style={{ padding: "7px 10px", textAlign: "right" }}>{fmt(p.market_value)}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right", color: p.unrealized_pl >= 0 ? "green" : "red" }}>{fmt(p.unrealized_pl)}</td>
+                      <td style={{ padding: "7px 10px", textAlign: "right" }}>{pct(p.unrealized_plpc)}</td>
+                      <td style={{ padding: "7px 10px" }}>
+                        <button onClick={() => sellPosition(p)}
+                          style={{ padding: "4px 12px", background: "#f44336", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                          Sell All
+                        </button>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr>
+                        <td colSpan={10} style={{ padding: 0, background: "#fafafa", borderBottom: "1px solid #eee" }}>
+                          {isLoadingLots
+                            ? <div style={{ padding: "10px 24px", fontSize: 12, color: "#888" }}>Loading lots…</div>
+                            : symLots.length === 0
+                              ? <div style={{ padding: "10px 24px", fontSize: 12, color: "#888" }}>No filled buy orders found.</div>
+                              : <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                                  <thead>
+                                    <tr style={{ background: "#f0f4ff" }}>
+                                      {["Date", "Side", "Qty", "Fill Price", "Cost Basis", "Cur Value", "Unreal P/L", "P/L %", "Held", "Tax Status"].map(h => (
+                                        <th key={h} style={{ padding: "5px 10px", textAlign: h === "Date" || h === "Side" || h === "Tax Status" ? "left" : "right",
+                                          fontWeight: 600, color: "#555", borderBottom: "1px solid #e0e0e0" }}>{h}</th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {symLots.map((lot, i) => (
+                                      <tr key={lot.order_id} style={{ background: i % 2 === 0 ? "#fff" : "#f9f9f9" }}>
+                                        <td style={{ padding: "5px 10px" }}>{lot.submitted_at}</td>
+                                        <td style={{ padding: "5px 10px", color: lot.side === "buy" ? "green" : "red", fontWeight: 600 }}>{lot.side?.toUpperCase()}</td>
+                                        <td style={{ padding: "5px 10px", textAlign: "right" }}>{lot.qty}</td>
+                                        <td style={{ padding: "5px 10px", textAlign: "right" }}>{fmt(lot.fill_price)}</td>
+                                        <td style={{ padding: "5px 10px", textAlign: "right" }}>{fmt(lot.cost_basis)}</td>
+                                        <td style={{ padding: "5px 10px", textAlign: "right" }}>{lot.cur_value != null ? fmt(lot.cur_value) : "—"}</td>
+                                        <td style={{ padding: "5px 10px", textAlign: "right", color: lot.unrealized_pl >= 0 ? "green" : "red" }}>
+                                          {lot.unrealized_pl != null ? fmt(lot.unrealized_pl) : "—"}
+                                        </td>
+                                        <td style={{ padding: "5px 10px", textAlign: "right" }}>{pct(lot.unrealized_plpc)}</td>
+                                        <td style={{ padding: "5px 10px", textAlign: "right", color: "#666" }}>
+                                          {lot.held_days != null ? `${lot.held_days}d` : "—"}
+                                        </td>
+                                        <td style={{ padding: "5px 10px" }}>
+                                          {lot.is_long_term
+                                            ? <span style={{ color: "#2e7d32", fontWeight: 600 }}>🟢 Long-term</span>
+                                            : lot.days_to_lt <= 30
+                                              ? <span style={{ color: "#e65100", fontWeight: 600 }}>🟡 {lot.days_to_lt}d to LT</span>
+                                              : <span style={{ color: "#c62828" }}>🔴 Short-term</span>}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                          }
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                   );
                 })}
               </tbody>

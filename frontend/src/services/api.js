@@ -418,6 +418,12 @@ export async function removeSubscription(subType, userId) {
   const res = await fetch(`${API_BASE}/admin/subscriptions/${subType}/${userId}`, { method: "DELETE" });
   return res.json();
 }
+export async function fetchLots(symbol, paper = true) {
+  const res = await fetch(`${API_BASE}/trading/lots/${encodeURIComponent(symbol)}?paper=${paper}`);
+  if (!res.ok) throw new Error("Failed to fetch lots");
+  return res.json();
+}
+
 export async function fetchDailyScreener() {
   const res = await fetch(`${API_BASE}/screener/daily`);
   if (!res.ok) throw new Error("Failed to fetch screener");
