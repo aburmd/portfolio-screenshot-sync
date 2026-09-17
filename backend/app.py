@@ -3820,57 +3820,53 @@ async def get_intraday(market: str, symbol: str):
 # ── Stock Screener ───────────────────────────────────────────────────────────
 
 def _compute_screener_stats(symbol: str):
-    """Read S3 OHLCV for symbol, compute MA50/150/200, direction, 52W stats."""
-    import pandas as pd
+    """Read S3 OHLCV for symbol, use stored MA50/150/200, compute direction + 52W stats."""
     key = f"ohlcv/US/{symbol}/daily.csv.gz"
     try:
         obj = s3.get_object(Bucket=SCREENSHOTS_BUCKET, Key=key)
         with gzip.open(obj["Body"], "rt") as f:
-            df = pd.read_csv(f, parse_dates=["date"])
+            rows = list(__import__("csv").DictReader(f))
     except Exception:
         return None
 
-    if df.empty or "close" not in df.columns:
+    if not rows:
         return None
 
-    df = df.sort_values("date").reset_index(drop=True)
-    closes = df["close"].astype(float)
-    n = len(closes)
+    last = rows[-1]
+    price = float(last["close"])
 
-    def ma(period):
-        if n < period:
-            return None
-        return float(closes.iloc[-period:].mean())
+    def _f(row, col):
+        v = row.get(col, "")
+        return float(v) if v else None
 
-    def ma_direction(period):
-        if n < period + 10:
+    ma50v  = _f(last, "ma50")
+    ma150v = _f(last, "ma150")
+    ma200v = _f(last, "ma200")
+
+    def ma_direction(col):
+        today_val = _f(last, col)
+        if today_val is None or len(rows) < 11:
             return None
-        today_ma = closes.iloc[-period:].mean()
-        past_ma  = closes.iloc[-period - 10:-10].mean()
-        if today_ma > past_ma:
-            return "up"
-        elif today_ma < past_ma:
-            return "down"
+        past_val = _f(rows[-11], col)
+        if past_val is None:
+            return None
+        if today_val > past_val: return "up"
+        if today_val < past_val: return "down"
         return "flat"
 
-    window_52w = min(n, 252)
-    w = closes.iloc[-window_52w:]
-    dates_52w = df["date"].iloc[-window_52w:]
-    high_52w = float(w.max())
-    low_52w  = float(w.min())
-    high_idx = w.idxmax()
-    low_idx  = w.idxmin()
-    last_date = df["date"].iloc[-1]
-    days_from_high = (last_date - dates_52w.iloc[high_idx - dates_52w.index[0]]).days
-    days_from_low  = (last_date - dates_52w.iloc[low_idx  - dates_52w.index[0]]).days
-    price = float(closes.iloc[-1])
-
-    ma50v  = ma(50)
-    ma150v = ma(150)
-    ma200v = ma(200)
+    window_52w = min(len(rows), 252)
+    w = rows[-window_52w:]
+    closes_52w = [float(r["close"]) for r in w]
+    high_52w = max(closes_52w)
+    low_52w  = min(closes_52w)
+    high_idx = closes_52w.index(high_52w)
+    low_idx  = closes_52w.index(low_52w)
+    from datetime import date
+    last_date = date.fromisoformat(last["date"])
+    days_from_high = (last_date - date.fromisoformat(w[high_idx]["date"])).days
+    days_from_low  = (last_date - date.fromisoformat(w[low_idx]["date"])).days
 
     def ma_diff(a, b):
-        """% diff between two MA values: (a - b) / b * 100, None if either missing."""
         if a is None or b is None:
             return None
         return round((a - b) / b * 100, 2)
@@ -3880,9 +3876,9 @@ def _compute_screener_stats(symbol: str):
         "ma50":             ma50v,
         "ma150":            ma150v,
         "ma200":            ma200v,
-        "ma50_dir":         ma_direction(50),
-        "ma150_dir":        ma_direction(150),
-        "ma200_dir":        ma_direction(200),
+        "ma50_dir":         ma_direction("ma50"),
+        "ma150_dir":        ma_direction("ma150"),
+        "ma200_dir":        ma_direction("ma200"),
         "high_52w":         high_52w,
         "low_52w":          low_52w,
         "days_from_high":   days_from_high,
