@@ -4,7 +4,9 @@ import csv
 import os
 import json
 import uuid
+import gzip
 from typing import List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
@@ -46,6 +48,7 @@ SAVED_CHARTS_TABLE   = os.environ.get("SAVED_CHARTS_TABLE",   "portfolio-saved-c
 UNIVERSE_TABLE       = os.environ.get("UNIVERSE_TABLE",       "portfolio-universe-dev")
 TRIGGERS_TABLE       = os.environ.get("TRIGGERS_TABLE",       "portfolio-triggers-dev")
 SUBSCRIPTIONS_TABLE  = os.environ.get("SUBSCRIPTIONS_TABLE",  "portfolio-subscriptions-dev")
+PAPER_RANKING_TABLE  = os.environ.get("PAPER_RANKING_TABLE",   "paper_daily_ranking")
 
 s3 = boto3.client("s3", region_name=REGION)
 ddb = boto3.resource("dynamodb", region_name=REGION)
@@ -3812,6 +3815,135 @@ async def get_intraday(market: str, symbol: str):
             "volume": int(row["Volume"]),
         },
     }
+
+
+# ── Stock Screener ───────────────────────────────────────────────────────────
+
+def _compute_screener_stats(symbol: str):
+    """Read S3 OHLCV for symbol, compute MA50/150/200, direction, 52W stats."""
+    import pandas as pd
+    key = f"ohlcv/US/{symbol}/daily.csv.gz"
+    try:
+        obj = s3.get_object(Bucket=SCREENSHOTS_BUCKET, Key=key)
+        with gzip.open(obj["Body"], "rt") as f:
+            df = pd.read_csv(f, parse_dates=["date"])
+    except Exception:
+        return None
+
+    if df.empty or "close" not in df.columns:
+        return None
+
+    df = df.sort_values("date").reset_index(drop=True)
+    closes = df["close"].astype(float)
+    n = len(closes)
+
+    def ma(period):
+        if n < period:
+            return None
+        return float(closes.iloc[-period:].mean())
+
+    def ma_direction(period):
+        if n < period + 10:
+            return None
+        today_ma = closes.iloc[-period:].mean()
+        past_ma  = closes.iloc[-period - 10:-10].mean()
+        if today_ma > past_ma:
+            return "up"
+        elif today_ma < past_ma:
+            return "down"
+        return "flat"
+
+    window_52w = min(n, 252)
+    w = closes.iloc[-window_52w:]
+    dates_52w = df["date"].iloc[-window_52w:]
+    high_52w = float(w.max())
+    low_52w  = float(w.min())
+    high_idx = w.idxmax()
+    low_idx  = w.idxmin()
+    last_date = df["date"].iloc[-1]
+    days_from_high = (last_date - dates_52w.iloc[high_idx - dates_52w.index[0]]).days
+    days_from_low  = (last_date - dates_52w.iloc[low_idx  - dates_52w.index[0]]).days
+    price = float(closes.iloc[-1])
+
+    return {
+        "price":          price,
+        "ma50":           ma(50),
+        "ma150":          ma(150),
+        "ma200":          ma(200),
+        "ma50_dir":       ma_direction(50),
+        "ma150_dir":      ma_direction(150),
+        "ma200_dir":      ma_direction(200),
+        "high_52w":       high_52w,
+        "low_52w":        low_52w,
+        "days_from_high": days_from_high,
+        "days_from_low":  days_from_low,
+        "pct_from_high":  round((price - high_52w) / high_52w * 100, 2),
+        "pct_from_low":   round((price - low_52w)  / low_52w  * 100, 2),
+    }
+
+
+@app.get("/screener/daily")
+def screener_daily():
+    """Return today's paper_daily_ranking SELECTED stocks enriched with MA + 52W stats."""
+    import pandas as pd
+    from datetime import date, timedelta
+
+    ranking_table = ddb.Table(PAPER_RANKING_TABLE)
+
+    # Try today, fall back to most recent available date
+    data_date = date.today().isoformat()
+    fallback = False
+    for delta in range(0, 10):
+        check_date = (date.today() - timedelta(days=delta)).isoformat()
+        resp = ranking_table.query(
+            KeyConditionExpression=Key("date").eq(check_date),
+            FilterExpression=Attr("candidate_status").eq("SELECTED"),
+            Limit=1,
+        )
+        if resp.get("Items"):
+            data_date = check_date
+            fallback = delta > 0
+            break
+
+    # Fetch all SELECTED items for data_date (paginate)
+    items = []
+    kwargs = {
+        "KeyConditionExpression": Key("date").eq(data_date),
+        "FilterExpression": Attr("candidate_status").eq("SELECTED"),
+    }
+    while True:
+        resp = ranking_table.query(**kwargs)
+        items.extend(resp.get("Items", []))
+        if "LastEvaluatedKey" not in resp:
+            break
+        kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+
+    # Parallel S3 reads
+    symbol_meta = {item["symbol"]: item for item in items}
+    results = []
+
+    def enrich(item):
+        sym = item["symbol"]
+        stats = _compute_screener_stats(sym)
+        if stats is None:
+            return None
+        return {
+            "symbol":         sym,
+            "rank":           int(item.get("rank", 9999)),
+            "beta":           float(item.get("beta_raw", 0) or 0),
+            "composite_score": float(item.get("composite_score", 0) or 0),
+            **stats,
+        }
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futures = {pool.submit(enrich, item): item["symbol"] for item in items}
+        for fut in as_completed(futures):
+            r = fut.result()
+            if r:
+                results.append(r)
+
+    results.sort(key=lambda x: x["rank"])
+    return {"data_date": data_date, "fallback": fallback, "stocks": results}
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

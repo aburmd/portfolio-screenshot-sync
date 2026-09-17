@@ -418,6 +418,12 @@ export async function removeSubscription(subType, userId) {
   const res = await fetch(`${API_BASE}/admin/subscriptions/${subType}/${userId}`, { method: "DELETE" });
   return res.json();
 }
+export async function fetchDailyScreener() {
+  const res = await fetch(`${API_BASE}/screener/daily`);
+  if (!res.ok) throw new Error("Failed to fetch screener");
+  return res.json();
+}
+
 export async function sendNotification(subject, message) {
   const res = await authFetch(`${API_BASE}/admin/notify`, {
     method: "POST", headers: { "Content-Type": "application/json" },

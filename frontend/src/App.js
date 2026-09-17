@@ -12,6 +12,7 @@ import PositionTracker from "./pages/PositionTracker";
 import Research from "./pages/Research";
 import Trading from "./pages/Trading";
 import OhlcvChart from "./pages/OhlcvChart";
+import Screener from "./pages/Screener";
 
 Amplify.configure(awsConfig);
 
@@ -54,6 +55,7 @@ function AppContent({ signOut, user }) {
         {isAdmin && <button style={tabStyle(page === "tracker")} onClick={() => setPage("tracker")}>Position Tracker</button>}
         {isAdmin && <button style={tabStyle(page === "research")} onClick={() => setPage("research")}>Research</button>}
         {isAdmin && <button style={tabStyle(page === "trading")} onClick={() => setPage("trading")}>Trading</button>}
+        {isAdmin && <button style={tabStyle(page === "screener")} onClick={() => setPage("screener")}>Screener</button>}
       </nav>
 
       {page === "dashboard" && <Dashboard user={user} />}
@@ -63,6 +65,7 @@ function AppContent({ signOut, user }) {
       {page === "tracker" && isAdmin && <PositionTracker user={user} />}
       {page === "research" && isAdmin && <Research user={user} />}
       {page === "trading" && isAdmin && <Trading user={user} />}
+      {page === "screener" && isAdmin && <Screener />}
     </div>
   );
 }
