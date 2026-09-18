@@ -30,8 +30,8 @@ SUBSCRIPTIONS_TABLE = os.environ.get("SUBSCRIPTIONS_TABLE", "portfolio-subscript
 ALERT_FROM_EMAIL    = os.environ.get("ALERT_FROM_EMAIL",     "")
 COGNITO_POOL_ID     = os.environ.get("COGNITO_USER_POOL_ID", "")
 
-# Alert cooldown: don't re-alert same symbol+zone within this many minutes
-ALERT_COOLDOWN_MIN = 60
+# Zone config SK prefix stored in INTRADAY_TABLE
+ZONE_CONFIG_SK = "ZONE_CONFIG"
 
 ddb      = boto3.resource("dynamodb", region_name=REGION)
 ses      = boto3.client("ses", region_name="us-east-1")
@@ -214,33 +214,35 @@ def _check_zone(price, agg):
     return None, None
 
 
-# ── Alert cooldown (stored in intraday table as ALERT# record) ────────────────
+# ── Zone config (enabled + fired state) ──────────────────────────────────────
 
-def _is_on_cooldown(market, symbol, zone_type):
-    """Check if an alert was sent for this symbol+zone within ALERT_COOLDOWN_MIN."""
+def _should_alert(market, symbol, zone_type) -> bool:
+    """
+    Fire alert if not explicitly disabled AND not already fired.
+    Default (no record) = enabled. After firing, writes fired=True to block repeats.
+    Atomic conditional write prevents race conditions with concurrent Lambda invocations.
+    """
+    pk = f"{market}#{symbol}"
+    sk = f"{ZONE_CONFIG_SK}#{zone_type}"
+    table = ddb.Table(INTRADAY_TABLE)
     try:
-        table = ddb.Table(INTRADAY_TABLE)
-        resp = table.get_item(
-            Key={"market_symbol": f"{market}#{symbol}", "timestamp": f"ALERT#{zone_type}"}
+        # Succeed only if: record doesn't exist (default=enabled, not fired)
+        #               OR enabled=true AND fired is not set or fired=false
+        table.update_item(
+            Key={"market_symbol": pk, "timestamp": sk},
+            UpdateExpression="SET fired = :t",
+            ConditionExpression=(
+                "(attribute_not_exists(enabled) OR enabled = :on)"
+                " AND (attribute_not_exists(fired) OR fired = :f)"
+            ),
+            ExpressionAttributeValues={":t": True, ":on": True, ":f": False},
         )
-        item = resp.get("Item")
-        if not item:
-            return False
-        last_sent = datetime.fromisoformat(item["last_sent"])
-        return (datetime.now(timezone.utc) - last_sent).total_seconds() < ALERT_COOLDOWN_MIN * 60
-    except Exception:
+        return True
+    except ddb.meta.client.exceptions.ConditionalCheckFailedException:
+        return False  # disabled or already fired
+    except Exception as e:
+        print(f"  zone config check error {symbol} {zone_type}: {e}")
         return False
-
-
-def _set_cooldown(market, symbol, zone_type):
-    try:
-        ddb.Table(INTRADAY_TABLE).put_item(Item={
-            "market_symbol": f"{market}#{symbol}",
-            "timestamp":     f"ALERT#{zone_type}",
-            "last_sent":     datetime.now(timezone.utc).isoformat(),
-        })
-    except Exception:
-        pass
 
 
 # ── SES alert ─────────────────────────────────────────────────────────────────
@@ -312,12 +314,11 @@ def _process_symbol(market, symbol, now_utc, write_5min):
     }
     ts_str = hist.index[-1].strftime("%Y-%m-%dT%H:%M")
 
-    # Zone alert check
+    # Zone alert check — fires only if enabled=True and not yet fired
     agg = _get_agg(market, symbol)
     zone_type, zone_label = _check_zone(price, agg)
-    if zone_type and not _is_on_cooldown(market, symbol, zone_type):
+    if zone_type and _should_alert(market, symbol, zone_type):
         _send_alert(market, symbol, zone_type, zone_label, price)
-        _set_cooldown(market, symbol, zone_type)
 
     # User-defined price triggers
     _check_triggers(market, symbol, price)

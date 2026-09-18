@@ -385,6 +385,111 @@ function TriggersList({ symbol, market, cur, triggers, onDeleted }) {
   );
 }
 
+// ── Zone Alerts Panel ────────────────────────────────────────────────────────
+
+const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:8000";
+
+async function fetchZoneAlerts(market, symbol) {
+  const res = await fetch(`${API_BASE}/research/zone-alerts/${market}/${symbol}`);
+  return res.json();
+}
+async function setZoneAlert(market, symbol, zone_type, enabled, rearm = false) {
+  const res = await fetch(`${API_BASE}/research/zone-alerts/${market}/${symbol}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ zone_type, enabled, rearm }),
+  });
+  return res.json();
+}
+
+function ZoneAlertsPanel({ symbol, market }) {
+  const [zones,   setZones]   = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving,  setSaving]  = useState(null); // "BUY" | "SELL" | null
+
+  const load = useCallback(async () => {
+    if (!symbol || !market) return;
+    setLoading(true);
+    try { const r = await fetchZoneAlerts(market, symbol); setZones(r.zones); }
+    catch (_) {}
+    setLoading(false);
+  }, [symbol, market]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handle = async (zone_type, enabled, rearm = false) => {
+    setSaving(zone_type);
+    await setZoneAlert(market, symbol, zone_type, enabled, rearm);
+    await load();
+    setSaving(null);
+  };
+
+  if (!symbol) return null;
+
+  const ZoneRow = ({ type, color, icon }) => {
+    const z = zones?.[type];
+    const busy = saving === type || loading;
+    // state label
+    let statusLabel, statusBg, statusColor;
+    if (!z) { statusLabel = "● active"; statusBg = "#e8f5e9"; statusColor = "#2e7d32"; }
+    else if (!z.enabled) { statusLabel = "⏸ disabled"; statusBg = "#f5f5f5"; statusColor = "#9e9e9e"; }
+    else if (z.fired)    { statusLabel = "✓ fired";    statusBg = "#fff3e0"; statusColor = "#e65100"; }
+    else                 { statusLabel = "● active";   statusBg = "#e8f5e9"; statusColor = "#2e7d32"; }
+
+    const isEnabled = !z || z.enabled;
+    const isFired   = z?.fired;
+
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0",
+        borderBottom: "1px solid #f0f0f0" }}>
+        <span style={{ width: 60, fontWeight: "bold", color, fontSize: 13 }}>{icon} {type}</span>
+        <span style={{ background: statusBg, color: statusColor, borderRadius: 10,
+          padding: "2px 8px", fontSize: 11, minWidth: 70, textAlign: "center" }}>
+          {statusLabel}
+        </span>
+        {/* Enable / Disable toggle */}
+        <button disabled={busy} onClick={() => handle(type, !isEnabled)}
+          style={{ padding: "3px 10px", fontSize: 11, borderRadius: 4, cursor: busy ? "not-allowed" : "pointer",
+            background: isEnabled ? "#fff" : "#e8f5e9",
+            border: `1px solid ${isEnabled ? "#e57373" : "#66bb6a"}`,
+            color: isEnabled ? "#c62828" : "#2e7d32" }}>
+          {busy ? "…" : isEnabled ? "Disable" : "Enable"}
+        </button>
+        {/* Re-arm — only shown when fired */}
+        {isFired && (
+          <button disabled={busy} onClick={() => handle(type, true, true)}
+            style={{ padding: "3px 10px", fontSize: 11, borderRadius: 4, cursor: busy ? "not-allowed" : "pointer",
+              background: "#e3f2fd", border: "1px solid #1976d2", color: "#1565c0" }}>
+            {busy ? "…" : "↺ Re-arm"}
+          </button>
+        )}
+        <span style={{ fontSize: 11, color: "#bbb" }}>
+          {isFired ? "alert sent — re-arm to enable again" :
+           !isEnabled ? "alerts paused" :
+           "will alert once when price enters zone"}
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ background: "#fafafa", border: "1px solid #e0e0e0", borderRadius: 6,
+      padding: "10px 14px", marginTop: 12 }}>
+      <div style={{ fontSize: 12, fontWeight: "bold", color: "#555", marginBottom: 6 }}>
+        🔔 Zone Alerts — {symbol}
+        <span style={{ fontWeight: "normal", color: "#999", marginLeft: 8 }}>
+          fires once per zone entry · re-arm to reset
+        </span>
+      </div>
+      {loading && !zones ? <span style={{ fontSize: 12, color: "#999" }}>Loading…</span> : (
+        <>
+          <ZoneRow type="BUY"  color="#2e7d32" icon="🟢" />
+          <ZoneRow type="SELL" color="#c62828" icon="🔴" />
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function OhlcvChart() {
@@ -568,6 +673,9 @@ export default function OhlcvChart() {
               />
             : <p style={{ color: "#999" }}>No data for selected range.</p>
           }
+
+          {/* Zone Alerts panel */}
+          <ZoneAlertsPanel symbol={data.symbol} market={data.market} />
 
           {/* Trigger creation panel */}
           <TriggerPanel

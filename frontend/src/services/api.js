@@ -430,6 +430,18 @@ export async function fetchDailyScreener() {
   return res.json();
 }
 
+export async function fetchZoneAlerts(market, symbol) {
+  const res = await fetch(`${API_BASE}/research/zone-alerts/${market}/${encodeURIComponent(symbol)}`);
+  return res.json();
+}
+export async function setZoneAlert(market, symbol, zone_type, enabled, rearm = false) {
+  const res = await fetch(`${API_BASE}/research/zone-alerts/${market}/${encodeURIComponent(symbol)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ zone_type, enabled, rearm }),
+  });
+  return res.json();
+}
+
 export async function sendNotification(subject, message) {
   const res = await authFetch(`${API_BASE}/admin/notify`, {
     method: "POST", headers: { "Content-Type": "application/json" },

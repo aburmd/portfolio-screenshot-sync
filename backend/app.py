@@ -3683,7 +3683,60 @@ async def delete_chart(market: str, symbol: str, user_id: str):
     return {"deleted": f"{market.upper()}#{symbol.upper()}"}
 
 
-# ── Price Triggers ───────────────────────────────────────────────────────────
+# ── Zone Alert Config ────────────────────────────────────────────────────────
+
+@app.get("/research/zone-alerts/{market}/{symbol}")
+async def get_zone_alerts(market: str, symbol: str):
+    """Get BUY and SELL zone alert config. No record = enabled by default, not yet fired."""
+    mkt, sym = market.upper(), symbol.upper()
+    table = ddb.Table(INTRADAY_TABLE)
+    result = {}
+    for zone_type in ("BUY", "SELL"):
+        resp = table.get_item(
+            Key={"market_symbol": f"{mkt}#{sym}", "timestamp": f"ZONE_CONFIG#{zone_type}"}
+        )
+        item = resp.get("Item")
+        result[zone_type] = {
+            "enabled": bool(item.get("enabled", True))  if item else True,
+            "fired":   bool(item.get("fired",   False)) if item else False,
+        }
+    return {"market": mkt, "symbol": sym, "zones": result}
+
+
+@app.put("/research/zone-alerts/{market}/{symbol}")
+async def set_zone_alert(market: str, symbol: str, data: dict):
+    """
+    Control zone alert per stock.
+    Body: { "zone_type": "BUY"|"SELL", "enabled": bool, "rearm": bool }
+    - enabled=false  → disable (no more alerts even if price enters zone)
+    - enabled=true   → re-enable
+    - rearm=true     → reset fired=false so next zone entry triggers a fresh alert
+    """
+    mkt, sym = market.upper(), symbol.upper()
+    zone_type = data.get("zone_type", "").upper()
+    if zone_type not in ("BUY", "SELL"):
+        return {"error": "zone_type must be BUY or SELL"}
+
+    enabled = bool(data.get("enabled", True))
+    rearm   = bool(data.get("rearm", False))
+
+    table = ddb.Table(INTRADAY_TABLE)
+    pk, sk = f"{mkt}#{sym}", f"ZONE_CONFIG#{zone_type}"
+
+    expr   = "SET enabled = :e"
+    values = {":e": enabled}
+    if rearm:
+        expr += ", fired = :f"
+        values[":f"] = False
+
+    table.update_item(
+        Key={"market_symbol": pk, "timestamp": sk},
+        UpdateExpression=expr,
+        ExpressionAttributeValues=values,
+    )
+    return {"market": mkt, "symbol": sym, "zone_type": zone_type, "enabled": enabled, "rearmed": rearm}
+
+
 
 @app.post("/research/trigger/{market}/{symbol}")
 async def add_trigger(market: str, symbol: str, data: dict, request: Request):
