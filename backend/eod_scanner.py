@@ -43,12 +43,15 @@ AGG_LOOKBACKS = {
 
 
 def _compute_mas(rows):
-    """Compute MA50/150/200 for all rows in-place. Requires float closes."""
+    """Compute MA50/150/200 for the last row only, using stored closes from prior rows."""
+    if len(rows) < 2:
+        return
     closes = [float(r["close"]) for r in rows]
-    for i, r in enumerate(rows):
-        r["ma50"]  = round(sum(closes[i-49:i+1])  / 50,  2) if i >= 49  else ""
-        r["ma150"] = round(sum(closes[i-149:i+1]) / 150, 2) if i >= 149 else ""
-        r["ma200"] = round(sum(closes[i-199:i+1]) / 200, 2) if i >= 199 else ""
+    i = len(rows) - 1
+    r = rows[i]
+    r["ma50"]  = round(sum(closes[i-49:i+1])  / 50,  2) if i >= 49  else ""
+    r["ma150"] = round(sum(closes[i-149:i+1]) / 150, 2) if i >= 149 else ""
+    r["ma200"] = round(sum(closes[i-199:i+1]) / 200, 2) if i >= 199 else ""
 
 
 # ── S3 helpers ────────────────────────────────────────────────────────────────

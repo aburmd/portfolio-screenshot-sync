@@ -44,11 +44,25 @@ def is_bad(row):
 
 
 def compute_mas(rows):
-    closes = [float(r["close"]) for r in rows]
+    import math
+    closes = []
+    for r in rows:
+        try:
+            v = float(r["close"])
+            closes.append(v if not math.isnan(v) else None)
+        except (ValueError, TypeError):
+            closes.append(None)
     for i, r in enumerate(rows):
-        r["ma50"]  = round(sum(closes[i-49:i+1])  / 50,  2) if i >= 49  else ""
-        r["ma150"] = round(sum(closes[i-149:i+1]) / 150, 2) if i >= 149 else ""
-        r["ma200"] = round(sum(closes[i-199:i+1]) / 200, 2) if i >= 199 else ""
+        c = closes[i]
+        if c is None:
+            r["ma50"] = r["ma150"] = r["ma200"] = ""
+            continue
+        for period, col in [(50, "ma50"), (150, "ma150"), (200, "ma200")]:
+            if i >= period - 1:
+                window = [v for v in closes[i-period+1:i+1] if v is not None]
+                r[col] = round(sum(window) / len(window), 2) if len(window) == period else ""
+            else:
+                r[col] = ""
 
 
 def write_s3(symbol, rows):
