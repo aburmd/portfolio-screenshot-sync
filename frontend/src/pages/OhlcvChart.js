@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, CrosshairMode, LineStyle } from "lightweight-charts";
-import { fetchOhlcv, fetchIntraday, addTrigger, listTriggers, deleteTrigger, fetchZones, fetchZoneAlerts, setZoneAlert } from "../services/api";
+import { fetchOhlcv, fetchIntraday, addTrigger, listTriggers, deleteTrigger, fetchZones, fetchZoneAlerts, setZoneAlert, saveChart, deleteChart } from "../services/api";
 import { fetchAuthSession, fetchUserAttributes } from "aws-amplify/auth";
 
 const RANGES = ["6M", "1Y", "2Y", "5Y", "All"];
@@ -401,12 +401,13 @@ function TriggersList({ symbol, market, cur, triggers, onDeleted }) {
 
 const pct = (v) => v == null ? "—" : <span style={{ color: v >= 0 ? "#2e7d32" : "#c62828", fontWeight: "bold" }}>{v >= 0 ? "+" : ""}{v.toFixed(1)}%</span>;
 
-function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct, onZonePricesChange, showZones, onToggleShowZones }) {
+function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct, onZonePricesChange, showZones, onToggleShowZones, userId, onSaved }) {
   const [zones,     setZones]     = useState(null);
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState(null);
   const [alerts,    setAlerts]    = useState({});  // { BUY: {enabled,fired}, SELL: {enabled,fired} }
   const [alertBusy, setAlertBusy] = useState(null);
+  const [saving,    setSaving]    = useState(false);
   // per-row edit state: { [idx_type]: { price, target } }  type = "buy"|"sell"
   const [editing,   setEditing]   = useState({});
 
@@ -554,6 +555,23 @@ function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSell
     );
   };
 
+  const handleSave = async () => {
+    if (!userId || !zones) return;
+    setSaving(true);
+    try {
+      const r = await saveChart(market, symbol, {
+        user_id: userId,
+        base_pos: basePos, max_pos: maxPos,
+        max_buy_zones: maxBuyZones, max_sell_zones: maxSellZones,
+        hh_trim_pct: hhTrimPct, current_holding_pct: currentHoldingPct,
+        zones_data: { ...zones, buy_zones: buyZones, sell_zones: sellZones },
+      });
+      if (r.error) alert(r.error);
+      else if (onSaved) onSaved();
+    } catch (e) { alert(e.message); }
+    setSaving(false);
+  };
+
   return (
     <div style={{ marginTop: 12, border: "1px solid #e0e0e0", borderRadius: 6, overflow: "hidden" }}>
       <div style={{ background: "#f5f5f5", padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -570,6 +588,14 @@ function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSell
               border: `1px solid ${showZones ? "#66bb6a" : "#ccc"}`,
               color: showZones ? "#2e7d32" : "#666" }}>
             {showZones ? "📍 Zones ON" : "📍 Zones OFF"}
+          </button>
+        )}
+        {zones && (
+          <button onClick={handleSave} disabled={saving}
+            style={{ padding: "4px 14px", fontSize: 12, borderRadius: 4, cursor: saving ? "not-allowed" : "pointer",
+              background: saving ? "#bdbdbd" : "#e8f5e9",
+              border: "1px solid #66bb6a", color: saving ? "#fff" : "#2e7d32", fontWeight: "bold" }}>
+            {saving ? "Saving…" : "💾 Save Chart"}
           </button>
         )}
         {error && <span style={{ fontSize: 12, color: "#c62828" }}>❌ {error}</span>}
@@ -1045,6 +1071,8 @@ export default function OhlcvChart() {
             onZonePricesChange={setZonePrices}
             showZones={showZonesOnChart}
             onToggleShowZones={() => setShowZonesOnChart(v => !v)}
+            userId={userId}
+            onSaved={() => alert(`Chart saved for ${data.symbol}`)}
           />
 
           {/* Trigger creation panel */}

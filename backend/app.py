@@ -3570,9 +3570,12 @@ async def save_chart(market: str, symbol: str, data: dict):
     max_sell_zones = data.get("max_sell_zones", 5)
     hh_trim_pct    = float(data.get("hh_trim_pct", 0.25))
     current_holding_pct = float(data.get("current_holding_pct", 0.0))
-    zones_data = compute_zones(symbol.upper(), market.upper(), base_pos=base_pos, max_pos=max_pos,
-                               max_buy_zones=max_buy_zones, max_sell_zones=max_sell_zones,
-                               hh_trim_pct=hh_trim_pct, current_holding_pct=current_holding_pct)
+    # Accept pre-computed zones from frontend (user may have edited them)
+    zones_data = data.get("zones_data")
+    if not zones_data:
+        zones_data = compute_zones(symbol.upper(), market.upper(), base_pos=base_pos, max_pos=max_pos,
+                                   max_buy_zones=max_buy_zones, max_sell_zones=max_sell_zones,
+                                   hh_trim_pct=hh_trim_pct, current_holding_pct=current_holding_pct)
     if not zones_data:
         return {"error": f"No data for {market}#{symbol}"}
 
