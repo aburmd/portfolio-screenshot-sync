@@ -3931,7 +3931,11 @@ def _compute_screener_stats(symbol: str):
     if not rows:
         return None
 
-    last = rows[-1]
+    # Skip trailing rows with invalid close (nan/empty) — EOD scanner may write bad yfinance rows
+    valid_rows = [r for r in rows if r.get("close") and r["close"] not in ("", "nan", "NaN")]
+    if not valid_rows:
+        return None
+    last = valid_rows[-1]
     price = float(last["close"])
 
     def _f(row, col):
@@ -3944,17 +3948,17 @@ def _compute_screener_stats(symbol: str):
 
     def ma_direction(col):
         today_val = _f(last, col)
-        if today_val is None or len(rows) < 11:
+        if today_val is None or len(valid_rows) < 11:
             return None
-        past_val = _f(rows[-11], col)
+        past_val = _f(valid_rows[-11], col)
         if past_val is None:
             return None
         if today_val > past_val: return "up"
         if today_val < past_val: return "down"
         return "flat"
 
-    window_52w = min(len(rows), 252)
-    w = rows[-window_52w:]
+    window_52w = min(len(valid_rows), 252)
+    w = valid_rows[-window_52w:]
     closes_52w = [float(r["close"]) for r in w]
     high_52w = max(closes_52w)
     low_52w  = min(closes_52w)
@@ -4050,6 +4054,15 @@ def screener_daily():
                 results.append(r)
 
     results.sort(key=lambda x: x["rank"])
+
+    # Sanitize NaN/Inf values before JSON serialization
+    import math
+    def _clean(v):
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        return v
+    results = [{k: _clean(v) for k, v in row.items()} for row in results]
+
     return {"data_date": data_date, "fallback": fallback, "stocks": results}
 
 

@@ -142,12 +142,18 @@ def _process_symbol(market, symbol):
     row = hist.iloc[-1]
     today_str = idx.strftime("%Y-%m-%d")
 
+    close_val = float(row["Close"])
+    import math
+    if math.isnan(close_val) or close_val <= 0:
+        print(f"  {symbol}: skipping nan/zero close for {today_str}")
+        return False
+
     new_row = {
         "date":   today_str,
         "open":   round(float(row["Open"]),   2),
         "high":   round(float(row["High"]),   2),
         "low":    round(float(row["Low"]),    2),
-        "close":  round(float(row["Close"]),  2),
+        "close":  round(close_val,            2),
         "volume": int(row["Volume"]),
     }
 
