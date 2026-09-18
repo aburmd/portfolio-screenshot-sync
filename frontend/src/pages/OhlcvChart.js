@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, CrosshairMode, LineStyle } from "lightweight-charts";
-import { fetchOhlcv, fetchIntraday, addTrigger, listTriggers, deleteTrigger, fetchZones } from "../services/api";
+import { fetchOhlcv, fetchIntraday, addTrigger, listTriggers, deleteTrigger, fetchZones, fetchZoneAlerts, setZoneAlert } from "../services/api";
 import { fetchAuthSession, fetchUserAttributes } from "aws-amplify/auth";
 
 const RANGES = ["6M", "1Y", "2Y", "5Y", "All"];
@@ -401,30 +401,161 @@ function TriggersList({ symbol, market, cur, triggers, onDeleted }) {
 
 const pct = (v) => v == null ? "—" : <span style={{ color: v >= 0 ? "#2e7d32" : "#c62828", fontWeight: "bold" }}>{v >= 0 ? "+" : ""}{v.toFixed(1)}%</span>;
 
-function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct }) {
-  const [zones,   setZones]   = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState(null);
+function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct, onZonePricesChange, showZones, onToggleShowZones }) {
+  const [zones,     setZones]     = useState(null);
+  const [loading,   setLoading]   = useState(false);
+  const [error,     setError]     = useState(null);
+  const [alerts,    setAlerts]    = useState({});  // { BUY: {enabled,fired}, SELL: {enabled,fired} }
+  const [alertBusy, setAlertBusy] = useState(null);
+  // per-row edit state: { [idx_type]: { price, target } }  type = "buy"|"sell"
+  const [editing,   setEditing]   = useState({});
 
   const compute = useCallback(async () => {
     if (!symbol || !market) return;
     setLoading(true); setError(null);
     try {
       const r = await fetchZones(market, symbol, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct || 0);
-      if (r.error) setError(r.error);
-      else setZones(r);
+      if (r.error) { setError(r.error); }
+      else {
+        setZones(r);
+        // push zone prices up to parent for chart lines
+        const prices = [
+          ...(r.buy_zones  || []).map(z => ({ price: z.price_level, type: "buy"  })),
+          ...(r.sell_zones || []).map(z => ({ price: z.price_level, type: "sell" })),
+        ];
+        onZonePricesChange(prices);
+      }
     } catch (e) { setError(e.message); }
     setLoading(false);
-  }, [symbol, market, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct]);
+  }, [symbol, market, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct, onZonePricesChange]);
 
-  // auto-compute when symbol/market changes
-  useEffect(() => { setZones(null); }, [symbol, market]);
+  const loadAlerts = useCallback(async () => {
+    if (!symbol || !market) return;
+    try { const r = await fetchZoneAlerts(market, symbol); setAlerts(r.zones || {}); }
+    catch (_) {}
+  }, [symbol, market]);
+
+  useEffect(() => { setZones(null); onZonePricesChange([]); setEditing({}); }, [symbol, market]);
+  useEffect(() => { loadAlerts(); }, [loadAlerts]);
+
+  const handleAlert = async (zone_type, enabled, rearm = false) => {
+    setAlertBusy(zone_type);
+    await setZoneAlert(market, symbol, zone_type, enabled, rearm);
+    await loadAlerts();
+    setAlertBusy(null);
+  };
+
+  const startEdit = (key, price, target) => setEditing(e => ({ ...e, [key]: { price: String(price), target: String(target) } }));
+  const cancelEdit = (key) => setEditing(e => { const n = { ...e }; delete n[key]; return n; });
+  const saveEdit = (key, zoneList, setterFn) => {
+    const ed = editing[key];
+    const newPrice  = parseFloat(ed.price);
+    const newTarget = parseFloat(ed.target);
+    if (isNaN(newPrice) || isNaN(newTarget)) return;
+    const idx = parseInt(key.split("_")[0]);
+    const updated = zoneList.map((z, i) => i === idx ? { ...z, price_level: newPrice, total_target_pct: newTarget, adjusted_target_pct: newTarget } : z);
+    setterFn(updated);
+    cancelEdit(key);
+  };
+
+  const deleteZone = (idx, zoneList, setterFn) => setterFn(zoneList.filter((_, i) => i !== idx));
+
+  const addZone = (zoneList, setterFn, type) => {
+    const blank = { price_level: 0, fib: null, touch_count: 0, vol_pct: 0, total_target_pct: 0, adjusted_target_pct: 0, note: "", in_zone_now: false, qqq_gate_qualified: false, pct_from_hh: null, pct_from_ll: null };
+    const newList = [...zoneList, blank];
+    setterFn(newList);
+    const key = `${newList.length - 1}_${type}`;
+    setEditing(e => ({ ...e, [key]: { price: "0", target: "0" } }));
+  };
+
+  // local mutable copies of zones for edit/delete/add
+  const [buyZones,  setBuyZones]  = useState([]);
+  const [sellZones, setSellZones] = useState([]);
+  useEffect(() => { setBuyZones(zones?.buy_zones  || []); }, [zones]);
+  useEffect(() => { setSellZones(zones?.sell_zones || []); }, [zones]);
+
+  // sync chart lines when local zones change
+  useEffect(() => {
+    const prices = [
+      ...buyZones.filter(z => z.price_level > 0).map(z => ({ price: z.price_level, type: "buy"  })),
+      ...sellZones.filter(z => z.price_level > 0).map(z => ({ price: z.price_level, type: "sell" })),
+    ];
+    onZonePricesChange(prices);
+  }, [buyZones, sellZones, onZonePricesChange]);
 
   const cagr = zones?.cagr_summary;
 
+  const AlertBadge = ({ type }) => {
+    const z = alerts[type];
+    const busy = alertBusy === type;
+    const isEnabled = !z || z.enabled;
+    const isFired   = z?.fired;
+    let label, bg, color;
+    if (!z)          { label = "● active"; bg = "#e8f5e9"; color = "#2e7d32"; }
+    else if (!z.enabled) { label = "⏸ off";  bg = "#f5f5f5"; color = "#9e9e9e"; }
+    else if (z.fired)    { label = "✓ fired"; bg = "#fff3e0"; color = "#e65100"; }
+    else                 { label = "● active"; bg = "#e8f5e9"; color = "#2e7d32"; }
+    return (
+      <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+        <span style={{ background: bg, color, borderRadius: 8, padding: "1px 6px", fontSize: 10 }}>{label}</span>
+        <button disabled={busy} onClick={() => handleAlert(type, !isEnabled)}
+          style={{ padding: "1px 6px", fontSize: 10, borderRadius: 3, cursor: busy ? "not-allowed" : "pointer",
+            background: "#fff", border: `1px solid ${isEnabled ? "#e57373" : "#66bb6a"}`,
+            color: isEnabled ? "#c62828" : "#2e7d32" }}>
+          {busy ? "…" : isEnabled ? "Off" : "On"}
+        </button>
+        {isFired && (
+          <button disabled={busy} onClick={() => handleAlert(type, true, true)}
+            style={{ padding: "1px 6px", fontSize: 10, borderRadius: 3, cursor: busy ? "not-allowed" : "pointer",
+              background: "#e3f2fd", border: "1px solid #1976d2", color: "#1565c0" }}>
+            {busy ? "…" : "↺"}
+          </button>
+        )}
+      </span>
+    );
+  };
+
+  const EditableRow = ({ z, i, type, zoneList, setterFn, rowBg, cols }) => {
+    const key = `${i}_${type}`;
+    const ed  = editing[key];
+    if (ed) {
+      return (
+        <tr key={key} style={{ background: "#fffde7" }}>
+          <td style={{ padding: "3px 6px" }}>
+            <input value={ed.price} onChange={e => setEditing(prev => ({ ...prev, [key]: { ...prev[key], price: e.target.value } }))}
+              style={{ width: 70, fontSize: 11, padding: "2px 4px", borderRadius: 3, border: "1px solid #ccc" }} />
+          </td>
+          <td colSpan={cols - 3} style={{ padding: "3px 6px", fontSize: 11, color: "#999" }}>
+            Target%: <input value={ed.target} onChange={e => setEditing(prev => ({ ...prev, [key]: { ...prev[key], target: e.target.value } }))}
+              style={{ width: 50, fontSize: 11, padding: "2px 4px", borderRadius: 3, border: "1px solid #ccc" }} />
+          </td>
+          <td style={{ padding: "3px 6px" }}>
+            <button onClick={() => saveEdit(key, zoneList, setterFn)}
+              style={{ fontSize: 10, padding: "2px 6px", background: "#e8f5e9", border: "1px solid #66bb6a", borderRadius: 3, cursor: "pointer", marginRight: 3 }}>✓</button>
+            <button onClick={() => cancelEdit(key)}
+              style={{ fontSize: 10, padding: "2px 6px", background: "#fff", border: "1px solid #ccc", borderRadius: 3, cursor: "pointer" }}>✕</button>
+          </td>
+        </tr>
+      );
+    }
+    return (
+      <tr key={i} style={{ background: rowBg }}>
+        {z._cells}
+        <td style={{ padding: "3px 6px", whiteSpace: "nowrap" }}>
+          <AlertBadge type={type === "buy" ? "BUY" : "SELL"} />
+        </td>
+        <td style={{ padding: "3px 6px", whiteSpace: "nowrap" }}>
+          <button onClick={() => startEdit(key, z.price_level, z.total_target_pct)}
+            style={{ fontSize: 10, padding: "2px 5px", background: "#fff", border: "1px solid #90caf9", borderRadius: 3, cursor: "pointer", marginRight: 3 }}>✎</button>
+          <button onClick={() => deleteZone(i, zoneList, setterFn)}
+            style={{ fontSize: 10, padding: "2px 5px", background: "#fff", border: "1px solid #e57373", color: "#c62828", borderRadius: 3, cursor: "pointer" }}>✕</button>
+        </td>
+      </tr>
+    );
+  };
+
   return (
     <div style={{ marginTop: 12, border: "1px solid #e0e0e0", borderRadius: 6, overflow: "hidden" }}>
-      {/* header + compute button */}
       <div style={{ background: "#f5f5f5", padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <span style={{ fontWeight: "bold", fontSize: 13 }}>📊 Buy / Sell Zones</span>
         <button onClick={compute} disabled={loading}
@@ -432,20 +563,28 @@ function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSell
             color: "#fff", border: "none", borderRadius: 4, cursor: loading ? "not-allowed" : "pointer" }}>
           {loading ? "Computing…" : zones ? "↺ Recompute" : "🔍 Compute Zones"}
         </button>
+        {zones && (
+          <button onClick={onToggleShowZones}
+            style={{ padding: "4px 12px", fontSize: 12, borderRadius: 4, cursor: "pointer",
+              background: showZones ? "#e8f5e9" : "#fff",
+              border: `1px solid ${showZones ? "#66bb6a" : "#ccc"}`,
+              color: showZones ? "#2e7d32" : "#666" }}>
+            {showZones ? "📍 Zones ON" : "📍 Zones OFF"}
+          </button>
+        )}
         {error && <span style={{ fontSize: 12, color: "#c62828" }}>❌ {error}</span>}
         {zones && <span style={{ fontSize: 11, color: "#999" }}>HH {cur}{zones.period_hh?.toLocaleString()} · LL {cur}{zones.period_ll?.toLocaleString()}</span>}
       </div>
 
       {zones && (
         <div style={{ padding: 12 }}>
-          {/* CAGR summary */}
           {cagr && (
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10, fontSize: 12 }}>
               {cagr.cagr_1y  != null && <span>1Y CAGR: <b>{pct(cagr.cagr_1y)}</b></span>}
               {cagr.cagr_3y  != null && <span>3Y CAGR: <b>{pct(cagr.cagr_3y)}</b></span>}
               {cagr.cagr_5y  != null && <span>5Y CAGR: <b>{pct(cagr.cagr_5y)}</b></span>}
               {cagr.avg_cagr != null && <span style={{ fontWeight: "bold" }}>Avg: {pct(cagr.avg_cagr)}</span>}
-              {cagr.qqq_gate_price != null && <span style={{ background: "#fff3e0", padding: "1px 6px", borderRadius: 3 }}>🚪 QQQ Gate: <b>{cur}{cagr.qqq_gate_price?.toLocaleString()}</b></span>}
+              {cagr.qqq_gate_price  != null && <span style={{ background: "#fff3e0", padding: "1px 6px", borderRadius: 3 }}>🚪 QQQ Gate: <b>{cur}{cagr.qqq_gate_price?.toLocaleString()}</b></span>}
               {cagr.final_sell_price != null && <span style={{ background: "#fce4ec", padding: "1px 6px", borderRadius: 3 }}>🎯 Final Sell: <b>{cur}{cagr.final_sell_price?.toLocaleString()}</b></span>}
             </div>
           )}
@@ -453,36 +592,67 @@ function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSell
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             {/* Buy zones */}
             <div>
-              <div style={{ fontWeight: "bold", fontSize: 12, color: "#2e7d32", marginBottom: 4 }}>🟢 Buy Zones ({zones.buy_zones?.length || 0})</div>
-              {zones.buy_zones?.length > 0 ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <span style={{ fontWeight: "bold", fontSize: 12, color: "#2e7d32" }}>🟢 Buy Zones ({buyZones.length})</span>
+                <button onClick={() => addZone(buyZones, setBuyZones, "buy")}
+                  style={{ fontSize: 10, padding: "1px 7px", background: "#e8f5e9", border: "1px solid #66bb6a", borderRadius: 3, cursor: "pointer" }}>➕</button>
+              </div>
+              {buyZones.length > 0 ? (
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                   <thead>
                     <tr style={{ background: "#e8f5e9" }}>
-                      {["Price", "Fib", "Touches", "Vol%", "% HH", "Target%", "Status"].map(h =>
-                        <th key={h} style={{ padding: "4px 6px", textAlign: h === "Price" ? "left" : "right", whiteSpace: "nowrap" }}>{h}</th>)}
+                      {["Price", "Fib", "Touches", "Vol%", "% HH", "Target%", "Alert", ""].map(h =>
+                        <th key={h} style={{ padding: "4px 6px", textAlign: h === "Price" || h === "" || h === "Alert" ? "left" : "right", whiteSpace: "nowrap" }}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
-                    {zones.buy_zones.map((z, i) => (
-                      <tr key={i} style={{ background: z.in_zone_now ? "#c8e6c9" : i % 2 ? "#f9fbe7" : "#fff" }}>
-                        <td style={{ padding: "4px 6px", fontWeight: "bold" }}>
-                          {cur}{z.price_level?.toLocaleString()}
-                          {z.in_zone_now && <span style={{ marginLeft: 4, fontSize: 9, background: "#2e7d32", color: "#fff", borderRadius: 3, padding: "1px 3px" }}>NOW</span>}
-                        </td>
-                        <td style={{ padding: "4px 6px", textAlign: "right", color: "#666" }}>{z.fib?.toFixed(3)}</td>
-                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{z.touch_count}</td>
-                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{z.vol_pct?.toFixed(1)}%</td>
-                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{pct(z.pct_from_hh)}</td>
-                        <td style={{ padding: "4px 6px", textAlign: "right", fontWeight: "bold" }}>
-                          {z.adjusted_target_pct !== z.total_target_pct
-                            ? <><span style={{ color: "#e65100" }}>{z.adjusted_target_pct?.toFixed(2)}%</span><span style={{ color: "#999", fontSize: 9 }}> (50%)</span></>
-                            : `${z.total_target_pct?.toFixed(2)}%`}
-                        </td>
-                        <td style={{ padding: "4px 6px", textAlign: "right" }}>
-                          {z.qqq_gate_qualified ? "✅" : "—"}
-                        </td>
-                      </tr>
-                    ))}
+                    {buyZones.map((z, i) => {
+                      const key = `${i}_buy`;
+                      const ed  = editing[key];
+                      const rowBg = z.in_zone_now ? "#c8e6c9" : i % 2 ? "#f9fbe7" : "#fff";
+                      if (ed) return (
+                        <tr key={key} style={{ background: "#fffde7" }}>
+                          <td style={{ padding: "3px 6px" }}>
+                            <input value={ed.price} onChange={e => setEditing(p => ({ ...p, [key]: { ...p[key], price: e.target.value } }))}
+                              style={{ width: 70, fontSize: 11, padding: "2px 4px", borderRadius: 3, border: "1px solid #ccc" }} />
+                          </td>
+                          <td colSpan={5} style={{ padding: "3px 6px", fontSize: 11, color: "#999" }}>
+                            Target%: <input value={ed.target} onChange={e => setEditing(p => ({ ...p, [key]: { ...p[key], target: e.target.value } }))}
+                              style={{ width: 50, fontSize: 11, padding: "2px 4px", borderRadius: 3, border: "1px solid #ccc" }} />
+                          </td>
+                          <td colSpan={2} style={{ padding: "3px 6px" }}>
+                            <button onClick={() => saveEdit(key, buyZones, setBuyZones)}
+                              style={{ fontSize: 10, padding: "2px 6px", background: "#e8f5e9", border: "1px solid #66bb6a", borderRadius: 3, cursor: "pointer", marginRight: 3 }}>✓</button>
+                            <button onClick={() => cancelEdit(key)}
+                              style={{ fontSize: 10, padding: "2px 6px", background: "#fff", border: "1px solid #ccc", borderRadius: 3, cursor: "pointer" }}>✕</button>
+                          </td>
+                        </tr>
+                      );
+                      return (
+                        <tr key={i} style={{ background: rowBg }}>
+                          <td style={{ padding: "4px 6px", fontWeight: "bold" }}>
+                            {cur}{z.price_level?.toLocaleString()}
+                            {z.in_zone_now && <span style={{ marginLeft: 4, fontSize: 9, background: "#2e7d32", color: "#fff", borderRadius: 3, padding: "1px 3px" }}>NOW</span>}
+                          </td>
+                          <td style={{ padding: "4px 6px", textAlign: "right", color: "#666" }}>{z.fib?.toFixed(3) ?? "—"}</td>
+                          <td style={{ padding: "4px 6px", textAlign: "right" }}>{z.touch_count}</td>
+                          <td style={{ padding: "4px 6px", textAlign: "right" }}>{z.vol_pct?.toFixed(1)}%</td>
+                          <td style={{ padding: "4px 6px", textAlign: "right" }}>{pct(z.pct_from_hh)}</td>
+                          <td style={{ padding: "4px 6px", textAlign: "right", fontWeight: "bold" }}>
+                            {z.adjusted_target_pct !== z.total_target_pct
+                              ? <><span style={{ color: "#e65100" }}>{z.adjusted_target_pct?.toFixed(2)}%</span><span style={{ color: "#999", fontSize: 9 }}> (50%)</span></>
+                              : `${z.total_target_pct?.toFixed(2)}%`}
+                          </td>
+                          <td style={{ padding: "4px 6px" }}><AlertBadge type="BUY" /></td>
+                          <td style={{ padding: "4px 6px", whiteSpace: "nowrap" }}>
+                            <button onClick={() => startEdit(key, z.price_level, z.total_target_pct)}
+                              style={{ fontSize: 10, padding: "2px 5px", background: "#fff", border: "1px solid #90caf9", borderRadius: 3, cursor: "pointer", marginRight: 3 }}>✎</button>
+                            <button onClick={() => deleteZone(i, buyZones, setBuyZones)}
+                              style={{ fontSize: 10, padding: "2px 5px", background: "#fff", border: "1px solid #e57373", color: "#c62828", borderRadius: 3, cursor: "pointer" }}>✕</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               ) : <p style={{ fontSize: 11, color: "#999" }}>No buy zones below current price.</p>}
@@ -490,29 +660,62 @@ function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSell
 
             {/* Sell zones */}
             <div>
-              <div style={{ fontWeight: "bold", fontSize: 12, color: "#c62828", marginBottom: 4 }}>🔴 Sell Zones ({zones.sell_zones?.length || 0})</div>
-              {zones.sell_zones?.length > 0 ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <span style={{ fontWeight: "bold", fontSize: 12, color: "#c62828" }}>🔴 Sell Zones ({sellZones.length})</span>
+                <button onClick={() => addZone(sellZones, setSellZones, "sell")}
+                  style={{ fontSize: 10, padding: "1px 7px", background: "#ffebee", border: "1px solid #e57373", borderRadius: 3, cursor: "pointer" }}>➕</button>
+              </div>
+              {sellZones.length > 0 ? (
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                   <thead>
                     <tr style={{ background: "#ffebee" }}>
-                      {["Price", "Fib", "Touches", "Vol%", "% LL", "Trim to%", "Note"].map(h =>
-                        <th key={h} style={{ padding: "4px 6px", textAlign: h === "Price" || h === "Note" ? "left" : "right", whiteSpace: "nowrap" }}>{h}</th>)}
+                      {["Price", "Fib", "Touches", "Vol%", "% LL", "Trim to%", "Alert", ""].map(h =>
+                        <th key={h} style={{ padding: "4px 6px", textAlign: h === "Price" || h === "" || h === "Alert" ? "left" : "right", whiteSpace: "nowrap" }}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
-                    {zones.sell_zones.map((z, i) => (
-                      <tr key={i} style={{ background: i % 2 ? "#fff8f8" : "#fff" }}>
-                        <td style={{ padding: "4px 6px", fontWeight: "bold" }}>{cur}{z.price_level?.toLocaleString()}</td>
-                        <td style={{ padding: "4px 6px", textAlign: "right", color: "#666" }}>{z.fib != null ? z.fib.toFixed(3) : "—"}</td>
-                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{z.touch_count}</td>
-                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{z.vol_pct?.toFixed(1)}%</td>
-                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{pct(z.pct_from_ll)}</td>
-                        <td style={{ padding: "4px 6px", textAlign: "right", fontWeight: "bold", color: z.total_target_pct === 0 ? "#c62828" : "#333" }}>
-                          {z.total_target_pct?.toFixed(2)}%
-                        </td>
-                        <td style={{ padding: "4px 6px", fontSize: 10, color: "#666" }}>{z.note || ""}</td>
-                      </tr>
-                    ))}
+                    {sellZones.map((z, i) => {
+                      const key = `${i}_sell`;
+                      const ed  = editing[key];
+                      const rowBg = i % 2 ? "#fff8f8" : "#fff";
+                      if (ed) return (
+                        <tr key={key} style={{ background: "#fffde7" }}>
+                          <td style={{ padding: "3px 6px" }}>
+                            <input value={ed.price} onChange={e => setEditing(p => ({ ...p, [key]: { ...p[key], price: e.target.value } }))}
+                              style={{ width: 70, fontSize: 11, padding: "2px 4px", borderRadius: 3, border: "1px solid #ccc" }} />
+                          </td>
+                          <td colSpan={5} style={{ padding: "3px 6px", fontSize: 11, color: "#999" }}>
+                            Trim to%: <input value={ed.target} onChange={e => setEditing(p => ({ ...p, [key]: { ...p[key], target: e.target.value } }))}
+                              style={{ width: 50, fontSize: 11, padding: "2px 4px", borderRadius: 3, border: "1px solid #ccc" }} />
+                          </td>
+                          <td colSpan={2} style={{ padding: "3px 6px" }}>
+                            <button onClick={() => saveEdit(key, sellZones, setSellZones)}
+                              style={{ fontSize: 10, padding: "2px 6px", background: "#e8f5e9", border: "1px solid #66bb6a", borderRadius: 3, cursor: "pointer", marginRight: 3 }}>✓</button>
+                            <button onClick={() => cancelEdit(key)}
+                              style={{ fontSize: 10, padding: "2px 6px", background: "#fff", border: "1px solid #ccc", borderRadius: 3, cursor: "pointer" }}>✕</button>
+                          </td>
+                        </tr>
+                      );
+                      return (
+                        <tr key={i} style={{ background: rowBg }}>
+                          <td style={{ padding: "4px 6px", fontWeight: "bold" }}>{cur}{z.price_level?.toLocaleString()}</td>
+                          <td style={{ padding: "4px 6px", textAlign: "right", color: "#666" }}>{z.fib != null ? z.fib.toFixed(3) : "—"}</td>
+                          <td style={{ padding: "4px 6px", textAlign: "right" }}>{z.touch_count}</td>
+                          <td style={{ padding: "4px 6px", textAlign: "right" }}>{z.vol_pct?.toFixed(1)}%</td>
+                          <td style={{ padding: "4px 6px", textAlign: "right" }}>{pct(z.pct_from_ll)}</td>
+                          <td style={{ padding: "4px 6px", textAlign: "right", fontWeight: "bold", color: z.total_target_pct === 0 ? "#c62828" : "#333" }}>
+                            {z.total_target_pct?.toFixed(2)}%
+                          </td>
+                          <td style={{ padding: "4px 6px" }}><AlertBadge type="SELL" /></td>
+                          <td style={{ padding: "4px 6px", whiteSpace: "nowrap" }}>
+                            <button onClick={() => startEdit(key, z.price_level, z.total_target_pct)}
+                              style={{ fontSize: 10, padding: "2px 5px", background: "#fff", border: "1px solid #90caf9", borderRadius: 3, cursor: "pointer", marginRight: 3 }}>✎</button>
+                            <button onClick={() => deleteZone(i, sellZones, setSellZones)}
+                              style={{ fontSize: 10, padding: "2px 5px", background: "#fff", border: "1px solid #e57373", color: "#c62828", borderRadius: 3, cursor: "pointer" }}>✕</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               ) : <p style={{ fontSize: 11, color: "#999" }}>No sell zones above current price.</p>}
@@ -525,20 +728,6 @@ function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSell
 }
 
 // ── Zone Alerts Panel ────────────────────────────────────────────────────────
-
-const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:8000";
-
-async function fetchZoneAlerts(market, symbol) {
-  const res = await fetch(`${API_BASE}/research/zone-alerts/${market}/${symbol}`);
-  return res.json();
-}
-async function setZoneAlert(market, symbol, zone_type, enabled, rearm = false) {
-  const res = await fetch(`${API_BASE}/research/zone-alerts/${market}/${symbol}`, {
-    method: "PUT", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ zone_type, enabled, rearm }),
-  });
-  return res.json();
-}
 
 function ZoneAlertsPanel({ symbol, market }) {
   const [zones,   setZones]   = useState(null);
@@ -651,6 +840,8 @@ export default function OhlcvChart() {
   const [maxSellZones,   setMaxSellZones]   = useState(5);
   const [hhTrimPct,      setHhTrimPct]      = useState(0.25);
   const [holdingPct,     setHoldingPct]     = useState("");
+  const [zonePrices,     setZonePrices]     = useState([]);
+  const [showZonesOnChart, setShowZonesOnChart] = useState(true);
 
   // Fetch current user id and role once
   useEffect(() => {
@@ -851,10 +1042,10 @@ export default function OhlcvChart() {
             basePos={basePos} maxPos={maxPos}
             maxBuyZones={maxBuyZones} maxSellZones={maxSellZones}
             hhTrimPct={hhTrimPct} currentHoldingPct={parseFloat(holdingPct) || 0}
+            onZonePricesChange={setZonePrices}
+            showZones={showZonesOnChart}
+            onToggleShowZones={() => setShowZonesOnChart(v => !v)}
           />
-
-          {/* Zone Alerts panel */}
-          <ZoneAlertsPanel symbol={data.symbol} market={data.market} />
 
           {/* Trigger creation panel */}
           <TriggerPanel
