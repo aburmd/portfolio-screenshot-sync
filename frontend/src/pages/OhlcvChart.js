@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, CrosshairMode, LineStyle } from "lightweight-charts";
-import { fetchOhlcv, fetchIntraday, addTrigger, listTriggers, deleteTrigger } from "../services/api";
+import { fetchOhlcv, fetchIntraday, addTrigger, listTriggers, deleteTrigger, fetchZones } from "../services/api";
 import { fetchAuthSession, fetchUserAttributes } from "aws-amplify/auth";
 
 const RANGES = ["6M", "1Y", "2Y", "5Y", "All"];
@@ -385,6 +385,133 @@ function TriggersList({ symbol, market, cur, triggers, onDeleted }) {
   );
 }
 
+// ── Zones Panel ──────────────────────────────────────────────────────────────
+
+const pct = (v) => v == null ? "—" : <span style={{ color: v >= 0 ? "#2e7d32" : "#c62828", fontWeight: "bold" }}>{v >= 0 ? "+" : ""}{v.toFixed(1)}%</span>;
+
+function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct }) {
+  const [zones,   setZones]   = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(null);
+
+  const compute = useCallback(async () => {
+    if (!symbol || !market) return;
+    setLoading(true); setError(null);
+    try {
+      const r = await fetchZones(market, symbol, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct || 0);
+      if (r.error) setError(r.error);
+      else setZones(r);
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  }, [symbol, market, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct]);
+
+  // auto-compute when symbol/market changes
+  useEffect(() => { setZones(null); }, [symbol, market]);
+
+  const cagr = zones?.cagr_summary;
+
+  return (
+    <div style={{ marginTop: 12, border: "1px solid #e0e0e0", borderRadius: 6, overflow: "hidden" }}>
+      {/* header + compute button */}
+      <div style={{ background: "#f5f5f5", padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontWeight: "bold", fontSize: 13 }}>📊 Buy / Sell Zones</span>
+        <button onClick={compute} disabled={loading}
+          style={{ padding: "4px 14px", fontSize: 12, background: loading ? "#bdbdbd" : "#1976d2",
+            color: "#fff", border: "none", borderRadius: 4, cursor: loading ? "not-allowed" : "pointer" }}>
+          {loading ? "Computing…" : zones ? "↺ Recompute" : "🔍 Compute Zones"}
+        </button>
+        {error && <span style={{ fontSize: 12, color: "#c62828" }}>❌ {error}</span>}
+        {zones && <span style={{ fontSize: 11, color: "#999" }}>HH {cur}{zones.period_hh?.toLocaleString()} · LL {cur}{zones.period_ll?.toLocaleString()}</span>}
+      </div>
+
+      {zones && (
+        <div style={{ padding: 12 }}>
+          {/* CAGR summary */}
+          {cagr && (
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10, fontSize: 12 }}>
+              {cagr.cagr_1y  != null && <span>1Y CAGR: <b>{pct(cagr.cagr_1y)}</b></span>}
+              {cagr.cagr_3y  != null && <span>3Y CAGR: <b>{pct(cagr.cagr_3y)}</b></span>}
+              {cagr.cagr_5y  != null && <span>5Y CAGR: <b>{pct(cagr.cagr_5y)}</b></span>}
+              {cagr.avg_cagr != null && <span style={{ fontWeight: "bold" }}>Avg: {pct(cagr.avg_cagr)}</span>}
+              {cagr.qqq_gate_price != null && <span style={{ background: "#fff3e0", padding: "1px 6px", borderRadius: 3 }}>🚪 QQQ Gate: <b>{cur}{cagr.qqq_gate_price?.toLocaleString()}</b></span>}
+              {cagr.final_sell_price != null && <span style={{ background: "#fce4ec", padding: "1px 6px", borderRadius: 3 }}>🎯 Final Sell: <b>{cur}{cagr.final_sell_price?.toLocaleString()}</b></span>}
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            {/* Buy zones */}
+            <div>
+              <div style={{ fontWeight: "bold", fontSize: 12, color: "#2e7d32", marginBottom: 4 }}>🟢 Buy Zones ({zones.buy_zones?.length || 0})</div>
+              {zones.buy_zones?.length > 0 ? (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                  <thead>
+                    <tr style={{ background: "#e8f5e9" }}>
+                      {["Price", "Fib", "Touches", "Vol%", "% HH", "Target%", "Status"].map(h =>
+                        <th key={h} style={{ padding: "4px 6px", textAlign: h === "Price" ? "left" : "right", whiteSpace: "nowrap" }}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {zones.buy_zones.map((z, i) => (
+                      <tr key={i} style={{ background: z.in_zone_now ? "#c8e6c9" : i % 2 ? "#f9fbe7" : "#fff" }}>
+                        <td style={{ padding: "4px 6px", fontWeight: "bold" }}>
+                          {cur}{z.price_level?.toLocaleString()}
+                          {z.in_zone_now && <span style={{ marginLeft: 4, fontSize: 9, background: "#2e7d32", color: "#fff", borderRadius: 3, padding: "1px 3px" }}>NOW</span>}
+                        </td>
+                        <td style={{ padding: "4px 6px", textAlign: "right", color: "#666" }}>{z.fib?.toFixed(3)}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{z.touch_count}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{z.vol_pct?.toFixed(1)}%</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{pct(z.pct_from_hh)}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right", fontWeight: "bold" }}>
+                          {z.adjusted_target_pct !== z.total_target_pct
+                            ? <><span style={{ color: "#e65100" }}>{z.adjusted_target_pct?.toFixed(2)}%</span><span style={{ color: "#999", fontSize: 9 }}> (50%)</span></>
+                            : `${z.total_target_pct?.toFixed(2)}%`}
+                        </td>
+                        <td style={{ padding: "4px 6px", textAlign: "right" }}>
+                          {z.qqq_gate_qualified ? "✅" : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : <p style={{ fontSize: 11, color: "#999" }}>No buy zones below current price.</p>}
+            </div>
+
+            {/* Sell zones */}
+            <div>
+              <div style={{ fontWeight: "bold", fontSize: 12, color: "#c62828", marginBottom: 4 }}>🔴 Sell Zones ({zones.sell_zones?.length || 0})</div>
+              {zones.sell_zones?.length > 0 ? (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                  <thead>
+                    <tr style={{ background: "#ffebee" }}>
+                      {["Price", "Fib", "Touches", "Vol%", "% LL", "Trim to%", "Note"].map(h =>
+                        <th key={h} style={{ padding: "4px 6px", textAlign: h === "Price" || h === "Note" ? "left" : "right", whiteSpace: "nowrap" }}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {zones.sell_zones.map((z, i) => (
+                      <tr key={i} style={{ background: i % 2 ? "#fff8f8" : "#fff" }}>
+                        <td style={{ padding: "4px 6px", fontWeight: "bold" }}>{cur}{z.price_level?.toLocaleString()}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right", color: "#666" }}>{z.fib != null ? z.fib.toFixed(3) : "—"}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{z.touch_count}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{z.vol_pct?.toFixed(1)}%</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{pct(z.pct_from_ll)}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right", fontWeight: "bold", color: z.total_target_pct === 0 ? "#c62828" : "#333" }}>
+                          {z.total_target_pct?.toFixed(2)}%
+                        </td>
+                        <td style={{ padding: "4px 6px", fontSize: 10, color: "#666" }}>{z.note || ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : <p style={{ fontSize: 11, color: "#999" }}>No sell zones above current price.</p>}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Zone Alerts Panel ────────────────────────────────────────────────────────
 
 const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:8000";
@@ -506,6 +633,12 @@ export default function OhlcvChart() {
   const [intradayBars,  setIntradayBars]  = useState([]);
   const [intradayLoad,  setIntradayLoad]  = useState(false);
   const [visibleMAs,    setVisibleMAs]    = useState(new Set(["ma50", "ma150", "ma200"]));
+  const [basePos,        setBasePos]        = useState(0.5);
+  const [maxPos,         setMaxPos]         = useState(3.0);
+  const [maxBuyZones,    setMaxBuyZones]    = useState(5);
+  const [maxSellZones,   setMaxSellZones]   = useState(5);
+  const [hhTrimPct,      setHhTrimPct]      = useState(0.25);
+  const [holdingPct,     setHoldingPct]     = useState("");
 
   // Fetch current user id and role once
   useEffect(() => {
@@ -581,6 +714,30 @@ export default function OhlcvChart() {
             <option value="US">US</option>
             <option value="IN">India (NSE)</option>
           </select>
+        </label>
+        <label style={{ fontSize: 12 }}>Base%<br />
+          <input type="number" value={basePos} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setBasePos(v); }}
+            step={0.1} min={0.1} style={{ padding: "6px 8px", width: 58, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }} />
+        </label>
+        <label style={{ fontSize: 12 }}>Max%<br />
+          <input type="number" value={maxPos} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setMaxPos(v); }}
+            step={0.5} min={0.1} style={{ padding: "6px 8px", width: 58, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }} />
+        </label>
+        <label style={{ fontSize: 12 }}>Buy Zones<br />
+          <input type="number" value={maxBuyZones} onChange={e => setMaxBuyZones(parseInt(e.target.value) || 5)}
+            min={1} max={20} style={{ padding: "6px 8px", width: 55, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }} />
+        </label>
+        <label style={{ fontSize: 12 }}>Sell Zones<br />
+          <input type="number" value={maxSellZones} onChange={e => setMaxSellZones(parseInt(e.target.value) || 5)}
+            min={1} max={20} style={{ padding: "6px 8px", width: 55, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }} />
+        </label>
+        <label style={{ fontSize: 12 }}>Holding%<br />
+          <input type="number" value={holdingPct} onChange={e => setHoldingPct(e.target.value)}
+            placeholder="0" step={0.1} min={0} style={{ padding: "6px 8px", width: 60, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }} />
+        </label>
+        <label style={{ fontSize: 12 }}>HH Trim%<br />
+          <input type="number" value={hhTrimPct} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setHhTrimPct(v); }}
+            step={0.05} min={0} style={{ padding: "6px 8px", width: 60, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }} />
         </label>
         <button
           onClick={() => handleSearch()}
@@ -673,6 +830,14 @@ export default function OhlcvChart() {
               />
             : <p style={{ color: "#999" }}>No data for selected range.</p>
           }
+
+          {/* Zones panel — full buy/sell zone tables */}
+          <ZonesPanel
+            symbol={data.symbol} market={data.market} cur={cur}
+            basePos={basePos} maxPos={maxPos}
+            maxBuyZones={maxBuyZones} maxSellZones={maxSellZones}
+            hhTrimPct={hhTrimPct} currentHoldingPct={parseFloat(holdingPct) || 0}
+          />
 
           {/* Zone Alerts panel */}
           <ZoneAlertsPanel symbol={data.symbol} market={data.market} />
