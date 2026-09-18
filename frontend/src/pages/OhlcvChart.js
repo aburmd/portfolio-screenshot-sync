@@ -20,7 +20,7 @@ function filterByRange(rows, range) {
   return rows.filter(r => r.date >= cutoffStr);
 }
 
-function CandleChart({ ohlcv, intraday, cur, triggers, onChartClick, visibleMAs }) {
+function CandleChart({ ohlcv, intraday, cur, triggers, zonePrices, showZones, onChartClick, visibleMAs }) {
   const containerRef    = useRef(null);
   const chartRef        = useRef(null);
   const candleRef       = useRef(null);
@@ -85,6 +85,18 @@ function CandleChart({ ohlcv, intraday, cur, triggers, onChartClick, visibleMAs 
         candleSeries.update(bar);
         barMap[b.date] = bar;
       }
+    }
+
+    // Draw zone price lines
+    if (showZones && zonePrices?.length) {
+      zonePrices.forEach(z => {
+        const color = z.type === "buy" ? "#2e7d32" : "#c62828";
+        candleSeries.createPriceLine({
+          price: z.price, color, lineWidth: 1,
+          lineStyle: LineStyle.Dashed, axisLabelVisible: true,
+          title: `${z.type === "buy" ? "B" : "S"} ${z.price.toFixed(2)}`,
+        });
+      });
     }
 
     // Draw trigger price lines
@@ -825,6 +837,8 @@ export default function OhlcvChart() {
                 intraday={intradayBars}
                 cur={cur}
                 triggers={triggers}
+                zonePrices={zonePrices}
+                showZones={showZonesOnChart}
                 onChartClick={setClickedPrice}
                 visibleMAs={visibleMAs}
               />
