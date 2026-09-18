@@ -401,25 +401,31 @@ function TriggersList({ symbol, market, cur, triggers, onDeleted }) {
 
 const pct = (v) => v == null ? "—" : <span style={{ color: v >= 0 ? "#2e7d32" : "#c62828", fontWeight: "bold" }}>{v >= 0 ? "+" : ""}{v.toFixed(1)}%</span>;
 
-function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct, onZonePricesChange, showZones, onToggleShowZones, userId, onSaved }) {
+function ZonesPanel({ symbol, market, cur, onZonePricesChange, showZones, onToggleShowZones, userId, onSaved }) {
   const [zones,     setZones]     = useState(null);
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState(null);
-  const [alerts,    setAlerts]    = useState({});  // { BUY: {enabled,fired}, SELL: {enabled,fired} }
+  const [alerts,    setAlerts]    = useState({});
   const [alertBusy, setAlertBusy] = useState(null);
   const [saving,    setSaving]    = useState(false);
-  // per-row edit state: { [idx_type]: { price, target } }  type = "buy"|"sell"
+  // zone params — live inside the panel
+  const [basePos,      setBasePos]      = useState(0.5);
+  const [maxPos,       setMaxPos]       = useState(3.0);
+  const [maxBuyZones,  setMaxBuyZones]  = useState(5);
+  const [maxSellZones, setMaxSellZones] = useState(5);
+  const [holdingPct,   setHoldingPct]   = useState("");
+  const [hhTrimPct,    setHhTrimPct]    = useState(0.25);
+  // per-row edit state
   const [editing,   setEditing]   = useState({});
 
   const compute = useCallback(async () => {
     if (!symbol || !market) return;
     setLoading(true); setError(null);
     try {
-      const r = await fetchZones(market, symbol, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct || 0);
+      const r = await fetchZones(market, symbol, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, parseFloat(holdingPct) || 0);
       if (r.error) { setError(r.error); }
       else {
         setZones(r);
-        // push zone prices up to parent for chart lines
         const prices = [
           ...(r.buy_zones  || []).map(z => ({ price: z.price_level, type: "buy"  })),
           ...(r.sell_zones || []).map(z => ({ price: z.price_level, type: "sell" })),
@@ -428,7 +434,7 @@ function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSell
       }
     } catch (e) { setError(e.message); }
     setLoading(false);
-  }, [symbol, market, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, currentHoldingPct, onZonePricesChange]);
+  }, [symbol, market, basePos, maxPos, maxBuyZones, maxSellZones, hhTrimPct, holdingPct, onZonePricesChange]);
 
   const loadAlerts = useCallback(async () => {
     if (!symbol || !market) return;
@@ -563,7 +569,7 @@ function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSell
         user_id: userId,
         base_pos: basePos, max_pos: maxPos,
         max_buy_zones: maxBuyZones, max_sell_zones: maxSellZones,
-        hh_trim_pct: hhTrimPct, current_holding_pct: currentHoldingPct,
+        hh_trim_pct: hhTrimPct, current_holding_pct: parseFloat(holdingPct) || 0,
         zones_data: { ...zones, buy_zones: buyZones, sell_zones: sellZones },
       });
       if (r.error) alert(r.error);
@@ -574,6 +580,25 @@ function ZonesPanel({ symbol, market, cur, basePos, maxPos, maxBuyZones, maxSell
 
   return (
     <div style={{ marginTop: 12, border: "1px solid #e0e0e0", borderRadius: 6, overflow: "hidden" }}>
+      {/* Zone params row */}
+      <div style={{ background: "#fafafa", padding: "8px 12px", borderBottom: "1px solid #e0e0e0",
+        display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+        {[
+          { label: "Base%",      val: basePos,      set: v => setBasePos(parseFloat(v) || 0.5),      step: 0.1,  w: 55 },
+          { label: "Max%",       val: maxPos,       set: v => setMaxPos(parseFloat(v) || 3.0),       step: 0.5,  w: 55 },
+          { label: "Buy Zones",  val: maxBuyZones,  set: v => setMaxBuyZones(parseInt(v) || 5),      step: 1,    w: 50 },
+          { label: "Sell Zones", val: maxSellZones, set: v => setMaxSellZones(parseInt(v) || 5),     step: 1,    w: 50 },
+          { label: "Holding%",   val: holdingPct,   set: v => setHoldingPct(v),                      step: 0.1,  w: 55, placeholder: "0" },
+          { label: "HH Trim%",   val: hhTrimPct,    set: v => setHhTrimPct(parseFloat(v) || 0.25),  step: 0.05, w: 55 },
+        ].map(({ label, val, set, step, w, placeholder }) => (
+          <label key={label} style={{ fontSize: 11, color: "#555" }}>{label}<br />
+            <input type="number" value={val} onChange={e => set(e.target.value)}
+              placeholder={placeholder} step={step} min={0}
+              style={{ padding: "4px 6px", width: w, fontSize: 12, borderRadius: 4, border: "1px solid #ccc" }} />
+          </label>
+        ))}
+      </div>
+      {/* action row */}
       <div style={{ background: "#f5f5f5", padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <span style={{ fontWeight: "bold", fontSize: 13 }}>📊 Buy / Sell Zones</span>
         <button onClick={compute} disabled={loading}
@@ -860,12 +885,6 @@ export default function OhlcvChart() {
   const [intradayBars,  setIntradayBars]  = useState([]);
   const [intradayLoad,  setIntradayLoad]  = useState(false);
   const [visibleMAs,    setVisibleMAs]    = useState(new Set(["ma50", "ma150", "ma200"]));
-  const [basePos,        setBasePos]        = useState(0.5);
-  const [maxPos,         setMaxPos]         = useState(3.0);
-  const [maxBuyZones,    setMaxBuyZones]    = useState(5);
-  const [maxSellZones,   setMaxSellZones]   = useState(5);
-  const [hhTrimPct,      setHhTrimPct]      = useState(0.25);
-  const [holdingPct,     setHoldingPct]     = useState("");
   const [zonePrices,     setZonePrices]     = useState([]);
   const [showZonesOnChart, setShowZonesOnChart] = useState(true);
 
@@ -925,7 +944,7 @@ export default function OhlcvChart() {
 
   return (
     <div>
-      {/* Search bar */}
+      {/* Search bar — symbol + market only */}
       <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 16,
         background: "#f5f5f5", padding: 12, borderRadius: 6, border: "1px solid #e0e0e0" }}>
         <label style={{ fontSize: 12 }}>Symbol<br />
@@ -934,7 +953,7 @@ export default function OhlcvChart() {
             onChange={e => setSymbol(e.target.value)}
             onKeyDown={e => e.key === "Enter" && handleSearch()}
             placeholder="e.g. AAPL, CRDO, INFY"
-            style={{ padding: "6px 10px", width: 160, fontSize: 14, borderRadius: 4, border: "1px solid #ccc" }}
+            style={{ padding: "6px 10px", width: 180, fontSize: 14, borderRadius: 4, border: "1px solid #ccc" }}
           />
         </label>
         <label style={{ fontSize: 12 }}>Market<br />
@@ -943,30 +962,6 @@ export default function OhlcvChart() {
             <option value="US">US</option>
             <option value="IN">India (NSE)</option>
           </select>
-        </label>
-        <label style={{ fontSize: 12 }}>Base%<br />
-          <input type="number" value={basePos} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setBasePos(v); }}
-            step={0.1} min={0.1} style={{ padding: "6px 8px", width: 58, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }} />
-        </label>
-        <label style={{ fontSize: 12 }}>Max%<br />
-          <input type="number" value={maxPos} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setMaxPos(v); }}
-            step={0.5} min={0.1} style={{ padding: "6px 8px", width: 58, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }} />
-        </label>
-        <label style={{ fontSize: 12 }}>Buy Zones<br />
-          <input type="number" value={maxBuyZones} onChange={e => setMaxBuyZones(parseInt(e.target.value) || 5)}
-            min={1} max={20} style={{ padding: "6px 8px", width: 55, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }} />
-        </label>
-        <label style={{ fontSize: 12 }}>Sell Zones<br />
-          <input type="number" value={maxSellZones} onChange={e => setMaxSellZones(parseInt(e.target.value) || 5)}
-            min={1} max={20} style={{ padding: "6px 8px", width: 55, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }} />
-        </label>
-        <label style={{ fontSize: 12 }}>Holding%<br />
-          <input type="number" value={holdingPct} onChange={e => setHoldingPct(e.target.value)}
-            placeholder="0" step={0.1} min={0} style={{ padding: "6px 8px", width: 60, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }} />
-        </label>
-        <label style={{ fontSize: 12 }}>HH Trim%<br />
-          <input type="number" value={hhTrimPct} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setHhTrimPct(v); }}
-            step={0.05} min={0} style={{ padding: "6px 8px", width: 60, fontSize: 13, borderRadius: 4, border: "1px solid #ccc" }} />
         </label>
         <button
           onClick={() => handleSearch()}
@@ -1065,14 +1060,11 @@ export default function OhlcvChart() {
           {/* Zones panel — full buy/sell zone tables */}
           <ZonesPanel
             symbol={data.symbol} market={data.market} cur={cur}
-            basePos={basePos} maxPos={maxPos}
-            maxBuyZones={maxBuyZones} maxSellZones={maxSellZones}
-            hhTrimPct={hhTrimPct} currentHoldingPct={parseFloat(holdingPct) || 0}
             onZonePricesChange={setZonePrices}
             showZones={showZonesOnChart}
             onToggleShowZones={() => setShowZonesOnChart(v => !v)}
             userId={userId}
-            onSaved={() => alert(`Chart saved for ${data.symbol}`)}
+            onSaved={() => alert(`✅ Chart saved for ${data.symbol}`)}
           />
 
           {/* Trigger creation panel */}
