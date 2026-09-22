@@ -1,7 +1,7 @@
 """Alpaca trading client — reads keys from SSM, wraps alpaca-py."""
 import os
 import boto3
-from datetime import datetime, time
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
@@ -13,10 +13,7 @@ ET = ZoneInfo("America/New_York")
 
 
 def _extended_hours_tif() -> TimeInForce:
-    """Pre-market (4:00–9:30 AM ET) → OPG. After-hours (4:00–8:00 PM ET) → DAY."""
-    now = datetime.now(ET).time()
-    if time(4, 0) <= now < time(9, 30):
-        return TimeInForce.OPG
+    """Extended hours always requires DAY time-in-force (both pre-market and after-hours)."""
     return TimeInForce.DAY
 
 
