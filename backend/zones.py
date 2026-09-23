@@ -230,7 +230,9 @@ def _best_touch_price(records, band_lo, band_hi, zone_type):
 
 def _vol_pct(zone_price, band_lo, band_hi, records):
     """Volume at zone as % of total period volume (uniform distribution)."""
-    total_vol = sum(r["volume"] for r in records) or 1
+    total_vol = sum(r.get("volume") or 0 for r in records) or 0
+    if total_vol <= 0:
+        return 0.0
     vol_sum   = 0.0
     for r in records:
         hi, lo, vol = r.get("high") or 0, r.get("low") or 0, r.get("volume") or 0

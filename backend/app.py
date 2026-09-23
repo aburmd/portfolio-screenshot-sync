@@ -3264,13 +3264,19 @@ async def export_positions_csv(paper: bool = False):
 async def get_zones(market: str, symbol: str, base_pos: float = 0.5, max_pos: float = 3.0,
                     max_buy_zones: int = 5, max_sell_zones: int = 5, hh_trim_pct: float = 0.25, current_holding_pct: float = 0.0):
     """Compute buy/sell zones on-demand from OHLCV history."""
+    import math
+    def _clean(obj):
+        if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)): return None
+        if isinstance(obj, dict):  return {k: _clean(v) for k, v in obj.items()}
+        if isinstance(obj, list):  return [_clean(v) for v in obj]
+        return obj
     from zones import compute_zones
     result = compute_zones(symbol.upper(), market.upper(), base_pos=base_pos, max_pos=max_pos,
                            max_buy_zones=max_buy_zones, max_sell_zones=max_sell_zones,
                            hh_trim_pct=hh_trim_pct, current_holding_pct=current_holding_pct)
     if not result:
         return {"error": f"No history data for {market.upper()}#{symbol.upper()}"}
-    return result
+    return _clean(result)
 
 
 @app.get("/research/ohlcv/{market}/{symbol}")
