@@ -3305,6 +3305,20 @@ async def get_ohlcv(market: str, symbol: str):
     item = resp.get("Item")
     known = item is not None and item.get("daily_enabled")
 
+    def _row(idx, row):
+        """Build a clean OHLCV dict, return None if close is nan/zero."""
+        import math
+        c = float(row["Close"])
+        if math.isnan(c) or c <= 0: return None
+        return {
+            "date":   idx.strftime("%Y-%m-%d"),
+            "open":   round(float(row["Open"]),  2),
+            "high":   round(float(row["High"]),  2),
+            "low":    round(float(row["Low"]),   2),
+            "close":  round(c,                   2),
+            "volume": int(row["Volume"]),
+        }
+
     # ── Step 2a: known → read S3, then backfill any gap up to yesterday ────────
     if known:
         rows = _read_s3(mkt, sym)
@@ -3322,14 +3336,8 @@ async def get_ohlcv(market: str, symbol: str):
                         for idx, row in hist.iterrows():
                             d = idx.strftime("%Y-%m-%d")
                             if d not in existing_dates and d <= yesterday:
-                                rows.append({
-                                    "date":   d,
-                                    "open":   round(float(row["Open"]),   2),
-                                    "high":   round(float(row["High"]),   2),
-                                    "low":    round(float(row["Low"]),    2),
-                                    "close":  round(float(row["Close"]),  2),
-                                    "volume": int(row["Volume"]),
-                                })
+                                r = _row(idx, row)
+                                if r: rows.append(r)
                         rows.sort(key=lambda r: r["date"])
                         if len(rows) > DAILY_CAP:
                             rows = rows[-DAILY_CAP:]
@@ -3354,14 +3362,8 @@ async def get_ohlcv(market: str, symbol: str):
 
     rows = []
     for idx, row in hist.iterrows():
-        rows.append({
-            "date":   idx.strftime("%Y-%m-%d"),
-            "open":   round(float(row["Open"]),   2),
-            "high":   round(float(row["High"]),   2),
-            "low":    round(float(row["Low"]),    2),
-            "close":  round(float(row["Close"]),  2),
-            "volume": int(row["Volume"]),
-        })
+        r = _row(idx, row)
+        if r: rows.append(r)
     if len(rows) > DAILY_CAP:
         rows = rows[-DAILY_CAP:]
 
