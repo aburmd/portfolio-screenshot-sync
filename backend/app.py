@@ -3407,7 +3407,7 @@ async def create_plan(market: str, symbol: str, data: dict):
     # Convert floats to Decimal for DDB
     from decimal import Decimal
     def _to_ddb(obj):
-        if isinstance(obj, float): return Decimal(str(round(obj, 6)))
+        if isinstance(obj, float): return None if (obj != obj or obj == float("inf") or obj == float("-inf")) else Decimal(str(round(obj, 6)))
         if isinstance(obj, dict):  return {k: _to_ddb(v) for k, v in obj.items()}
         if isinstance(obj, list):  return [_to_ddb(v) for v in obj]
         return obj
@@ -3476,7 +3476,7 @@ async def execute_zone(market: str, symbol: str, data: dict):
             break
 
     def _to_ddb(obj):
-        if isinstance(obj, float): return Decimal(str(round(obj, 6)))
+        if isinstance(obj, float): return None if (obj != obj or obj == float("inf") or obj == float("-inf")) else Decimal(str(round(obj, 6)))
         if isinstance(obj, dict):  return {k: _to_ddb(v) for k, v in obj.items()}
         if isinstance(obj, list):  return [_to_ddb(v) for v in obj]
         return obj
@@ -3593,7 +3593,7 @@ async def save_chart(market: str, symbol: str, data: dict):
     table = ddb.Table(SAVED_CHARTS_TABLE)
 
     def _to_ddb(obj):
-        if isinstance(obj, float): return Decimal(str(round(obj, 6)))
+        if isinstance(obj, float): return None if (obj != obj or obj == float("inf") or obj == float("-inf")) else Decimal(str(round(obj, 6)))
         if isinstance(obj, dict):  return {k: _to_ddb(v) for k, v in obj.items()}
         if isinstance(obj, list):  return [_to_ddb(v) for v in obj]
         return obj
@@ -3667,7 +3667,7 @@ async def refresh_chart(market: str, symbol: str, data: dict):
     daily, _ = _fetch_ohlcv(market.upper(), symbol.upper())
 
     def _to_ddb(obj):
-        if isinstance(obj, float): return Decimal(str(round(obj, 6)))
+        if isinstance(obj, float): return None if (obj != obj or obj == float("inf") or obj == float("-inf")) else Decimal(str(round(obj, 6)))
         if isinstance(obj, dict):  return {k: _to_ddb(v) for k, v in obj.items()}
         if isinstance(obj, list):  return [_to_ddb(v) for v in obj]
         return obj
