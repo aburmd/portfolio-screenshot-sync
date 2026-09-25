@@ -10,7 +10,7 @@ export default function Trading({ user }) {
   const [account, setAccount] = useState(null);
   const [positions, setPositions] = useState([]);
   const [orders, setOrders] = useState([]);
-  const [form, setForm] = useState({ symbol: "", qty: "", amount: "", by: "qty", side: "buy", order_type: "market", limit_price: "", extended_hours: false });
+  const [form, setForm] = useState({ symbol: "", qty: "", amount: "", by: "qty", side: "buy", order_type: "market", tif: "day", limit_price: "", extended_hours: false });
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [canceling, setCanceling] = useState(null);
@@ -100,7 +100,7 @@ export default function Trading({ user }) {
       order_type: form.order_type, paper,
       extended_hours: form.extended_hours,
       ...(byAmount ? { notional: parseFloat(form.amount) } : { qty: parseFloat(form.qty) }),
-      ...(form.order_type === "limit" && form.limit_price ? { limit_price: parseFloat(form.limit_price) } : {}),
+      ...(form.order_type === "limit" && form.limit_price ? { limit_price: parseFloat(form.limit_price), tif: form.tif } : {}),
     };
     const res = await fetch(`${API_BASE}/trading/order`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -228,12 +228,23 @@ export default function Trading({ user }) {
           <div>
             <div style={{ fontSize: 11, marginBottom: 4 }}>Type</div>
             <select value={form.order_type}
-              onChange={e => setForm(f => ({ ...f, order_type: e.target.value, extended_hours: e.target.value !== "limit" ? false : f.extended_hours }))}
+              onChange={e => setForm(f => ({ ...f, order_type: e.target.value, extended_hours: e.target.value !== "limit" ? false : f.extended_hours, tif: e.target.value !== "limit" ? "day" : f.tif }))}
               style={{ padding: "6px 8px" }}>
               <option value="market">Market</option>
               <option value="limit">Limit</option>
             </select>
           </div>
+          {form.order_type === "limit" && (
+            <div>
+              <div style={{ fontSize: 11, marginBottom: 4 }}>TIF</div>
+              <select value={form.tif}
+                onChange={e => setForm(f => ({ ...f, tif: e.target.value, extended_hours: e.target.value === "gtc" ? false : f.extended_hours }))}
+                style={{ padding: "6px 8px" }}>
+                <option value="day">DAY</option>
+                <option value="gtc">GTC</option>
+              </select>
+            </div>
+          )}
           {form.order_type === "limit" && (
             <div>
               <div style={{ fontSize: 11, marginBottom: 4 }}>Limit Price</div>

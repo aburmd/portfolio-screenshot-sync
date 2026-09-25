@@ -2,20 +2,12 @@
 import os
 import boto3
 from datetime import datetime
-from zoneinfo import ZoneInfo
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 
 REGION = os.environ.get("AWS_REGION", "us-west-1")
 _client_cache = {}
-ET = ZoneInfo("America/New_York")
-
-
-def _extended_hours_tif() -> TimeInForce:
-    """Extended hours always requires DAY time-in-force (both pre-market and after-hours)."""
-    return TimeInForce.DAY
-
 
 def _get_client(paper: bool = True) -> TradingClient:
     key = "paper" if paper else "live"
@@ -48,13 +40,20 @@ def get_account(paper: bool = True) -> dict:
 
 def place_order(symbol: str, qty: float = None, side: str = "buy", order_type: str = "market",
                 limit_price: float = None, notional: float = None, paper: bool = True,
-                extended_hours: bool = False) -> dict:
+                extended_hours: bool = False, tif: str = "day") -> dict:
     client = _get_client(paper)
     order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
 
-    # Extended hours requires limit orders with time_in_force=day
     if extended_hours and order_type != "limit":
         raise ValueError("Extended hours trading requires a limit order with a limit price")
+
+    # Resolve time_in_force
+    if extended_hours:
+        resolved_tif = TimeInForce.DAY
+    elif tif.lower() == "gtc":
+        resolved_tif = TimeInForce.GTC
+    else:
+        resolved_tif = TimeInForce.DAY
 
     if notional:
         req = MarketOrderRequest(symbol=symbol.upper(), notional=round(notional, 2),
@@ -62,7 +61,7 @@ def place_order(symbol: str, qty: float = None, side: str = "buy", order_type: s
     elif order_type == "limit" and limit_price:
         req = LimitOrderRequest(
             symbol=symbol.upper(), qty=qty, side=order_side,
-            time_in_force=_extended_hours_tif() if extended_hours else TimeInForce.DAY,
+            time_in_force=resolved_tif,
             limit_price=limit_price,
             extended_hours=extended_hours
         )

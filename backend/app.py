@@ -3037,6 +3037,7 @@ async def trading_place_order(data: dict, request: Request):
             notional=float(data["notional"]) if data.get("notional") else None,
             paper=data.get("paper", True),
             extended_hours=data.get("extended_hours", False),
+            tif=data.get("tif", "day"),
         )
         # Store lot record in DDB (best-effort — don't fail the order if this fails)
         if result.get("id") and not result.get("error"):
