@@ -14,7 +14,7 @@ from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from mangum import Mangum
-from auth import get_claims, require_admin
+from auth import get_claims, require_admin, require_claims
 
 import yfinance as yf
 
@@ -3122,8 +3122,8 @@ async def trading_place_order(data: dict, request: Request):
 @app.get("/trading/fractional-queue")
 async def get_fractional_queue(request: Request, paper: bool = True):
     try:
-        claims = get_claims(request)
-        user_id = claims.get("sub", "unknown") if claims else "unknown"
+        claims = require_claims(request)
+        user_id = claims.get("sub", "unknown")
         resp = ddb.Table(FRACTIONAL_QUEUE_TABLE).query(
             KeyConditionExpression=Key("user_id").eq(user_id)
         )
@@ -3140,8 +3140,8 @@ async def get_fractional_queue(request: Request, paper: bool = True):
 async def cancel_fractional_queue(item_id: str, request: Request):
     try:
         from alpaca_client import cancel_order
-        claims = get_claims(request)
-        user_id = claims.get("sub", "unknown") if claims else "unknown"
+        claims = require_claims(request)
+        user_id = claims.get("sub", "unknown")
         table = ddb.Table(FRACTIONAL_QUEUE_TABLE)
         resp = table.get_item(Key={"user_id": user_id, "id": item_id})
         item = resp.get("Item")

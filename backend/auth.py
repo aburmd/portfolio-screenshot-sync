@@ -38,17 +38,28 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
 
 
-def get_claims(request: Request) -> dict:
-    """Extract and decode JWT from Authorization header. Raises 401 if missing/invalid."""
+def get_claims(request: Request) -> dict | None:
+    """Extract and decode JWT from Authorization header. Returns None if missing/invalid."""
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-    return decode_token(auth[7:])
+        return None
+    try:
+        return decode_token(auth[7:])
+    except HTTPException:
+        return None
+
+
+def require_claims(request: Request) -> dict:
+    """Like get_claims but raises 401 if token missing/invalid."""
+    claims = get_claims(request)
+    if not claims:
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    return claims
 
 
 def require_admin(request: Request) -> dict:
     """Like get_claims but also asserts custom:role == admin."""
-    claims = get_claims(request)
+    claims = require_claims(request)
     if claims.get("custom:role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     return claims
