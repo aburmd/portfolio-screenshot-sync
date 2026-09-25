@@ -79,9 +79,9 @@ export default function Trading({ user }) {
     setLoading(true);
     try {
       const [acct, pos, ords, frac] = await Promise.all([
-        fetch(`${API_BASE}/trading/account?paper=${paper}`).then(r => r.json()),
-        fetch(`${API_BASE}/trading/positions?paper=${paper}`).then(r => r.json()),
-        fetch(`${API_BASE}/trading/orders?paper=${paper}&limit=20`).then(r => r.json()),
+        authFetch(`${API_BASE}/trading/account?paper=${paper}`).then(r => r.json()),
+        authFetch(`${API_BASE}/trading/positions?paper=${paper}`).then(r => r.json()),
+        authFetch(`${API_BASE}/trading/orders?paper=${paper}&limit=20`).then(r => r.json()),
         authFetch(`${API_BASE}/trading/fractional-queue?paper=${paper}`).then(r => r.json()),
       ]);
       setAccount(acct.error ? null : acct);
@@ -118,7 +118,7 @@ export default function Trading({ user }) {
       ...(byAmount ? { notional: parseFloat(form.amount) } : { qty: parseFloat(form.qty) }),
       ...(form.order_type === "limit" && form.limit_price ? { limit_price: parseFloat(form.limit_price), tif: form.tif } : {}),
     };
-    const res = await fetch(`${API_BASE}/trading/order`, {
+    const res = await authFetch(`${API_BASE}/trading/order`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     }).then(r => r.json());
 
@@ -148,7 +148,7 @@ export default function Trading({ user }) {
 
   const cancelOrder = async (orderId) => {
     setCanceling(orderId);
-    const res = await fetch(`${API_BASE}/trading/order/${orderId}?paper=${paper}`, { method: "DELETE" }).then(r => r.json());
+    const res = await authFetch(`${API_BASE}/trading/order/${orderId}?paper=${paper}`, { method: "DELETE" }).then(r => r.json());
     if (res.error) setStatus("❌ Cancel failed: " + res.error);
     else setStatus("✅ Order cancelled");
     setCanceling(null);
@@ -157,7 +157,7 @@ export default function Trading({ user }) {
 
   const editOrder = async (o) => {
     setEditing(o.id);
-    const res = await fetch(`${API_BASE}/trading/order/${o.id}?paper=${paper}`, { method: "DELETE" }).then(r => r.json());
+    const res = await authFetch(`${API_BASE}/trading/order/${o.id}?paper=${paper}`, { method: "DELETE" }).then(r => r.json());
     if (res.error) { setStatus("❌ Could not cancel for edit: " + res.error); setEditing(null); return; }
     setForm({
       symbol: o.symbol,
