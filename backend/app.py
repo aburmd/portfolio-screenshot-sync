@@ -3030,8 +3030,8 @@ async def trading_place_order(data: dict, request: Request):
         import uuid
         from alpaca_client import place_order
         from datetime import datetime, timezone
-        claims = get_claims(request)
-        user_id = claims.get("sub", "unknown") if claims else "unknown"
+        claims = require_claims(request)
+        user_id = claims.get("sub", "unknown")
         ts = datetime.now(timezone.utc).isoformat()
 
         raw_qty = float(data["qty"]) if data.get("qty") is not None else None
