@@ -3025,12 +3025,13 @@ async def trading_account(paper: bool = True):
 
 
 @app.post("/trading/order")
-async def trading_place_order(data: dict, request: Request):
+async def trading_place_order(request: Request):
     try:
         import uuid
         from alpaca_client import place_order
         from datetime import datetime, timezone
-        user_id = data.get("user_id", "unknown")
+        data = await request.json()
+        user_id = data.get("user_id") or data.get("userId") or "unknown"
         ts = datetime.now(timezone.utc).isoformat()
 
         raw_qty = float(data["qty"]) if data.get("qty") is not None else None

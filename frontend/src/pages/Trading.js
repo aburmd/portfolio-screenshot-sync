@@ -11,6 +11,13 @@ async function authFetch(url, options = {}) {
   return fetch(url, options);
 }
 
+async function getSessionUserId() {
+  try {
+    const session = await fetchAuthSession();
+    return session.tokens?.idToken?.payload?.sub || null;
+  } catch (_) { return null; }
+}
+
 const fmt = (n, prefix = "$") => n != null ? `${prefix}${Number(n).toFixed(2)}` : "—";
 const pct = (n) => n != null ? <span style={{ color: n >= 0 ? "green" : "red" }}>{n >= 0 ? "+" : ""}{n.toFixed(2)}%</span> : "—";
 const CANCELABLE = ["new", "accepted", "pending_new", "accepted_for_bidding", "held"];
@@ -91,8 +98,9 @@ export default function Trading({ user }) {
     } catch (e) { setStatus("❌ " + e.message); }
 
     try {
-      if (userId) {
-        const frac = await fetch(`${API_BASE}/trading/fractional-queue?user_id=${userId}`).then(r => r.json());
+      const resolvedUserId = await getSessionUserId() || userId;
+      if (resolvedUserId) {
+        const frac = await fetch(`${API_BASE}/trading/fractional-queue?user_id=${resolvedUserId}`).then(r => r.json());
         setFracQueue(Array.isArray(frac) ? frac : []);
       }
     } catch (e) {}
@@ -118,9 +126,10 @@ export default function Trading({ user }) {
     if (form.extended_hours && form.order_type !== "limit") return setStatus("Extended hours requires a Limit order with a limit price");
     if (form.extended_hours && !form.limit_price) return setStatus("Extended hours requires a limit price");
     setStatus("Placing order...");
+    const resolvedUserId = await getSessionUserId() || userId;
     const body = {
       symbol: form.symbol.toUpperCase(), side: form.side,
-      order_type: form.order_type, paper, user_id: userId,
+      order_type: form.order_type, paper, user_id: resolvedUserId,
       extended_hours: form.extended_hours,
       ...(byAmount ? { notional: parseFloat(form.amount) } : { qty: parseFloat(form.qty) }),
       ...(form.order_type === "limit" && form.limit_price ? { limit_price: parseFloat(form.limit_price), tif: form.tif } : {}),
@@ -146,7 +155,8 @@ export default function Trading({ user }) {
 
   const cancelFracQueue = async (itemId) => {
     setFracCanceling(itemId);
-    const res = await fetch(`${API_BASE}/trading/fractional-queue/${itemId}?user_id=${userId}`, { method: "DELETE" }).then(r => r.json());
+    const resolvedUserId = await getSessionUserId() || userId;
+    const res = await fetch(`${API_BASE}/trading/fractional-queue/${itemId}?user_id=${resolvedUserId}`, { method: "DELETE" }).then(r => r.json());
     if (res.error) setStatus("❌ Cancel failed: " + res.error);
     else setStatus("✅ Fractional queue item cancelled");
     setFracCanceling(null);
