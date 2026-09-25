@@ -3120,10 +3120,12 @@ async def trading_place_order(data: dict, request: Request):
 
 
 @app.get("/trading/fractional-queue")
-async def get_fractional_queue(request: Request, paper: bool = True):
+async def get_fractional_queue(request: Request):
     try:
-        claims = require_claims(request)
-        user_id = claims.get("sub", "unknown")
+        claims = get_claims(request)
+        user_id = claims.get("sub") if claims else None
+        if not user_id:
+            return []
         resp = ddb.Table(FRACTIONAL_QUEUE_TABLE).query(
             KeyConditionExpression=Key("user_id").eq(user_id)
         )
@@ -3140,8 +3142,10 @@ async def get_fractional_queue(request: Request, paper: bool = True):
 async def cancel_fractional_queue(item_id: str, request: Request):
     try:
         from alpaca_client import cancel_order
-        claims = require_claims(request)
-        user_id = claims.get("sub", "unknown")
+        claims = get_claims(request)
+        user_id = claims.get("sub") if claims else None
+        if not user_id:
+            return {"error": "Unauthorized"}
         table = ddb.Table(FRACTIONAL_QUEUE_TABLE)
         resp = table.get_item(Key={"user_id": user_id, "id": item_id})
         item = resp.get("Item")

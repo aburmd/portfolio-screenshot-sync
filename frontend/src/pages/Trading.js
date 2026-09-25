@@ -78,18 +78,22 @@ export default function Trading({ user }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [acct, pos, ords, frac] = await Promise.all([
+      const [acct, pos, ords] = await Promise.all([
         authFetch(`${API_BASE}/trading/account?paper=${paper}`).then(r => r.json()),
         authFetch(`${API_BASE}/trading/positions?paper=${paper}`).then(r => r.json()),
         authFetch(`${API_BASE}/trading/orders?paper=${paper}&limit=20`).then(r => r.json()),
-        authFetch(`${API_BASE}/trading/fractional-queue`).then(r => r.json()),
       ]);
       setAccount(acct.error ? null : acct);
       setPositions(Array.isArray(pos) ? pos : []);
       setOrders(Array.isArray(ords) ? ords : []);
-      setFracQueue(Array.isArray(frac) ? frac : []);
       if (acct.error) setStatus("❌ " + acct.error);
     } catch (e) { setStatus("❌ " + e.message); }
+
+    try {
+      const frac = await authFetch(`${API_BASE}/trading/fractional-queue`).then(r => r.json());
+      setFracQueue(Array.isArray(frac) ? frac : []);
+    } catch (e) {}
+
     setLoading(false);
   }, [paper]);
 
@@ -439,11 +443,14 @@ export default function Trading({ user }) {
       )}
 
       {/* Fractional Queue */}
-      {fracQueue.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>
-            ⏳ Daily Fractional Queue ({fracQueue.filter(i => i.status === "active").length} active)
-          </div>
+      {/* Fractional Queue */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>
+          ⏳ Daily Fractional Queue ({fracQueue.filter(i => i.status === "active").length} active)
+        </div>
+        {fracQueue.length === 0 ? (
+          <div style={{ color: "#888", fontSize: 13 }}>No fractional orders queued.</div>
+        ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
@@ -491,8 +498,8 @@ export default function Trading({ user }) {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Recent Orders */}
       {orders.length > 0 && (
