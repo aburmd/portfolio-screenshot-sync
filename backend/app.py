@@ -3073,27 +3073,34 @@ async def trading_place_order(data: dict, request: Request):
                 tif=data.get("tif", "day"),
             )
 
-        # Enqueue fractional part
+        # Place fractional part immediately as DAY limit + enqueue for daily retry
         frac_queued = False
+        frac_result = {}
         if frac_qty and frac_qty > 0 and limit_price:
             try:
+                frac_result = place_order(
+                    symbol=symbol, qty=frac_qty, side=side,
+                    order_type="limit", limit_price=limit_price,
+                    paper=paper, extended_hours=False, tif="day",
+                )
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 q_item = {
-                    "user_id":     user_id,
-                    "id":          str(uuid.uuid4()),
-                    "symbol":      symbol,
-                    "side":        side,
-                    "qty":         str(frac_qty),
-                    "limit_price": str(limit_price),
-                    "paper":       str(paper),
-                    "status":      "active",
-                    "last_order_id":   "",
-                    "last_order_date": "",
-                    "created_at":  ts,
+                    "user_id":         user_id,
+                    "id":              str(uuid.uuid4()),
+                    "symbol":          symbol,
+                    "side":            side,
+                    "qty":             str(frac_qty),
+                    "limit_price":     str(limit_price),
+                    "paper":           str(paper),
+                    "status":          "active",
+                    "last_order_id":   frac_result.get("id", ""),
+                    "last_order_date": today,
+                    "created_at":      ts,
                 }
                 ddb.Table(FRACTIONAL_QUEUE_TABLE).put_item(Item=q_item)
                 frac_queued = True
             except Exception as qe:
-                print(f"Fractional queue write failed (non-fatal): {qe}")
+                print(f"Fractional order/queue failed (non-fatal): {qe}")
 
         # Store lot record (best-effort)
         if result.get("id") and not result.get("error"):

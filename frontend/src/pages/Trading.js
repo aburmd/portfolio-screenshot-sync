@@ -91,12 +91,14 @@ export default function Trading({ user }) {
     } catch (e) { setStatus("❌ " + e.message); }
 
     try {
-      const frac = await fetch(`${API_BASE}/trading/fractional-queue?user_id=${userId}`).then(r => r.json());
-      setFracQueue(Array.isArray(frac) ? frac : []);
+      if (userId) {
+        const frac = await fetch(`${API_BASE}/trading/fractional-queue?user_id=${userId}`).then(r => r.json());
+        setFracQueue(Array.isArray(frac) ? frac : []);
+      }
     } catch (e) {}
 
     setLoading(false);
-  }, [paper]);
+  }, [paper, userId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -133,7 +135,7 @@ export default function Trading({ user }) {
       setStatus("❌ " + msg);
     } else if (res.id || res.fractional_queued) {
       const detail = byAmount ? `$${form.amount}` : `${form.qty} shares`;
-      const fracNote = res.fractional_queued ? ` + ${res.frac_qty?.toFixed(6)} shares queued daily` : "";
+      const fracNote = res.fractional_queued ? ` + ${res.frac_qty?.toFixed(6)} frac shares placed (DAY) & queued daily` : "";
       setStatus(`✅ Order placed: ${form.side} ${detail} of ${form.symbol.toUpperCase()}${fracNote}`);
       setForm(f => ({ ...f, symbol: "", qty: "", amount: "", limit_price: "", side: "buy", extended_hours: false }));
       setTimeout(load, 1500);
