@@ -1,5 +1,15 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { API_BASE, fetchLots } from "../services/api";
+import { fetchAuthSession } from "aws-amplify/auth";
+
+async function authFetch(url, options = {}) {
+  try {
+    const session = await fetchAuthSession();
+    const token = session.tokens?.idToken?.toString();
+    if (token) options.headers = { ...(options.headers || {}), Authorization: `Bearer ${token}` };
+  } catch (_) {}
+  return fetch(url, options);
+}
 
 const fmt = (n, prefix = "$") => n != null ? `${prefix}${Number(n).toFixed(2)}` : "—";
 const pct = (n) => n != null ? <span style={{ color: n >= 0 ? "green" : "red" }}>{n >= 0 ? "+" : ""}{n.toFixed(2)}%</span> : "—";
@@ -72,9 +82,7 @@ export default function Trading({ user }) {
         fetch(`${API_BASE}/trading/account?paper=${paper}`).then(r => r.json()),
         fetch(`${API_BASE}/trading/positions?paper=${paper}`).then(r => r.json()),
         fetch(`${API_BASE}/trading/orders?paper=${paper}&limit=20`).then(r => r.json()),
-        fetch(`${API_BASE}/trading/fractional-queue?paper=${paper}`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem("id_token")}` }
-        }).then(r => r.json()),
+        authFetch(`${API_BASE}/trading/fractional-queue?paper=${paper}`).then(r => r.json()),
       ]);
       setAccount(acct.error ? null : acct);
       setPositions(Array.isArray(pos) ? pos : []);
@@ -131,10 +139,7 @@ export default function Trading({ user }) {
 
   const cancelFracQueue = async (itemId) => {
     setFracCanceling(itemId);
-    const res = await fetch(`${API_BASE}/trading/fractional-queue/${itemId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${localStorage.getItem("id_token")}` },
-    }).then(r => r.json());
+    const res = await authFetch(`${API_BASE}/trading/fractional-queue/${itemId}`, { method: "DELETE" }).then(r => r.json());
     if (res.error) setStatus("❌ Cancel failed: " + res.error);
     else setStatus("✅ Fractional queue item cancelled");
     setFracCanceling(null);
