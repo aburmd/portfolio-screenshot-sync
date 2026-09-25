@@ -41,6 +41,7 @@ export default function Trading({ user }) {
   const [lotsLoading, setLotsLoading] = useState({});
   const [fracQueue, setFracQueue] = useState([]);
   const [fracCanceling, setFracCanceling] = useState(null);
+  const [fracEditing, setFracEditing] = useState(null); // {id, qty, limit_price}
 
   async function toggleExpand(symbol) {
     if (expanded[symbol]) {
@@ -161,6 +162,17 @@ export default function Trading({ user }) {
     else setStatus("✅ Fractional queue item cancelled");
     setFracCanceling(null);
     setTimeout(load, 600);
+  };
+
+  const saveFracEdit = async () => {
+    const resolvedUserId = await getSessionUserId() || userId;
+    const res = await fetch(`${API_BASE}/trading/fractional-queue/${fracEditing.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: resolvedUserId, qty: parseFloat(fracEditing.qty), limit_price: parseFloat(fracEditing.limit_price) }),
+    }).then(r => r.json());
+    if (res.error) setStatus("❌ Edit failed: " + res.error);
+    else { setStatus("✅ Queue item updated"); setFracEditing(null); setTimeout(load, 600); }
   };
 
   const cancelOrder = async (orderId) => {
@@ -478,8 +490,20 @@ export default function Trading({ user }) {
                   <tr key={item.id} style={{ borderBottom: "1px solid #eee", opacity: item.status !== "active" ? 0.55 : 1 }}>
                     <td style={{ padding: "7px 10px", fontWeight: 600 }}>{item.symbol}</td>
                     <td style={{ padding: "7px 10px", color: item.side === "buy" ? "green" : "red", fontWeight: 600 }}>{item.side.toUpperCase()}</td>
-                    <td style={{ padding: "7px 10px" }}>{Number(item.qty).toFixed(6)}</td>
-                    <td style={{ padding: "7px 10px" }}>{fmt(item.limit_price)}</td>
+                    <td style={{ padding: "7px 10px" }}>
+                      {fracEditing?.id === item.id
+                        ? <input type="number" step="0.000001" value={fracEditing.qty}
+                            onChange={e => setFracEditing(f => ({ ...f, qty: e.target.value }))}
+                            style={{ width: 90, padding: "2px 4px", fontSize: 12 }} />
+                        : Number(item.qty).toFixed(6)}
+                    </td>
+                    <td style={{ padding: "7px 10px" }}>
+                      {fracEditing?.id === item.id
+                        ? <input type="number" step="0.01" value={fracEditing.limit_price}
+                            onChange={e => setFracEditing(f => ({ ...f, limit_price: e.target.value }))}
+                            style={{ width: 80, padding: "2px 4px", fontSize: 12 }} />
+                        : fmt(item.limit_price)}
+                    </td>
                     <td style={{ padding: "7px 10px" }}>
                       <span style={{ fontSize: 11, padding: "2px 6px", borderRadius: 3,
                         background: item.paper === "True" ? "#e8f5e9" : "#fff3e0",
@@ -497,13 +521,35 @@ export default function Trading({ user }) {
                       {item.last_order_id ? item.last_order_id.slice(0, 8) + "…" : "—"}
                     </td>
                     <td style={{ padding: "7px 10px", color: "#888", fontSize: 11 }}>{item.created_at?.slice(0, 10)}</td>
-                    <td style={{ padding: "7px 10px" }}>
+                    <td style={{ padding: "7px 10px", display: "flex", gap: 6 }}>
                       {item.status === "active" && (
-                        <button onClick={() => cancelFracQueue(item.id)} disabled={fracCanceling === item.id}
-                          style={{ padding: "4px 10px", background: "#fff", color: "#f44336",
-                            border: "1px solid #f44336", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
-                          {fracCanceling === item.id ? "…" : "❌ Stop"}
-                        </button>
+                        fracEditing?.id === item.id ? (
+                          <>
+                            <button onClick={saveFracEdit}
+                              style={{ padding: "4px 10px", background: "#1976d2", color: "#fff",
+                                border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                              💾 Save
+                            </button>
+                            <button onClick={() => setFracEditing(null)}
+                              style={{ padding: "4px 10px", background: "#fff", color: "#555",
+                                border: "1px solid #ccc", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => setFracEditing({ id: item.id, qty: item.qty, limit_price: item.limit_price })}
+                              style={{ padding: "4px 10px", background: "#fff", color: "#1976d2",
+                                border: "1px solid #1976d2", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                              ✏️ Edit
+                            </button>
+                            <button onClick={() => cancelFracQueue(item.id)} disabled={fracCanceling === item.id}
+                              style={{ padding: "4px 10px", background: "#fff", color: "#f44336",
+                                border: "1px solid #f44336", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                              {fracCanceling === item.id ? "…" : "❌ Stop"}
+                            </button>
+                          </>
+                        )
                       )}
                     </td>
                   </tr>

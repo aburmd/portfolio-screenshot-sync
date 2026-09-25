@@ -3167,6 +3167,34 @@ async def cancel_fractional_queue(item_id: str, user_id: str):
         return {"error": str(e)}
 
 
+@app.put("/trading/fractional-queue/{item_id}")
+async def edit_fractional_queue(item_id: str, request: Request):
+    try:
+        data = await request.json()
+        user_id = data.get("user_id")
+        if not user_id:
+            return {"error": "user_id required"}
+        table = ddb.Table(FRACTIONAL_QUEUE_TABLE)
+        resp = table.get_item(Key={"user_id": user_id, "id": item_id})
+        if not resp.get("Item"):
+            return {"error": "Not found"}
+        updates, names, values = [], {}, {}
+        if data.get("qty") is not None:
+            updates.append("qty = :q"); values[":q"] = str(data["qty"])
+        if data.get("limit_price") is not None:
+            updates.append("limit_price = :lp"); values[":lp"] = str(data["limit_price"])
+        if not updates:
+            return {"error": "Nothing to update"}
+        table.update_item(
+            Key={"user_id": user_id, "id": item_id},
+            UpdateExpression="SET " + ", ".join(updates),
+            ExpressionAttributeValues=values,
+        )
+        return {"updated": item_id}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/trading/orders")
 async def trading_list_orders(paper: bool = True, limit: int = 20):
     try:
