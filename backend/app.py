@@ -49,7 +49,8 @@ UNIVERSE_TABLE       = os.environ.get("UNIVERSE_TABLE",       "portfolio-univers
 TRIGGERS_TABLE       = os.environ.get("TRIGGERS_TABLE",       "portfolio-triggers-dev")
 SUBSCRIPTIONS_TABLE  = os.environ.get("SUBSCRIPTIONS_TABLE",  "portfolio-subscriptions-dev")
 PAPER_RANKING_TABLE  = os.environ.get("PAPER_RANKING_TABLE",   "paper_daily_ranking")
-TRADE_LOTS_TABLE     = os.environ.get("TRADE_LOTS_TABLE",      "portfolio-trade-lots-dev")
+TRADE_LOTS_TABLE          = os.environ.get("TRADE_LOTS_TABLE",          "portfolio-trade-lots-dev")
+FRACTIONAL_QUEUE_TABLE    = os.environ.get("FRACTIONAL_QUEUE_TABLE",    "portfolio-fractional-queue-dev")
 
 s3 = boto3.client("s3", region_name=REGION)
 ddb = boto3.resource("dynamodb", region_name=REGION)
@@ -3026,47 +3027,139 @@ async def trading_account(paper: bool = True):
 @app.post("/trading/order")
 async def trading_place_order(data: dict, request: Request):
     try:
+        import uuid
         from alpaca_client import place_order
         from datetime import datetime, timezone
-        result = place_order(
-            symbol=data["symbol"],
-            qty=float(data["qty"]) if data.get("qty") is not None else None,
-            side=data["side"],
-            order_type=data.get("order_type", "market"),
-            limit_price=data.get("limit_price"),
-            notional=float(data["notional"]) if data.get("notional") else None,
-            paper=data.get("paper", True),
-            extended_hours=data.get("extended_hours", False),
-            tif=data.get("tif", "day"),
-        )
-        # Store lot record in DDB (best-effort — don't fail the order if this fails)
+        claims = get_claims(request)
+        user_id = claims.get("sub", "unknown") if claims else "unknown"
+        ts = datetime.now(timezone.utc).isoformat()
+
+        raw_qty = float(data["qty"]) if data.get("qty") is not None else None
+        notional = float(data["notional"]) if data.get("notional") else None
+        order_type = data.get("order_type", "market")
+        limit_price = data.get("limit_price")
+        paper = data.get("paper", True)
+        side = data["side"]
+        symbol = data["symbol"].upper()
+
+        # Split whole + fractional when limit order with decimal qty
+        whole_qty = None
+        frac_qty = None
+        if raw_qty is not None and order_type == "limit" and limit_price:
+            whole_qty = int(raw_qty)
+            frac_qty = round(raw_qty - whole_qty, 9)
+
+        result = {}
+        # Place whole qty as GTC (only if >= 1)
+        if whole_qty is not None and whole_qty >= 1:
+            result = place_order(
+                symbol=symbol, qty=float(whole_qty), side=side,
+                order_type="limit", limit_price=limit_price,
+                paper=paper, extended_hours=False, tif="gtc",
+            )
+        elif raw_qty is not None and (whole_qty is None or whole_qty < 1):
+            # No split needed — plain order
+            result = place_order(
+                symbol=symbol, qty=raw_qty, side=side,
+                order_type=order_type, limit_price=limit_price,
+                notional=notional, paper=paper,
+                extended_hours=data.get("extended_hours", False),
+                tif=data.get("tif", "day"),
+            )
+        elif notional:
+            result = place_order(
+                symbol=symbol, notional=notional, side=side,
+                order_type=order_type, paper=paper,
+                extended_hours=data.get("extended_hours", False),
+                tif=data.get("tif", "day"),
+            )
+
+        # Enqueue fractional part
+        frac_queued = False
+        if frac_qty and frac_qty > 0 and limit_price:
+            try:
+                q_item = {
+                    "user_id":     user_id,
+                    "id":          str(uuid.uuid4()),
+                    "symbol":      symbol,
+                    "side":        side,
+                    "qty":         str(frac_qty),
+                    "limit_price": str(limit_price),
+                    "paper":       str(paper),
+                    "status":      "active",
+                    "last_order_id":   "",
+                    "last_order_date": "",
+                    "created_at":  ts,
+                }
+                ddb.Table(FRACTIONAL_QUEUE_TABLE).put_item(Item=q_item)
+                frac_queued = True
+            except Exception as qe:
+                print(f"Fractional queue write failed (non-fatal): {qe}")
+
+        # Store lot record (best-effort)
         if result.get("id") and not result.get("error"):
             try:
-                claims = get_claims(request)
-                user_id = claims.get("sub", "unknown") if claims else "unknown"
-                ts = datetime.now(timezone.utc).isoformat()
-                sk = f"{data['symbol']}#{ts}#{result['id'][:8]}"
+                sk = f"{symbol}#{ts}#{result['id'][:8]}"
                 lot_item = {
-                    "user_id":    user_id,
-                    "sk":         sk,
-                    "order_id":   result["id"],
-                    "symbol":     data["symbol"].upper(),
-                    "side":       data["side"],
-                    "order_type": data.get("order_type", "market"),
-                    "qty":        str(data["qty"]) if data.get("qty") else None,
-                    "notional":   str(data["notional"]) if data.get("notional") else None,
-                    "limit_price":str(data["limit_price"]) if data.get("limit_price") else None,
-                    "paper":      str(data.get("paper", True)),
-                    "status":     result.get("status", "pending"),
+                    "user_id":    user_id, "sk": sk,
+                    "order_id":   result["id"], "symbol": symbol,
+                    "side":       side, "order_type": order_type,
+                    "qty":        str(raw_qty) if raw_qty else None,
+                    "notional":   str(notional) if notional else None,
+                    "limit_price":str(limit_price) if limit_price else None,
+                    "paper":      str(paper), "status": result.get("status", "pending"),
                     "submitted_at": ts,
-                    "filled_at":  None,
-                    "fill_price": None,
-                    "filled_qty": None,
                 }
                 ddb.Table(TRADE_LOTS_TABLE).put_item(Item={k: v for k, v in lot_item.items() if v is not None})
             except Exception as lot_err:
                 print(f"Lot record write failed (non-fatal): {lot_err}")
-        return result
+
+        return {**result, "fractional_queued": frac_queued, "frac_qty": frac_qty}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/trading/fractional-queue")
+async def get_fractional_queue(request: Request, paper: bool = True):
+    try:
+        claims = get_claims(request)
+        user_id = claims.get("sub", "unknown") if claims else "unknown"
+        resp = ddb.Table(FRACTIONAL_QUEUE_TABLE).query(
+            KeyConditionExpression=Key("user_id").eq(user_id)
+        )
+        items = [i for i in resp.get("Items", []) if i.get("paper", "True") == str(paper)]
+        for i in items:
+            i["qty"] = float(i["qty"])
+            i["limit_price"] = float(i["limit_price"])
+        return sorted(items, key=lambda x: x.get("created_at", ""), reverse=True)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.delete("/trading/fractional-queue/{item_id}")
+async def cancel_fractional_queue(item_id: str, request: Request):
+    try:
+        from alpaca_client import cancel_order
+        claims = get_claims(request)
+        user_id = claims.get("sub", "unknown") if claims else "unknown"
+        table = ddb.Table(FRACTIONAL_QUEUE_TABLE)
+        resp = table.get_item(Key={"user_id": user_id, "id": item_id})
+        item = resp.get("Item")
+        if not item:
+            return {"error": "Not found"}
+        # Cancel any live Alpaca order
+        if item.get("last_order_id"):
+            try:
+                cancel_order(item["last_order_id"], paper=item.get("paper", "True") == "True")
+            except Exception:
+                pass
+        table.update_item(
+            Key={"user_id": user_id, "id": item_id},
+            UpdateExpression="SET #s = :s",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":s": "cancelled"},
+        )
+        return {"cancelled": item_id}
     except Exception as e:
         return {"error": str(e)}
 

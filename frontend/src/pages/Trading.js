@@ -4,6 +4,8 @@ import { API_BASE, fetchLots } from "../services/api";
 const fmt = (n, prefix = "$") => n != null ? `${prefix}${Number(n).toFixed(2)}` : "—";
 const pct = (n) => n != null ? <span style={{ color: n >= 0 ? "green" : "red" }}>{n >= 0 ? "+" : ""}{n.toFixed(2)}%</span> : "—";
 const CANCELABLE = ["new", "accepted", "pending_new", "accepted_for_bidding", "held"];
+const STATUS_COLOR = { active: "#1976d2", filled: "#2e7d32", cancelled: "#999" };
+const STATUS_ICON  = { active: "🔄", filled: "✅", cancelled: "🚫" };
 
 export default function Trading({ user }) {
   const [paper, setPaper] = useState(true);
@@ -16,9 +18,11 @@ export default function Trading({ user }) {
   const [canceling, setCanceling] = useState(null);
   const [editing, setEditing] = useState(null);
   const [posSort, setPosSort] = useState({ key: null, dir: "asc" });
-  const [expanded, setExpanded] = useState({});   // symbol → true/false
-  const [lots, setLots]         = useState({});   // symbol → array
+  const [expanded, setExpanded] = useState({});
+  const [lots, setLots]         = useState({});
   const [lotsLoading, setLotsLoading] = useState({});
+  const [fracQueue, setFracQueue] = useState([]);
+  const [fracCanceling, setFracCanceling] = useState(null);
 
   async function toggleExpand(symbol) {
     if (expanded[symbol]) {
@@ -64,14 +68,18 @@ export default function Trading({ user }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [acct, pos, ords] = await Promise.all([
+      const [acct, pos, ords, frac] = await Promise.all([
         fetch(`${API_BASE}/trading/account?paper=${paper}`).then(r => r.json()),
         fetch(`${API_BASE}/trading/positions?paper=${paper}`).then(r => r.json()),
         fetch(`${API_BASE}/trading/orders?paper=${paper}&limit=20`).then(r => r.json()),
+        fetch(`${API_BASE}/trading/fractional-queue?paper=${paper}`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("id_token")}` }
+        }).then(r => r.json()),
       ]);
       setAccount(acct.error ? null : acct);
       setPositions(Array.isArray(pos) ? pos : []);
       setOrders(Array.isArray(ords) ? ords : []);
+      setFracQueue(Array.isArray(frac) ? frac : []);
       if (acct.error) setStatus("❌ " + acct.error);
     } catch (e) { setStatus("❌ " + e.message); }
     setLoading(false);
@@ -110,14 +118,27 @@ export default function Trading({ user }) {
       let msg = res.error;
       try { const p = JSON.parse(msg); msg = p.message || msg; } catch {}
       setStatus("❌ " + msg);
-    } else if (res.id) {
+    } else if (res.id || res.fractional_queued) {
       const detail = byAmount ? `$${form.amount}` : `${form.qty} shares`;
-      setStatus(`✅ Order placed: ${form.side} ${detail} of ${form.symbol.toUpperCase()} — status: ${res.status || "accepted"}`);
+      const fracNote = res.fractional_queued ? ` + ${res.frac_qty?.toFixed(6)} shares queued daily` : "";
+      setStatus(`✅ Order placed: ${form.side} ${detail} of ${form.symbol.toUpperCase()}${fracNote}`);
       setForm(f => ({ ...f, symbol: "", qty: "", amount: "", limit_price: "", side: "buy", extended_hours: false }));
       setTimeout(load, 1500);
     } else {
       setStatus("❌ Unexpected response: " + JSON.stringify(res));
     }
+  };
+
+  const cancelFracQueue = async (itemId) => {
+    setFracCanceling(itemId);
+    const res = await fetch(`${API_BASE}/trading/fractional-queue/${itemId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${localStorage.getItem("id_token")}` },
+    }).then(r => r.json());
+    if (res.error) setStatus("❌ Cancel failed: " + res.error);
+    else setStatus("✅ Fractional queue item cancelled");
+    setFracCanceling(null);
+    setTimeout(load, 600);
   };
 
   const cancelOrder = async (orderId) => {
@@ -406,6 +427,55 @@ export default function Trading({ user }) {
                   </React.Fragment>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Fractional Queue */}
+      {fracQueue.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>
+            ⏳ Daily Fractional Queue ({fracQueue.filter(i => i.status === "active").length} active)
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: "#f0f0f0" }}>
+                  {["Symbol", "Side", "Qty", "Limit Price", "Status", "Last Placed", "Last Order ID", "Created", ""].map(h => (
+                    <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {fracQueue.map(item => (
+                  <tr key={item.id} style={{ borderBottom: "1px solid #eee", opacity: item.status !== "active" ? 0.55 : 1 }}>
+                    <td style={{ padding: "7px 10px", fontWeight: 600 }}>{item.symbol}</td>
+                    <td style={{ padding: "7px 10px", color: item.side === "buy" ? "green" : "red", fontWeight: 600 }}>{item.side.toUpperCase()}</td>
+                    <td style={{ padding: "7px 10px" }}>{Number(item.qty).toFixed(6)}</td>
+                    <td style={{ padding: "7px 10px" }}>{fmt(item.limit_price)}</td>
+                    <td style={{ padding: "7px 10px" }}>
+                      <span style={{ color: STATUS_COLOR[item.status] || "#333", fontWeight: 600 }}>
+                        {STATUS_ICON[item.status]} {item.status}
+                      </span>
+                    </td>
+                    <td style={{ padding: "7px 10px", color: "#555" }}>{item.last_order_date || "—"}</td>
+                    <td style={{ padding: "7px 10px", color: "#888", fontSize: 11, fontFamily: "monospace" }}>
+                      {item.last_order_id ? item.last_order_id.slice(0, 8) + "…" : "—"}
+                    </td>
+                    <td style={{ padding: "7px 10px", color: "#888", fontSize: 11 }}>{item.created_at?.slice(0, 10)}</td>
+                    <td style={{ padding: "7px 10px" }}>
+                      {item.status === "active" && (
+                        <button onClick={() => cancelFracQueue(item.id)} disabled={fracCanceling === item.id}
+                          style={{ padding: "4px 10px", background: "#fff", color: "#f44336",
+                            border: "1px solid #f44336", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                          {fracCanceling === item.id ? "…" : "❌ Stop"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

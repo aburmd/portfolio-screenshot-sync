@@ -25,8 +25,9 @@ REGION           = os.environ.get("AWS_REGION", "us-west-1")
 UNIVERSE_TABLE   = os.environ.get("UNIVERSE_TABLE", "portfolio-universe-dev")
 HISTORY_TABLE    = os.environ.get("STOCK_HISTORY_TABLE", "portfolio-stock-history-dev")
 INTRADAY_TABLE   = os.environ.get("INTRADAY_TABLE", "portfolio-intraday-dev")
-TRIGGERS_TABLE      = os.environ.get("TRIGGERS_TABLE",      "portfolio-triggers-dev")
-SUBSCRIPTIONS_TABLE = os.environ.get("SUBSCRIPTIONS_TABLE", "portfolio-subscriptions-dev")
+TRIGGERS_TABLE          = os.environ.get("TRIGGERS_TABLE",          "portfolio-triggers-dev")
+SUBSCRIPTIONS_TABLE     = os.environ.get("SUBSCRIPTIONS_TABLE",     "portfolio-subscriptions-dev")
+FRACTIONAL_QUEUE_TABLE  = os.environ.get("FRACTIONAL_QUEUE_TABLE",  "portfolio-fractional-queue-dev")
 ALERT_FROM_EMAIL    = os.environ.get("ALERT_FROM_EMAIL",     "")
 COGNITO_POOL_ID     = os.environ.get("COGNITO_USER_POOL_ID", "")
 
@@ -333,6 +334,80 @@ def _process_symbol(market, symbol, now_utc, write_5min):
 
 # ── Lambda handler ────────────────────────────────────────────────────────────
 
+def _place_fractional_queue():
+    """Called at 13:00 UTC — place DAY limit orders for all active fractional queue items."""
+    from alpaca_client import place_order
+    table = ddb.Table(FRACTIONAL_QUEUE_TABLE)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Scan all active items (small table, full scan is fine)
+    resp = table.scan(FilterExpression=boto3.dynamodb.conditions.Attr("status").eq("active"))
+    items = resp.get("Items", [])
+    print(f"Fractional queue: {len(items)} active items")
+
+    for item in items:
+        # Skip if already placed today
+        if item.get("last_order_date") == today:
+            print(f"  {item['symbol']} already placed today — skip")
+            continue
+        try:
+            paper = item.get("paper", "True") == "True"
+            result = place_order(
+                symbol=item["symbol"],
+                qty=float(item["qty"]),
+                side=item["side"],
+                order_type="limit",
+                limit_price=float(item["limit_price"]),
+                paper=paper,
+                extended_hours=False,
+                tif="day",
+            )
+            order_id = result.get("id", "")
+            table.update_item(
+                Key={"user_id": item["user_id"], "id": item["id"]},
+                UpdateExpression="SET last_order_id = :oid, last_order_date = :d",
+                ExpressionAttributeValues={":oid": order_id, ":d": today},
+            )
+            print(f"  {item['symbol']} {item['qty']} placed order {order_id}")
+        except Exception as e:
+            print(f"  {item['symbol']} place failed: {e}")
+
+
+def _check_fractional_fills():
+    """Called at 20:00 UTC — check if today's DAY order filled; mark done if so."""
+    from alpaca_client import _get_client
+    table = ddb.Table(FRACTIONAL_QUEUE_TABLE)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    resp = table.scan(FilterExpression=boto3.dynamodb.conditions.Attr("status").eq("active"))
+    items = resp.get("Items", [])
+
+    for item in items:
+        order_id = item.get("last_order_id")
+        if not order_id or item.get("last_order_date") != today:
+            continue
+        try:
+            paper = item.get("paper", "True") == "True"
+            client = _get_client(paper)
+            order = client.get_order_by_id(order_id)
+            status = order.status.value
+            print(f"  {item['symbol']} order {order_id} status={status}")
+            if status == "filled":
+                table.update_item(
+                    Key={"user_id": item["user_id"], "id": item["id"]},
+                    UpdateExpression="SET #s = :s, filled_at = :fa, fill_price = :fp",
+                    ExpressionAttributeNames={"#s": "status"},
+                    ExpressionAttributeValues={
+                        ":s": "filled",
+                        ":fa": today,
+                        ":fp": str(order.filled_avg_price) if order.filled_avg_price else "",
+                    },
+                )
+                print(f"  {item['symbol']} marked filled")
+        except Exception as e:
+            print(f"  {item['symbol']} fill check failed: {e}")
+
+
 def handler(event, context):
     market   = event.get("market", "US").upper()
     now_utc  = datetime.now(timezone.utc)
@@ -340,6 +415,12 @@ def handler(event, context):
 
     print(f"=== Intraday Scanner: {market} {now_utc.strftime('%H:%M')} UTC write_5min={write_5min} ===")
 
+    # Fractional queue: place at 13:00 UTC (9:00 AM EST), check fills at 20:00 UTC (4:00 PM EST)
+    if market == "US":
+        if now_utc.hour == 13 and now_utc.minute == 0:
+            _place_fractional_queue()
+        elif now_utc.hour == 20 and now_utc.minute == 0:
+            _check_fractional_fills()
     symbols = _get_intraday_symbols(market)
     if not symbols:
         print("No min1_enabled symbols — nothing to do")
