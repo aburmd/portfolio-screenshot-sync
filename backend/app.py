@@ -3127,7 +3127,7 @@ async def get_fractional_queue(request: Request, paper: bool = True):
         resp = ddb.Table(FRACTIONAL_QUEUE_TABLE).query(
             KeyConditionExpression=Key("user_id").eq(user_id)
         )
-        items = [i for i in resp.get("Items", []) if i.get("paper", "True") == str(paper)]
+        items = resp.get("Items", [])
         for i in items:
             i["qty"] = float(i["qty"])
             i["limit_price"] = float(i["limit_price"])

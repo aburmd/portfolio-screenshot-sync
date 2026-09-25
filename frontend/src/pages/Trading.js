@@ -82,7 +82,7 @@ export default function Trading({ user }) {
         authFetch(`${API_BASE}/trading/account?paper=${paper}`).then(r => r.json()),
         authFetch(`${API_BASE}/trading/positions?paper=${paper}`).then(r => r.json()),
         authFetch(`${API_BASE}/trading/orders?paper=${paper}&limit=20`).then(r => r.json()),
-        authFetch(`${API_BASE}/trading/fractional-queue?paper=${paper}`).then(r => r.json()),
+        authFetch(`${API_BASE}/trading/fractional-queue`).then(r => r.json()),
       ]);
       setAccount(acct.error ? null : acct);
       setPositions(Array.isArray(pos) ? pos : []);
@@ -448,7 +448,7 @@ export default function Trading({ user }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "#f0f0f0" }}>
-                  {["Symbol", "Side", "Qty", "Limit Price", "Status", "Last Placed", "Last Order ID", "Created", ""].map(h => (
+                  {["Symbol", "Side", "Qty", "Limit Price", "Account", "Status", "Last Placed", "Last Order ID", "Created", ""].map(h => (
                     <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -460,6 +460,13 @@ export default function Trading({ user }) {
                     <td style={{ padding: "7px 10px", color: item.side === "buy" ? "green" : "red", fontWeight: 600 }}>{item.side.toUpperCase()}</td>
                     <td style={{ padding: "7px 10px" }}>{Number(item.qty).toFixed(6)}</td>
                     <td style={{ padding: "7px 10px" }}>{fmt(item.limit_price)}</td>
+                    <td style={{ padding: "7px 10px" }}>
+                      <span style={{ fontSize: 11, padding: "2px 6px", borderRadius: 3,
+                        background: item.paper === "True" ? "#e8f5e9" : "#fff3e0",
+                        color: item.paper === "True" ? "#2e7d32" : "#e65100", fontWeight: 600 }}>
+                        {item.paper === "True" ? "📄 Paper" : "⚡ Live"}
+                      </span>
+                    </td>
                     <td style={{ padding: "7px 10px" }}>
                       <span style={{ color: STATUS_COLOR[item.status] || "#333", fontWeight: 600 }}>
                         {STATUS_ICON[item.status]} {item.status}
