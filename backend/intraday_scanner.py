@@ -155,8 +155,11 @@ def _check_triggers(market: str, symbol: str, price: float):
 
 
 def _send_trigger_alert(symbol, market, price, trigger_price, direction, note, to_email):
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
     arrow = "↓" if direction == "below" else "↑"
-    subject = f"[TRIGGER {arrow}] {symbol} ({market}) hit {trigger_price:.2f} — now {price:.2f}"
+    now_str = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %H:%M PST")
+    subject = f"{now_str} [TRIGGER {arrow}] {symbol} ({market}) hit {trigger_price:.2f} — now {price:.2f}"
     body_lines = [
         f"Your price trigger for {symbol} ({market}) was hit.",
         f"",
