@@ -417,8 +417,8 @@ def handler(event, context):
 
     # Fractional queue: place at 13:00 UTC (9:00 AM EST), check fills at 20:00 UTC (4:00 PM EST)
     if market == "US":
-        if now_utc.hour == 13 and now_utc.minute == 0:
-            _place_fractional_queue()
+        if now_utc.hour == 9 and now_utc.minute == 5:
+            _place_fractional_queue()  # 4:05 AM EST — queued before market open
         elif now_utc.hour == 20 and now_utc.minute == 0:
             _check_fractional_fills()
     symbols = _get_intraday_symbols(market)
