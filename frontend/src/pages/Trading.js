@@ -18,6 +18,7 @@ const STATUS_COLOR = { active: "#1976d2", filled: "#2e7d32", cancelled: "#999" }
 const STATUS_ICON  = { active: "🔄", filled: "✅", cancelled: "🚫" };
 
 export default function Trading({ user }) {
+  const userId = user?.userId || user?.username;
   const [paper, setPaper] = useState(true);
   const [account, setAccount] = useState(null);
   const [positions, setPositions] = useState([]);
@@ -90,7 +91,7 @@ export default function Trading({ user }) {
     } catch (e) { setStatus("❌ " + e.message); }
 
     try {
-      const frac = await authFetch(`${API_BASE}/trading/fractional-queue`).then(r => r.json());
+      const frac = await fetch(`${API_BASE}/trading/fractional-queue?user_id=${userId}`).then(r => r.json());
       setFracQueue(Array.isArray(frac) ? frac : []);
     } catch (e) {}
 
@@ -117,7 +118,7 @@ export default function Trading({ user }) {
     setStatus("Placing order...");
     const body = {
       symbol: form.symbol.toUpperCase(), side: form.side,
-      order_type: form.order_type, paper,
+      order_type: form.order_type, paper, user_id: userId,
       extended_hours: form.extended_hours,
       ...(byAmount ? { notional: parseFloat(form.amount) } : { qty: parseFloat(form.qty) }),
       ...(form.order_type === "limit" && form.limit_price ? { limit_price: parseFloat(form.limit_price), tif: form.tif } : {}),
@@ -143,7 +144,7 @@ export default function Trading({ user }) {
 
   const cancelFracQueue = async (itemId) => {
     setFracCanceling(itemId);
-    const res = await authFetch(`${API_BASE}/trading/fractional-queue/${itemId}`, { method: "DELETE" }).then(r => r.json());
+    const res = await fetch(`${API_BASE}/trading/fractional-queue/${itemId}?user_id=${userId}`, { method: "DELETE" }).then(r => r.json());
     if (res.error) setStatus("❌ Cancel failed: " + res.error);
     else setStatus("✅ Fractional queue item cancelled");
     setFracCanceling(null);
