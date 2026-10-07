@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { API_BASE, fetchLots } from "../services/api";
 import { fetchAuthSession } from "aws-amplify/auth";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 
 async function authFetch(url, options = {}) {
   try {
@@ -26,11 +27,12 @@ const STATUS_ICON  = { active: "🔄", filled: "✅", cancelled: "🚫" };
 
 export default function Trading({ user }) {
   const userId = user?.userId || user?.username;
+  const [tab, setTab] = useState("trading");
   const [paper, setPaper] = useState(true);
   const [account, setAccount] = useState(null);
   const [positions, setPositions] = useState([]);
   const [orders, setOrders] = useState([]);
-  const [form, setForm] = useState({ symbol: "", qty: "", amount: "", by: "qty", side: "buy", order_type: "market", tif: "day", limit_price: "", extended_hours: false });
+  const [form, setForm] = useState({ symbol: "", qty: "", amount: "", by: "qty", side: "buy", order_type: "market", limit_price: "", extended_hours: false });
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [canceling, setCanceling] = useState(null);
@@ -133,7 +135,7 @@ export default function Trading({ user }) {
       order_type: form.order_type, paper, user_id: resolvedUserId,
       extended_hours: form.extended_hours,
       ...(byAmount ? { notional: parseFloat(form.amount) } : { qty: parseFloat(form.qty) }),
-      ...(form.order_type === "limit" && form.limit_price ? { limit_price: parseFloat(form.limit_price), tif: form.tif } : {}),
+      ...(form.order_type === "limit" && form.limit_price ? { limit_price: parseFloat(form.limit_price) } : {}),
     };
     const res = await authFetch(`${API_BASE}/trading/order`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -209,7 +211,22 @@ export default function Trading({ user }) {
   return (
     <div style={{ padding: "20px", maxWidth: 1100, margin: "0 auto" }}>
 
-      {/* Header */}
+      {/* Tab selector */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        <button onClick={() => setTab("trading")}
+          style={{ padding: "7px 20px", borderRadius: 4, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 13,
+            background: tab === "trading" ? "#1976d2" : "#eee", color: tab === "trading" ? "#fff" : "#333" }}>
+          📋 Trading
+        </button>
+        <button onClick={() => setTab("performance")}
+          style={{ padding: "7px 20px", borderRadius: 4, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 13,
+            background: tab === "performance" ? "#2e7d32" : "#eee", color: tab === "performance" ? "#fff" : "#333" }}>
+          📈 Performance
+        </button>
+      </div>
+
+      {tab === "performance" && <PerformanceTab paper={paper} setPaper={setPaper} />}
+      {tab === "trading" && <>
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
         <h2 style={{ margin: 0 }}>Trading</h2>
         <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid #ddd", marginLeft: 8 }}>
@@ -283,23 +300,13 @@ export default function Trading({ user }) {
           <div>
             <div style={{ fontSize: 11, marginBottom: 4 }}>Type</div>
             <select value={form.order_type}
-              onChange={e => setForm(f => ({ ...f, order_type: e.target.value, extended_hours: e.target.value !== "limit" ? false : f.extended_hours, tif: e.target.value !== "limit" ? "day" : f.tif }))}
+              onChange={e => setForm(f => ({ ...f, order_type: e.target.value, extended_hours: e.target.value !== "limit" ? false : f.extended_hours }))}
               style={{ padding: "6px 8px" }}>
               <option value="market">Market</option>
               <option value="limit">Limit</option>
             </select>
           </div>
-          {form.order_type === "limit" && (
-            <div>
-              <div style={{ fontSize: 11, marginBottom: 4 }}>TIF</div>
-              <select value={form.tif}
-                onChange={e => setForm(f => ({ ...f, tif: e.target.value, extended_hours: e.target.value === "gtc" ? false : f.extended_hours }))}
-                style={{ padding: "6px 8px" }}>
-                <option value="day">DAY</option>
-                <option value="gtc">GTC</option>
-              </select>
-            </div>
-          )}
+
           {form.order_type === "limit" && (
             <div>
               <div style={{ fontSize: 11, marginBottom: 4 }}>Limit Price</div>
@@ -617,9 +624,137 @@ export default function Trading({ user }) {
         </div>
       )}
 
-      {!account && !loading && (
+      {!account && !loading && tab === "trading" && (
         <div style={{ color: "#888", marginTop: 20 }}>No account connected. Add your Alpaca API keys to SSM Parameter Store first.</div>
+      )}
+      </> }
+    </div>
+  );
+}
+
+const PERIODS = ["1D", "1W", "1M", "3M", "1Y", "3Y", "5Y", "all"];
+
+function PerformanceTab({ paper, setPaper }) {
+  const [period, setPeriod]   = useState("1M");
+  const [data, setData]       = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const res = await authFetch(`${API_BASE}/trading/portfolio-history?paper=${paper}&period=${period}`);
+      const json = await res.json();
+      if (json.error) setError(json.error);
+      else setData(json);
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  }, [paper, period]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const points = data?.points || [];
+  const first  = points[0]?.value;
+  const last   = points[points.length - 1]?.value;
+  const totalPl    = last != null && first != null ? round2(last - first) : null;
+  const totalPlPct = first > 0 && totalPl != null ? round2(totalPl / first * 100) : null;
+  const plColor    = totalPl >= 0 ? "#2e7d32" : "#c62828";
+
+  // X-axis tick formatting based on period
+  const fmtTick = (v) => {
+    if (!v) return "";
+    if (period === "1D") return v.slice(11, 16);           // HH:MM
+    if (period === "1W") return v.slice(5, 10);            // MM-DD
+    if (["3Y","5Y","all"].includes(period)) return v.slice(0, 7); // YYYY-MM
+    return v.slice(5, 10);                                 // MM-DD
+  };
+
+  const fmtTooltip = (v) => `$${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <h3 style={{ margin: 0 }}>📈 Portfolio Performance</h3>
+        <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", border: "1px solid #ddd" }}>
+          <button onClick={() => setPaper(true)}
+            style={{ padding: "5px 14px", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 12,
+              background: paper ? "#e8f5e9" : "#eee", color: paper ? "#2e7d32" : "#999" }}>
+            📄 Paper
+          </button>
+          <button onClick={() => { if (window.confirm("Switch to Live account?")) setPaper(false); }}
+            style={{ padding: "5px 14px", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 12,
+              background: !paper ? "#ff5722" : "#eee", color: !paper ? "#fff" : "#999" }}>
+            ⚡ Live
+          </button>
+        </div>
+        <button onClick={load} disabled={loading}
+          style={{ padding: "5px 12px", border: "1px solid #ccc", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+          {loading ? "Loading..." : "↻ Refresh"}
+        </button>
+      </div>
+
+      {/* Period selector */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+        {PERIODS.map(p => (
+          <button key={p} onClick={() => setPeriod(p)}
+            style={{ padding: "5px 14px", borderRadius: 4, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
+              background: period === p ? "#1976d2" : "#eee", color: period === p ? "#fff" : "#333" }}>
+            {p}
+          </button>
+        ))}
+      </div>
+
+      {error && <div style={{ background: "#fce4ec", color: "#c62828", padding: 10, borderRadius: 4, marginBottom: 12 }}>❌ {error}</div>}
+
+      {/* Summary cards */}
+      {data && points.length > 0 && (
+        <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+          {[
+            ["Current Value", `$${last?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
+            ["Period Start",  `$${first?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
+            ["P/L ($)",       totalPl != null ? `${totalPl >= 0 ? "+" : ""}$${Math.abs(totalPl).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"],
+            ["P/L (%)",       totalPlPct != null ? `${totalPlPct >= 0 ? "+" : ""}${totalPlPct.toFixed(2)}%` : "—"],
+          ].map(([label, val], i) => (
+            <div key={label} style={{ background: "#f5f5f5", borderRadius: 8, padding: "10px 18px", minWidth: 130 }}>
+              <div style={{ fontSize: 11, color: "#888" }}>{label}</div>
+              <div style={{ fontSize: 16, fontWeight: 700,
+                color: i >= 2 ? plColor : "#333" }}>{val}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Chart */}
+      {loading ? (
+        <div style={{ padding: 40, textAlign: "center", color: "#999" }}>Loading chart...</div>
+      ) : points.length > 0 ? (
+        <ResponsiveContainer width="100%" height={400}>
+          <LineChart data={points} margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={fmtTick}
+              interval={Math.max(1, Math.floor(points.length / 8))} />
+            <YAxis tick={{ fontSize: 10 }}
+              tickFormatter={v => `$${v >= 1000 ? (v/1000).toFixed(0)+"K" : v.toFixed(0)}`}
+              domain={["auto", "auto"]} width={60} />
+            <Tooltip
+              formatter={(v, name) => [fmtTooltip(v), name]}
+              labelFormatter={l => l?.replace("T", " ")}
+              contentStyle={{ fontSize: 12 }} />
+            {data?.base_value > 0 && (
+              <ReferenceLine y={data.base_value} stroke="#bdbdbd" strokeDasharray="4 3"
+                label={{ value: "Start", position: "right", fontSize: 10, fill: "#999" }} />
+            )}
+            <Line type="monotone" dataKey="value" name="Portfolio Value"
+              stroke={totalPl >= 0 ? "#2e7d32" : "#c62828"}
+              strokeWidth={2} dot={false} isAnimationActive={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      ) : !loading && !error && (
+        <div style={{ padding: 40, textAlign: "center", color: "#999" }}>No data for this period.</div>
       )}
     </div>
   );
 }
+
+function round2(n) { return Math.round(n * 100) / 100; }

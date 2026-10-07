@@ -3015,6 +3015,15 @@ async def check_stock(symbol: str, market: str = "US", user_id: str = None):
 
 # ── Trading (Alpaca) ─────────────────────────────────────────────────────────
 
+@app.get("/trading/portfolio-history")
+async def trading_portfolio_history(paper: bool = True, period: str = "1M"):
+    try:
+        from alpaca_client import get_portfolio_history
+        return get_portfolio_history(paper=paper, period=period)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/trading/account")
 async def trading_account(paper: bool = True):
     try:
@@ -3042,6 +3051,15 @@ async def trading_place_order(request: Request):
         side = data["side"]
         symbol = data["symbol"].upper()
 
+        # Validate sell qty against Alpaca position
+        if side == "sell" and raw_qty is not None:
+            from alpaca_client import get_position_qty
+            held_qty = get_position_qty(symbol, paper=paper)
+            if held_qty == 0.0:
+                return {"error": f"No position found for {symbol} in Alpaca"}
+            if raw_qty > held_qty:
+                return {"error": f"Sell qty {raw_qty} exceeds held qty {held_qty} for {symbol}"}
+
         # Split whole + fractional when limit order with decimal qty
         whole_qty = None
         frac_qty = None
@@ -3057,8 +3075,8 @@ async def trading_place_order(request: Request):
                 order_type="limit", limit_price=limit_price,
                 paper=paper, extended_hours=False, tif="gtc",
             )
-        elif raw_qty is not None and (whole_qty is None or whole_qty < 1):
-            # No split needed — plain order
+        elif raw_qty is not None and (whole_qty is None or whole_qty < 1) and not (frac_qty and frac_qty > 0):
+            # No split needed — plain order (non-fractional limit, or market)
             result = place_order(
                 symbol=symbol, qty=raw_qty, side=side,
                 order_type=order_type, limit_price=limit_price,

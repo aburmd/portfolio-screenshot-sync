@@ -135,6 +135,78 @@ def get_positions(paper: bool = True) -> list:
     ]
 
 
+def get_portfolio_history(paper: bool = True, period: str = "1M") -> dict:
+    """Fetch portfolio value history from Alpaca.
+    period: 1D, 1W, 1M, 3M, 1Y, 3Y, 5Y, all
+    Returns {timestamps, equity, profit_loss, profit_loss_pct, base_value}
+    """
+    import requests as req_lib
+    ssm = boto3.client("ssm", region_name=REGION)
+    prefix = "/portfolio-sync/alpaca-paper" if paper else "/portfolio-sync/alpaca-live"
+    api_key    = ssm.get_parameter(Name=f"{prefix}-key",    WithDecryption=True)["Parameter"]["Value"]
+    api_secret = ssm.get_parameter(Name=f"{prefix}-secret", WithDecryption=True)["Parameter"]["Value"]
+
+    base_url = "https://paper-api.alpaca.markets" if paper else "https://api.alpaca.markets"
+
+    # Map period to Alpaca timeframe params
+    period_map = {
+        "1D":  {"period": "1D",  "timeframe": "5Min"},
+        "1W":  {"period": "1W",  "timeframe": "1H"},
+        "1M":  {"period": "1M",  "timeframe": "1D"},
+        "3M":  {"period": "3M",  "timeframe": "1D"},
+        "1Y":  {"period": "1A",  "timeframe": "1D"},
+        "3Y":  {"period": "3A",  "timeframe": "1W"},
+        "5Y":  {"period": "5A",  "timeframe": "1W"},
+        "all": {"period": "all", "timeframe": "1M"},
+    }
+    params = period_map.get(period, period_map["1M"])
+
+    resp = req_lib.get(
+        f"{base_url}/v2/account/portfolio/history",
+        params={"period": params["period"], "timeframe": params["timeframe"],
+                "intraday_reporting": "market_hours", "pnl_reset": "per_day"},
+        headers={"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": api_secret},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    timestamps = data.get("timestamp", [])
+    equity     = data.get("equity", [])
+    pl         = data.get("profit_loss", [])
+    pl_pct     = data.get("profit_loss_pct", [])
+    base_value = data.get("base_value", 0)
+
+    # Build data points, skip nulls
+    points = []
+    for i, ts in enumerate(timestamps):
+        eq = equity[i] if i < len(equity) else None
+        if eq is None:
+            continue
+        points.append({
+            "date":     datetime.utcfromtimestamp(ts).strftime("%Y-%m-%dT%H:%M"),
+            "value":    round(float(eq), 2),
+            "pl":       round(float(pl[i]), 2)       if i < len(pl)     and pl[i]     is not None else None,
+            "pl_pct":   round(float(pl_pct[i]) * 100, 2) if i < len(pl_pct) and pl_pct[i] is not None else None,
+        })
+
+    return {
+        "points":     points,
+        "base_value": float(base_value) if base_value else None,
+        "period":     period,
+        "paper":      paper,
+    }
+
+
+    """Return held qty for symbol, 0.0 if no position."""
+    try:
+        client = _get_client(paper)
+        p = client.get_open_position(symbol)
+        return float(p.qty)
+    except Exception:
+        return 0.0
+
+
 def get_lots(symbol: str, paper: bool = True) -> list:
     """Return filled BUY orders for symbol as lots, enriched with current price P/L."""
     from alpaca.trading.requests import GetOrdersRequest
